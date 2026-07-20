@@ -1,6 +1,13 @@
 import { and, eq } from 'drizzle-orm';
 import type { Database } from '../client';
-import { auditEvents, tenantMemberships, tenants, userIdentities, users } from '../schema';
+import {
+  auditEvents,
+  authUsers,
+  tenantMemberships,
+  tenants,
+  userIdentities,
+  users,
+} from '../schema';
 
 export interface ClubBootstrapInput {
   clubName: string;
@@ -17,8 +24,14 @@ export async function isClubConfigured(db: Database): Promise<boolean> {
 }
 
 export async function bootstrapClub(db: Database, input: ClubBootstrapInput): Promise<{ tenantId: string; userId: string }> {
-  if (await isClubConfigured(db)) throw new Error('Club installation is already configured');
-  if (input.retentionYears < 1 || input.retentionYears > 10) throw new Error('Retention years must be between 1 and 10');
+  if (
+    input.retentionYears < 1 ||
+    input.retentionYears > 10
+  ) {
+    throw new Error(
+      'Retention years must be between 1 and 10',
+    );
+  }
 
   const now = new Date().toISOString();
   const tenantId = crypto.randomUUID();
@@ -26,6 +39,17 @@ export async function bootstrapClub(db: Database, input: ClubBootstrapInput): Pr
   const correlationId = crypto.randomUUID();
 
   await db.transaction(async (tx) => {
+    const existingTenants = await tx
+      .select({ id: tenants.id })
+      .from(tenants)
+      .limit(1);
+
+    if (existingTenants.length > 0) {
+      throw new Error(
+        'Club installation is already configured',
+      );
+    }
+
     await tx.insert(tenants).values({
       id: tenantId,
       slug: input.slug,
@@ -81,4 +105,13 @@ export async function resolveMembership(db: Database, authUserId: string) {
     .where(and(eq(userIdentities.provider, 'BETTER_AUTH'), eq(userIdentities.providerSubject, authUserId)))
     .limit(1);
   return rows[0] ?? null;
+}
+
+export async function removeAuthUser(
+  db: Database,
+  authUserId: string,
+): Promise<void> {
+  await db
+    .delete(authUsers)
+    .where(eq(authUsers.id, authUserId));
 }

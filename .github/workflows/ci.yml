@@ -1,20 +1,40 @@
 name: CI
+
 on:
   pull_request:
   push:
-    branches: [main]
+    branches:
+      - main
+
 jobs:
   verify:
     runs-on: ubuntu-latest
+
+    env:
+      DEPLOYMENT_MODE: club
+      AUTH_PROVIDER: better-auth
+      BETTER_AUTH_SECRET: ci-only-secret-with-at-least-32-characters
+      BETTER_AUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      DATABASE_URL: file:ci.db
+      DATABASE_AUTH_TOKEN: ""
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
-        with: { version: 10 }
+        with:
+          version: 10.15.0
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile=false
+
+      - run: pnpm install --frozen-lockfile
+
       - run: pnpm typecheck
+
       - run: pnpm test
+
       - run: pnpm build
