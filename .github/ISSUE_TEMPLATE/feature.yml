@@ -1,0 +1,14 @@
+name: Feature
+about: Implementierungsaufgabe aus der SPEC
+body:
+  - type: textarea
+    id: goal
+    attributes: { label: Ziel }
+    validations: { required: true }
+  - type: textarea
+    id: acceptance
+    attributes: { label: Akzeptanzkriterien }
+    validations: { required: true }
+  - type: textarea
+    id: risks
+    attributes: { label: Datenschutz-/Tenant-/Diagnostikrisiken }

@@ -1,0 +1,20 @@
+{
+  "name": "masters-diagnostics",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @masters/web dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter @masters/web test:e2e",
+    "db:generate": "pnpm --filter @masters/db db:generate",
+    "db:push": "pnpm --filter @masters/db db:push",
+    "db:migrate": "pnpm --filter @masters/db db:migrate"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "turbo": "^2.5.6"
+  }
+}

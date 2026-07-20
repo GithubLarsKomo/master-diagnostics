@@ -1,0 +1,14 @@
+{
+  "id": "theoretical-example-001",
+  "deviceType": "ROWERG",
+  "stages": [
+    {"watts":240,"lactate":1.8,"heartRate":130,"durationSeconds":240},
+    {"watts":280,"lactate":2.1,"heartRate":137,"durationSeconds":240},
+    {"watts":320,"lactate":3.5,"heartRate":148,"durationSeconds":240},
+    {"watts":360,"lactate":4.8,"heartRate":162,"durationSeconds":240},
+    {"watts":400,"lactate":7.5,"heartRate":168,"durationSeconds":240},
+    {"watts":440,"lactate":12.8,"heartRate":176,"durationSeconds":150,"partialIncluded":true}
+  ],
+  "recovery":{"offsetSeconds":300,"lactate":16.5,"heartRate":132},
+  "note":"Theoretischer Datensatz; keine klinische oder trainingspraktische Referenzfreigabe."
+}

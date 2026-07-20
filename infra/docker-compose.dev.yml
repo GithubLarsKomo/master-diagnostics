@@ -1,0 +1,17 @@
+services:
+  libsql:
+    image: ghcr.io/tursodatabase/libsql-server:latest
+    restart: unless-stopped
+    environment:
+      SQLD_NODE: primary
+    ports:
+      - "8080:8080"
+    volumes:
+      - libsql-dev-data:/var/lib/sqld
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+volumes:
+  libsql-dev-data:

@@ -1,0 +1,43 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    env_file: ../.env
+    depends_on:
+      libsql:
+        condition: service_healthy
+    networks: [internal]
+
+  libsql:
+    image: ghcr.io/tursodatabase/libsql-server:latest
+    restart: unless-stopped
+    environment:
+      SQLD_NODE: primary
+    volumes:
+      - libsql-data:/var/lib/sqld
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [app]
+    networks: [internal]
+
+networks:
+  internal:
+volumes:
+  libsql-data:
+  caddy-data:
+  caddy-config:
