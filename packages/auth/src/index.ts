@@ -12,3 +12,5 @@ export interface IdentityProvider {
   inviteUser(input: InviteUserInput): Promise<InviteResult>;
   revokeSession(sessionId: string): Promise<void>;
 }
+
+export * from './local';

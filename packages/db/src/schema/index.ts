@@ -4,3 +4,5 @@ export * from './protocols';
 export * from './tests';
 export * from './diagnostics';
 export * from './operations';
+
+export * from './auth';
