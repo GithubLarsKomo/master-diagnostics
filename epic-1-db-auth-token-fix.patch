@@ -1,0 +1,50 @@
+From 7b1d2a0000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenAI <noreply@openai.com>
+Date: Mon, 20 Jul 2026 22:55:00 +0200
+Subject: [PATCH] fix: handle optional libsql auth token
+
+---
+ packages/db/drizzle.config.ts | 4 +++-
+ packages/db/src/client.ts     | 5 ++++-
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/packages/db/drizzle.config.ts b/packages/db/drizzle.config.ts
+index 0000000..1111111 100644
+--- a/packages/db/drizzle.config.ts
++++ b/packages/db/drizzle.config.ts
+@@ -1,10 +1,12 @@
+ import { defineConfig } from 'drizzle-kit';
+ 
++const databaseAuthToken = process.env.DATABASE_AUTH_TOKEN ?? '';
++
+ export default defineConfig({
+   dialect: 'turso',
+   schema: './src/schema/index.ts',
+   out: './migrations',
+   dbCredentials: {
+     url: process.env.DATABASE_URL ?? 'http://localhost:8080',
+-    authToken: process.env.DATABASE_AUTH_TOKEN,
++    authToken: databaseAuthToken,
+   },
+ });
+diff --git a/packages/db/src/client.ts b/packages/db/src/client.ts
+index 0000000..2222222 100644
+--- a/packages/db/src/client.ts
++++ b/packages/db/src/client.ts
+@@ -1,10 +1,13 @@
+ import { createClient } from '@libsql/client';
+ import { drizzle } from 'drizzle-orm/libsql';
+ 
++const databaseAuthToken = process.env.DATABASE_AUTH_TOKEN;
++
+ export const libsqlClient = createClient({
+   url: process.env.DATABASE_URL ?? 'http://localhost:8080',
+-  authToken: process.env.DATABASE_AUTH_TOKEN,
++  ...(databaseAuthToken
++    ? { authToken: databaseAuthToken }
++    : {}),
+ });
+ 
+ export const db = drizzle(libsqlClient);
+-- 
+2.50.1

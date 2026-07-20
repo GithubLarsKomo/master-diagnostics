@@ -14,8 +14,8 @@
     "db:migrate": "pnpm --filter @masters/db db:migrate"
   },
   "devDependencies": {
-    "typescript": "^7.0.2",
-    "turbo": "^2.5.6"
+    "turbo": "^2.5.6",
+    "typescript": "^5.9.3"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
