@@ -20,7 +20,8 @@
     "drizzle-kit": "^0.31.4",
     "tsx": "^4.20.6",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "@types/node": "^24.0.0"
   },
   "exports": "./src/index.ts",
   "types": "./src/index.ts"
