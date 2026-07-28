@@ -5,6 +5,8 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { signOut } from './sign-in/actions';
 
+export const dynamic = 'force-dynamic';
+
 export default async function HomePage() {
   const session = await auth.api.getSession({ headers: await headers() });
   const membership = session ? await resolveMembership(db, session.user.id) : null;
