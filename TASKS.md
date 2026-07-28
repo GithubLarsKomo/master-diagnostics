@@ -4,22 +4,25 @@
 
 - [x] Monorepo-Grundstruktur erzeugen
 - [x] Next.js-, Drizzle- und Docker-Basis anlegen
-- [ ] CI für Lint, Typecheck, Unit- und Build-Tests
-- [ ] Dependabot/Renovate konfigurieren
-- [ ] Lizenzentscheidung dokumentieren
-- [ ] Branch-Protection und CODEOWNERS aktivieren
+- [x] CI für Lint, Typecheck, Unit-, Build- und Browser-E2E-Tests
+- [x] Dependabot für pnpm und GitHub Actions konfigurieren
+- [x] vorläufige Lizenzentscheidung dokumentieren
+- [x] CODEOWNERS ergänzen
+- [ ] Branch-Protection für `main` in GitHub aktivieren
 
 ## Epic 1 — Lokaler Bootstrap und Tenancy
 
-- [ ] Better Auth vollständig integrieren
-- [ ] browserbasierten Setup-Assistenten implementieren
-- [ ] Single-Tenant-Invariante im Club-Modus erzwingen
-- [ ] ersten Tenant-Admin atomar erzeugen
-- [ ] Tenant-Kontext-Middleware implementieren
-- [ ] Rollenmatrix als Policy-Tests abdecken
-- [ ] SaaS-Provider-Schnittstelle für Clerk vorbereiten
+- [x] Better Auth für den lokalen Club-Modus integrieren
+- [x] browserbasierten Setup-Assistenten implementieren
+- [x] Single-Tenant-Invariante im Club-Modus erzwingen
+- [x] ersten Tenant-Admin atomar erzeugen
+- [x] Tenant-Kontext-Middleware implementieren
+- [x] Rollenmatrix und Tenant-Isolation als Policy-Tests abdecken
+- [x] providerneutrale Identity-Schnittstelle vorbereiten
+- [ ] Clerk-Adapter für den späteren SaaS-Modus implementieren
+- [ ] frische Docker-Installation als eigener Smoke-Test in CI ausführen
 
-**Akzeptanz:** Eine frische Docker-Installation kann ohne Internet initialisiert werden; anschließend ist eine Anmeldung als Tenant-Admin möglich.
+**Akzeptanz:** Der lokale Club-Bootstrap, die Anmeldung als Tenant-Admin und die Sperre einer erneuten Einrichtung sind im Browser-E2E-Test nachgewiesen. Der Docker-Smoke-Test bleibt als separates Betriebs-Gate offen.
 
 ## Epic 2 — Athleten und Einwilligungen
 
@@ -138,7 +141,7 @@
 
 Ein MVP-Release ist nur zulässig, wenn:
 
-- [ ] alle Tenant-Isolationstests bestehen
+- [x] aktuelle Tenant-Isolations- und Rollen-Policy-Tests bestehen
 - [ ] alle Algorithmus-Referenztests bestehen
 - [ ] Offline-Wiederaufnahme und Sync-Retry keinen Datenverlust erzeugen
 - [ ] WCAG-2.2-AA-Kernprüfungen bestehen

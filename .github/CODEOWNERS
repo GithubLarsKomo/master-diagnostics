@@ -1,0 +1,10 @@
+# Default owner
+* @GithubLarsKomo
+
+# Security- and data-critical areas
+/.github/ @GithubLarsKomo
+/packages/db/ @GithubLarsKomo
+/packages/domain/ @GithubLarsKomo
+/packages/diagnostics/ @GithubLarsKomo
+/apps/web/src/lib/auth* @GithubLarsKomo
+/apps/web/src/proxy.ts @GithubLarsKomo
