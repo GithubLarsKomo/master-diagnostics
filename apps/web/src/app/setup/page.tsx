@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { completeSetup } from './actions';
 
+export const dynamic = 'force-dynamic';
+
 export default async function SetupPage() {
   if (process.env.DEPLOYMENT_MODE !== 'club') redirect('/');
   if (await isClubConfigured(db)) redirect('/');
