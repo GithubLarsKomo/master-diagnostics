@@ -16,7 +16,7 @@ async function expectTenantAdminHome(page: Page) {
   await expect(page.getByRole('heading', { name: 'Tenant-Kontext' })).toBeVisible();
 }
 
-test('bootstraps a fresh club and signs in the tenant admin', async ({ page }) => {
+test('bootstraps a club and manages a tenant-scoped athlete', async ({ page }) => {
   await page.goto('/');
   await expect(page).toHaveURL(/\/setup$/);
   await expect(page.getByRole('heading', { name: 'Club einrichten' })).toBeVisible();
@@ -34,11 +34,30 @@ test('bootstraps a fresh club and signs in the tenant admin', async ({ page }) =
   }
   await expectTenantAdminHome(page);
 
+  await page.getByRole('link', { name: 'Athleten öffnen' }).click();
+  await expect(page).toHaveURL(/\/athletes$/);
+  await page.getByLabel('Vorname', { exact: true }).fill('Petra');
+  await page.getByLabel('Nachname', { exact: true }).fill('Muster');
+  await page.getByLabel('Geburtsdatum', { exact: true }).fill('1992-04-18');
+  await page.getByLabel('Referenzkategorie', { exact: true }).fill('Masters A');
+  await page.getByLabel('Körpergröße (cm)', { exact: true }).fill('174');
+  await page.getByLabel('Gewicht (kg)', { exact: true }).fill('68.5');
+  await page.getByLabel('Disziplin', { exact: true }).fill('Einer');
+  await page.getByLabel('Trainingsstatus', { exact: true }).fill('leistungsorientiert');
+  await page.getByRole('button', { name: 'Athlet speichern' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Petra Muster' })).toBeVisible();
+  await page.getByRole('link', { name: 'Bearbeiten' }).click();
+  await expect(page.getByRole('heading', { name: 'Athlet bearbeiten' })).toBeVisible();
+  await page.getByLabel('Gewicht (kg)', { exact: true }).fill('69.25');
+  await page.getByRole('button', { name: 'Änderungen speichern' }).click();
+  await expect(page.getByText('174 cm · 69,25 kg')).toBeVisible();
+
+  await page.goto('/setup');
+  await expectTenantAdminHome(page);
+
   await page.getByRole('button', { name: 'Abmelden' }).click();
   await expect(page).toHaveURL(/\/sign-in$/);
   await signIn(page);
-  await expectTenantAdminHome(page);
-
-  await page.goto('/setup');
   await expectTenantAdminHome(page);
 });
