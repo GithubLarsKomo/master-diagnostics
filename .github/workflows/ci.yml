@@ -16,7 +16,7 @@ jobs:
       BETTER_AUTH_SECRET: ci-only-secret-with-at-least-32-characters
       BETTER_AUTH_URL: http://127.0.0.1:3000
       NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
-      DATABASE_URL: file:ci.db
+      DATABASE_URL: file:${{ github.workspace }}/ci.db
       DATABASE_AUTH_TOKEN: ""
 
     steps:
@@ -39,6 +39,6 @@ jobs:
       - run: pnpm --filter @masters/web exec playwright install --with-deps chromium
       - name: Prepare E2E database
         run: |
-          rm -f ci.db
+          rm -f "${{ github.workspace }}/ci.db"
           pnpm db:migrate
       - run: pnpm test:e2e
