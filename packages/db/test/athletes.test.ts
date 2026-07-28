@@ -23,7 +23,8 @@ const input = {
 };
 
 async function createTestDatabase(): Promise<Database> {
-  const client = createClient({ url: 'file::memory:' });
+  const databasePath = `/tmp/masters-athletes-${crypto.randomUUID()}.db`;
+  const client = createClient({ url: `file:${databasePath}` });
   await client.batch([
     `CREATE TABLE athletes (
       id TEXT PRIMARY KEY NOT NULL,
