@@ -1,4 +1,5 @@
 import { planFromExpectedLt2 } from '@masters/diagnostics';
+import Link from 'next/link';
 import { headers } from 'next/headers';
 import { auth } from '@/lib/auth';
 import { getTenantContext } from '@/lib/tenant-context';
@@ -16,8 +17,8 @@ export default async function HomePage() {
         <div><h1>Masters Diagnostics</h1><p>{session?.user.name} · {tenantContext.role}</p></div>
         <form action={signOut}><button type="submit">Abmelden</button></form>
       </header>
-      <section className="grid" aria-label="Projektstatus">
-        <article className="card"><h2>Club eingerichtet</h2><p>Single-Tenant-Betrieb mit lokalem Better Auth und libSQL.</p></article>
+      <section className="grid" aria-label="Arbeitsbereiche">
+        <article className="card"><h2>Athleten</h2><p>Tenant-gebundene Stammdaten anlegen und verwalten.</p><Link href="/athletes">Athleten öffnen</Link></article>
         <article className="card"><h2>Tenant-Kontext</h2><p>Anfragen werden serverseitig dem aktiven Tenant und Benutzer zugeordnet.</p></article>
         <article className="card"><h2>Rollenmodell</h2><p>Berechtigungen und Tenant-Isolation werden gemeinsam geprüft.</p></article>
       </section>
