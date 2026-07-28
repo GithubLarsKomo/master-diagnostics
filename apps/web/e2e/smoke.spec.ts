@@ -1,9 +1,9 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 const adminEmail = 'admin@example.test';
 const adminPassword = 'Correct-Horse-Battery-42';
 
-async function expectTenantAdminHome(page: Parameters<typeof test>[0]['page']) {
+async function expectTenantAdminHome(page: Page) {
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole('heading', { name: 'Masters Diagnostics' })).toBeVisible();
   await expect(page.getByText('TENANT_ADMIN')).toBeVisible();
