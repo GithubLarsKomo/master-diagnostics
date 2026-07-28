@@ -4,9 +4,14 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
   workers: 1,
-  use: { baseURL: 'http://127.0.0.1:3000' },
+  reporter: 'line',
+  use: {
+    baseURL: 'http://127.0.0.1:3000',
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+  },
   webServer: {
-    command: 'pnpm --dir ../.. db:push && pnpm dev',
+    command: 'pnpm dev',
     port: 3000,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
