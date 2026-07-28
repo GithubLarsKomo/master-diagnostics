@@ -12,7 +12,7 @@ async function signIn(page: Page) {
 async function expectTenantAdminHome(page: Page) {
   await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:3000\/$/);
   await expect(page.getByRole('heading', { name: 'Masters Diagnostics' })).toBeVisible();
-  await expect(page.getByText('TENANT_ADMIN', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Club Admin · TENANT_ADMIN/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Tenant-Kontext' })).toBeVisible();
 }
 
