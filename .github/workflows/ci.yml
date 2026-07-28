@@ -37,4 +37,8 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm --filter @masters/web exec playwright install --with-deps chromium
-      - run: rm -f ci.db && pnpm test:e2e
+      - name: Prepare E2E database
+        run: |
+          rm -f ci.db
+          pnpm db:migrate
+      - run: pnpm test:e2e
