@@ -1,7 +1,7 @@
 'use server';
 
 import { authorize } from '@masters/domain';
-import { createAthlete } from '@masters/db';
+import { createAthlete, updateAthlete } from '@masters/db';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
@@ -20,12 +20,9 @@ const athleteSchema = z.object({
   trainingStatus: z.string().trim().min(1).max(80),
 });
 
-export async function addAthlete(formData: FormData) {
-  const context = await getTenantContext();
-  authorize(context, 'athlete.manage');
+function toAthleteInput(formData: FormData) {
   const input = athleteSchema.parse(Object.fromEntries(formData));
-
-  await createAthlete(db, context.tenantId, { userId: context.userId, role: context.role }, {
+  return {
     firstName: input.firstName,
     lastName: input.lastName,
     birthDate: input.birthDate,
@@ -35,8 +32,37 @@ export async function addAthlete(formData: FormData) {
     primarySport: input.primarySport,
     primaryDiscipline: input.primaryDiscipline,
     trainingStatus: input.trainingStatus,
-  });
+  };
+}
+
+export async function addAthlete(formData: FormData) {
+  const context = await getTenantContext();
+  authorize(context, 'athlete.manage');
+
+  await createAthlete(
+    db,
+    context.tenantId,
+    { userId: context.userId, role: context.role },
+    toAthleteInput(formData),
+  );
 
   revalidatePath('/athletes');
+  redirect('/athletes');
+}
+
+export async function editAthlete(athleteId: string, formData: FormData) {
+  const context = await getTenantContext();
+  authorize(context, 'athlete.manage');
+
+  await updateAthlete(
+    db,
+    context.tenantId,
+    athleteId,
+    { userId: context.userId, role: context.role },
+    toAthleteInput(formData),
+  );
+
+  revalidatePath('/athletes');
+  revalidatePath(`/athletes/${athleteId}`);
   redirect('/athletes');
 }
