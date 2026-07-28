@@ -3,10 +3,15 @@ import { drizzle } from 'drizzle-orm/libsql';
 import * as schema from './schema';
 
 export function createDatabase() {
+  const databaseAuthToken = process.env.DATABASE_AUTH_TOKEN;
+
   const client = createClient({
     url: process.env.DATABASE_URL ?? 'http://localhost:8080',
-    authToken: process.env.DATABASE_AUTH_TOKEN || undefined,
+    ...(databaseAuthToken
+      ? { authToken: databaseAuthToken }
+      : {}),
   });
+
   return drizzle(client, { schema });
 }
 

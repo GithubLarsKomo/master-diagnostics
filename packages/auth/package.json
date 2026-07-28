@@ -10,10 +10,12 @@
     "lint": "echo auth-lint-pending"
   },
   "dependencies": {
+    "@masters/db": "workspace:*",
     "better-auth": "^1.6.23"
   },
   "devDependencies": {
-    "typescript": "^7.0.2",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
     "vitest": "^4.1.10"
   },
   "exports": "./src/index.ts",

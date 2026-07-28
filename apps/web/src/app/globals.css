@@ -5,3 +5,10 @@ main { max-width: 72rem; margin: 0 auto; padding: 2rem; }
 .card { border: 1px solid currentColor; border-radius: .75rem; padding: 1.25rem; margin-block: 1rem; }
 .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
 code { overflow-wrap: anywhere; }
+
+.setup-form { display: grid; gap: 1rem; max-width: 42rem; }
+.setup-form label { display: grid; gap: .35rem; font-weight: 600; }
+.setup-form input, .setup-form select { min-height: 2.75rem; padding: .55rem .7rem; font: inherit; }
+.setup-form button { min-height: 2.75rem; font: inherit; font-weight: 700; cursor: pointer; }
+.app-header { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
+.app-header button { min-height: 2.75rem; padding-inline: 1rem; }

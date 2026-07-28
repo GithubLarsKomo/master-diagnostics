@@ -1,1 +1,15 @@
-{"extends":"../config/tsconfig.base.json","compilerOptions":{"outDir":"dist","declaration":true},"include":["src/**/*.ts","drizzle.config.ts"]}
+{
+  "extends": "../config/tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "declaration": true,
+    "rootDir": ".",
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src/**/*.ts",
+    "drizzle.config.ts"
+  ]
+}

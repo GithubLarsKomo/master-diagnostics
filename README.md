@@ -38,6 +38,7 @@ pnpm install
 docker compose -f infra/docker-compose.dev.yml up -d
 pnpm db:push
 pnpm dev
+# Club-Modus: anschließend http://localhost:3000/setup öffnen
 ```
 
 Danach: `http://localhost:3000`.
@@ -65,3 +66,8 @@ Details: [`TASKS.md`](./TASKS.md) und [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 ## Lizenz
 
 Noch festzulegen. Bis dahin ist das Repository nicht zur Weiterverteilung lizenziert.
+
+
+## Epic 1 – Club-Bootstrap
+
+Der Club-Modus enthält einen einmaligen Setup-Assistenten, Better Auth mit lokaler E-Mail-/Passwort-Anmeldung, die Anlage des Single-Tenants und des ersten Tenant-Admins sowie ein transaktionales Audit-Ereignis.
