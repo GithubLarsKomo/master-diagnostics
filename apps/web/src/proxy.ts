@@ -17,6 +17,12 @@ const PUBLIC_PATHS = [
   '/api/health',
 ];
 
+const CONTEXT_HEADERS = [
+  'x-masters-tenant-id',
+  'x-masters-user-id',
+  'x-masters-role',
+] as const;
+
 export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
 
@@ -59,7 +65,15 @@ export async function proxy(request: NextRequest) {
     );
   }
 
-  return NextResponse.next();
+  const requestHeaders = new Headers(request.headers);
+  for (const header of CONTEXT_HEADERS) requestHeaders.delete(header);
+  requestHeaders.set('x-masters-tenant-id', membership.tenantId);
+  requestHeaders.set('x-masters-user-id', membership.userId);
+  requestHeaders.set('x-masters-role', membership.role);
+
+  return NextResponse.next({
+    request: { headers: requestHeaders },
+  });
 }
 
 export const config = {
