@@ -274,14 +274,15 @@ export async function createProtocolTemplateVersion(
       ))
       .orderBy(desc(protocolTemplateVersions.versionNumber))
       .limit(1);
-    if (latestVersions.length === 0) {
+    const [latestVersion] = latestVersions;
+    if (!latestVersion) {
       throw new Error('Protocol template has no base version');
     }
 
     const versionValues = buildVersionValues(
       tenantId,
       templateId,
-      latestVersions[0].versionNumber + 1,
+      latestVersion.versionNumber + 1,
       actor,
       normalized,
       now,
