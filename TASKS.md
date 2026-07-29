@@ -32,9 +32,9 @@
 - [x] unveränderliche Athleten-Snapshots
 - [x] Einwilligungsworkflow
 - [x] Minderjährigen- und Guardian-Workflow
-- [ ] Widerruf, Nutzungssperre und Löschantrag
+- [x] Widerruf und sofortige Nutzungssperre
 
-**Akzeptanz:** Tenantgebundene Athletenverwaltung, Trainerzuordnung, Snapshots, Einwilligungen und Guardian-Pflicht für Minderjährige sind durch Integrations- und Browser-E2E-Tests abgedeckt. Löschantrag und nachgelagerte Pseudonymisierung bleiben offen.
+**Akzeptanz:** Tenantgebundene Athletenverwaltung, Trainerzuordnung, Snapshots, Einwilligungen, sofortige Nutzungssperre bei Widerruf und Guardian-Pflicht für Minderjährige sind durch Integrations- und Browser-E2E-Tests abgedeckt. Lösch-/Anonymisierungsanträge, Aufbewahrungsprüfung und nachgelagerte Pseudonymisierung werden zusammenhängend in Epic 10 umgesetzt.
 
 ## Epic 3 — Protokolle und Testplanung
 
@@ -115,6 +115,7 @@
 - [ ] append-only Audit-Service
 - [ ] Audit-Abdeckung aller spezifizierten Ereignisse
 - [ ] Aufbewahrungsjob 1–10 Jahre
+- [ ] Lösch-/Anonymisierungsanträge und Aufbewahrungsprüfung
 - [ ] Pseudonymisierung nach Löschung
 - [ ] Betroffenenexport
 - [ ] Löschung/Anonymisierung mit Vorschau
