@@ -53,4 +53,4 @@ test('bootstraps a club and manages athlete consent', async ({ page }) => {
 
   await page.goto('/setup');
   await expectTenantAdminHome(page);
-}
+});
