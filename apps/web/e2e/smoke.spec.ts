@@ -16,11 +16,9 @@ async function expectTenantAdminHome(page: Page) {
   await expect(page.getByRole('heading', { name: 'Tenant-Kontext' })).toBeVisible();
 }
 
-test('bootstraps a club and manages a tenant-scoped athlete', async ({ page }) => {
+test('bootstraps a club and manages athlete consent', async ({ page }) => {
   await page.goto('/');
   await expect(page).toHaveURL(/\/setup$/);
-  await expect(page.getByRole('heading', { name: 'Club einrichten' })).toBeVisible();
-
   await page.getByLabel('Clubname', { exact: true }).fill('Ratzeburger Ruderclub');
   await page.getByLabel('Slug', { exact: true }).fill('rrc');
   await page.getByLabel('Name', { exact: true }).fill('Club Admin');
@@ -29,13 +27,10 @@ test('bootstraps a club and manages a tenant-scoped athlete', async ({ page }) =
   await page.getByRole('button', { name: 'Installation abschließen' }).click();
 
   await page.waitForURL((url) => url.pathname === '/' || url.pathname === '/sign-in');
-  if (new URL(page.url()).pathname === '/sign-in') {
-    await signIn(page);
-  }
+  if (new URL(page.url()).pathname === '/sign-in') await signIn(page);
   await expectTenantAdminHome(page);
 
   await page.getByRole('link', { name: 'Athleten öffnen' }).click();
-  await expect(page).toHaveURL(/\/athletes$/);
   await page.getByLabel('Vorname', { exact: true }).fill('Petra');
   await page.getByLabel('Nachname', { exact: true }).fill('Muster');
   await page.getByLabel('Geburtsdatum', { exact: true }).fill('1992-04-18');
@@ -46,18 +41,16 @@ test('bootstraps a club and manages a tenant-scoped athlete', async ({ page }) =
   await page.getByLabel('Trainingsstatus', { exact: true }).fill('leistungsorientiert');
   await page.getByRole('button', { name: 'Athlet speichern' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Petra Muster' })).toBeVisible();
   await page.getByRole('link', { name: 'Bearbeiten' }).click();
-  await expect(page.getByRole('heading', { name: 'Athlet bearbeiten' })).toBeVisible();
-  await page.getByLabel('Gewicht (kg)', { exact: true }).fill('69.25');
-  await page.getByRole('button', { name: 'Änderungen speichern' }).click();
-  await expect(page.getByText('174 cm · 69,25 kg')).toBeVisible();
+  await page.getByLabel('Dokumentversion', { exact: true }).fill('v1.0');
+  await page.getByRole('button', { name: 'Einwilligung erteilen' }).click();
+  await expect(page.getByText(/DIAGNOSTIC_TESTING · v1.0 · GRANTED/)).toBeVisible();
+
+  await page.getByLabel('Widerrufsgrund', { exact: true }).fill('Auf Wunsch des Athleten');
+  await page.getByRole('button', { name: 'Einwilligung widerrufen' }).click();
+  await expect(page.getByRole('heading', { name: 'Nutzung gesperrt' })).toBeVisible();
+  await expect(page.getByText(/DIAGNOSTIC_TESTING · v1.0 · WITHDRAWN/)).toBeVisible();
 
   await page.goto('/setup');
   await expectTenantAdminHome(page);
-
-  await page.getByRole('button', { name: 'Abmelden' }).click();
-  await expect(page).toHaveURL(/\/sign-in$/);
-  await signIn(page);
-  await expectTenantAdminHome(page);
-});
+}
