@@ -26,13 +26,15 @@
 
 ## Epic 2 — Athleten und Einwilligungen
 
-- [ ] Athleten-CRUD mit Pflicht-/Optionalfeldern
-- [ ] verwaltete Profile ohne Login
-- [ ] Many-to-many Trainerzuordnung mit Haupttrainer
-- [ ] unveränderliche Athleten-Snapshots
-- [ ] Einwilligungsworkflow
-- [ ] Minderjährigen- und Guardian-Workflow
+- [x] Athleten-CRUD für Anlage, Anzeige und Änderung mit Pflichtfeldern
+- [x] verwaltete Profile ohne Login
+- [x] Many-to-many Trainerzuordnung mit Haupttrainer
+- [x] unveränderliche Athleten-Snapshots
+- [x] Einwilligungsworkflow
+- [x] Minderjährigen- und Guardian-Workflow
 - [ ] Widerruf, Nutzungssperre und Löschantrag
+
+**Akzeptanz:** Tenantgebundene Athletenverwaltung, Trainerzuordnung, Snapshots, Einwilligungen und Guardian-Pflicht für Minderjährige sind durch Integrations- und Browser-E2E-Tests abgedeckt. Löschantrag und nachgelagerte Pseudonymisierung bleiben offen.
 
 ## Epic 3 — Protokolle und Testplanung
 
