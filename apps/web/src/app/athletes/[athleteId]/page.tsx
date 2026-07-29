@@ -1,10 +1,12 @@
 import { authorize } from '@masters/domain';
 import {
+  athleteIsMinor,
   getAthlete,
   listActiveTrainers,
   listAthleteSnapshots,
   listCoachAssignments,
   listConsents,
+  listGuardians,
 } from '@masters/db';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -13,17 +15,9 @@ import { getTenantContext } from '@/lib/tenant-context';
 import { editAthlete } from '../actions';
 import { addCoachAssignment, captureAthleteSnapshot } from './context-actions';
 import { addConsent, withdrawAthleteConsent } from './consent-actions';
+import { addGuardian, removeGuardian } from './guardian-actions';
 
 export const dynamic = 'force-dynamic';
-
-function isMinor(birthDate: string, now = new Date()) {
-  const birth = new Date(`${birthDate}T00:00:00Z`);
-  let age = now.getUTCFullYear() - birth.getUTCFullYear();
-  const beforeBirthday = now.getUTCMonth() < birth.getUTCMonth()
-    || (now.getUTCMonth() === birth.getUTCMonth() && now.getUTCDate() < birth.getUTCDate());
-  if (beforeBirthday) age -= 1;
-  return age < 18;
-}
 
 export default async function AthletePage({ params }: { params: Promise<{ athleteId: string }> }) {
   const context = await getTenantContext();
@@ -32,17 +26,21 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
   const athlete = await getAthlete(db, context.tenantId, athleteId);
   if (!athlete) notFound();
 
-  const [trainers, assignments, snapshots, consentRows] = await Promise.all([
+  const [trainers, assignments, snapshots, consentRows, guardians] = await Promise.all([
     listActiveTrainers(db, context.tenantId),
     listCoachAssignments(db, context.tenantId, athlete.id),
     listAthleteSnapshots(db, context.tenantId, athlete.id),
     listConsents(db, context.tenantId, athlete.id),
+    listGuardians(db, context.tenantId, athlete.id),
   ]);
   const editAction = editAthlete.bind(null, athlete.id);
   const assignmentAction = addCoachAssignment.bind(null, athlete.id);
   const snapshotAction = captureAthleteSnapshot.bind(null, athlete.id);
   const consentAction = addConsent.bind(null, athlete.id);
+  const guardianAction = addGuardian.bind(null, athlete.id);
   const blocked = Boolean(athlete.consentBlockedAt);
+  const minor = athleteIsMinor(athlete.birthDate);
+  const activeGuardian = guardians.some((guardian) => !guardian.revokedAt && (!guardian.validUntil || guardian.validUntil >= new Date().toISOString().slice(0, 10)));
 
   return (
     <main>
@@ -52,7 +50,7 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
       </header>
 
       {blocked && <section className="card" role="alert"><h2>Nutzung gesperrt</h2><p>Die Einwilligung wurde widerrufen. Neue Tests dürfen erst nach erneuter Erteilung gestartet werden.</p></section>}
-      {isMinor(athlete.birthDate) && <section className="card"><h2>Guardian erforderlich</h2><p>Der Athlet ist minderjährig. Vor Testbeginn muss eine gesetzliche Vertretung dokumentiert werden.</p></section>}
+      {minor && !activeGuardian && <section className="card" role="alert"><h2>Guardian erforderlich</h2><p>Für diesen minderjährigen Athleten ist noch keine aktive gesetzliche Vertretung dokumentiert. Ein Teststart muss blockiert bleiben.</p></section>}
 
       <section className="card">
         <h2>Stammdaten</h2>
@@ -71,25 +69,40 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
       </section>
 
       <section className="card">
+        <h2>Gesetzliche Vertretung</h2>
+        {!minor && <p>Der Athlet ist volljährig. Guardian-Daten sind optional und werden normalerweise nicht benötigt.</p>}
+        <form action={guardianAction} className="setup-form">
+          <label>Vollständiger Name<input name="fullName" required maxLength={160} /></label>
+          <label>Beziehung<input name="relationship" required placeholder="Mutter, Vater, Vormund" /></label>
+          <label>E-Mail<input name="email" type="email" /></label>
+          <label>Telefon<input name="phone" /></label>
+          <label>Gültig bis<input name="validUntil" type="date" /></label>
+          <button type="submit">Vertretung dokumentieren</button>
+        </form>
+        {guardians.length === 0 ? <p>Noch keine gesetzliche Vertretung dokumentiert.</p> : <ul>{guardians.map((guardian) => {
+          const revokeAction = removeGuardian.bind(null, athlete.id);
+          return <li key={guardian.id}>
+            <strong>{guardian.fullName}</strong> · {guardian.relationship} · {guardian.revokedAt ? 'widerrufen' : 'aktiv'}
+            {!guardian.revokedAt && <form action={revokeAction} className="setup-form">
+              <input type="hidden" name="guardianId" value={guardian.id} />
+              <label>Grund der Aufhebung<input name="reason" required minLength={3} /></label>
+              <button type="submit">Vertretung aufheben</button>
+            </form>}
+          </li>;
+        })}</ul>}
+      </section>
+
+      <section className="card">
         <h2>Einwilligungen</h2>
         <form action={consentAction} className="setup-form">
           <label>Einwilligungstyp<input name="consentType" required defaultValue="DIAGNOSTIC_TESTING" /></label>
           <label>Dokumentversion<input name="documentVersion" required placeholder="v1.0" /></label>
           <button type="submit">Einwilligung erteilen</button>
         </form>
-        {consentRows.length === 0 ? <p>Noch keine Einwilligung dokumentiert.</p> : (
-          <ul>{consentRows.map((consent) => {
-            const withdrawAction = withdrawAthleteConsent.bind(null, athlete.id);
-            return <li key={consent.id}>
-              <strong>{consent.consentType}</strong> · {consent.documentVersion} · {consent.status}
-              {consent.status === 'GRANTED' && <form action={withdrawAction} className="setup-form">
-                <input type="hidden" name="consentId" value={consent.id} />
-                <label>Widerrufsgrund<input name="reason" required minLength={3} /></label>
-                <button type="submit">Einwilligung widerrufen</button>
-              </form>}
-            </li>;
-          })}</ul>
-        )}
+        {consentRows.length === 0 ? <p>Noch keine Einwilligung dokumentiert.</p> : <ul>{consentRows.map((consent) => {
+          const withdrawAction = withdrawAthleteConsent.bind(null, athlete.id);
+          return <li key={consent.id}><strong>{consent.consentType}</strong> · {consent.documentVersion} · {consent.status}{consent.status === 'GRANTED' && <form action={withdrawAction} className="setup-form"><input type="hidden" name="consentId" value={consent.id} /><label>Widerrufsgrund<input name="reason" required minLength={3} /></label><button type="submit">Einwilligung widerrufen</button></form>}</li>;
+        })}</ul>}
       </section>
 
       <section className="card">
