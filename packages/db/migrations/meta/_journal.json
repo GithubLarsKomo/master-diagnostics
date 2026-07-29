@@ -15,6 +15,13 @@
       "when": 1785325500000,
       "tag": "0001_guardian_workflow",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785359100000,
+      "tag": "0002_factory_protocol_templates",
+      "breakpoints": true
     }
   ]
 }

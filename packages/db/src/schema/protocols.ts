@@ -4,7 +4,7 @@ import { id, tenantId, timestamps } from './common';
 export const protocolTemplates = sqliteTable('protocol_templates', {
   id: id(), tenantId: tenantId(), deviceType: text('device_type', { enum: ['BIKEERG','ROWERG','RP3'] }).notNull(),
   name: text('name').notNull(), active: integer('active', { mode: 'boolean' }).notNull().default(true), ...timestamps,
-});
+}, (t) => [uniqueIndex('protocol_template_tenant_device_name_uq').on(t.tenantId, t.deviceType, t.name)]);
 
 export const protocolTemplateVersions = sqliteTable('protocol_template_versions', {
   id: id(), tenantId: tenantId(), templateId: text('template_id').notNull().references(() => protocolTemplates.id),
