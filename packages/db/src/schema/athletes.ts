@@ -37,3 +37,17 @@ export const consents = sqliteTable('consents', {
   consentType: text('consent_type').notNull(), status: text('status', { enum: ['GRANTED','WITHDRAWN','EXPIRED'] }).notNull(),
   grantedAt: text('granted_at'), withdrawnAt: text('withdrawn_at'), documentVersion: text('document_version').notNull(), ...timestamps,
 });
+
+export const athleteGuardians = sqliteTable('athlete_guardians', {
+  id: id(),
+  tenantId: tenantId(),
+  athleteId: text('athlete_id').notNull().references(() => athletes.id),
+  fullName: text('full_name').notNull(),
+  relationship: text('relationship').notNull(),
+  email: text('email'),
+  phone: text('phone'),
+  authorityConfirmedAt: text('authority_confirmed_at').notNull(),
+  validUntil: text('valid_until'),
+  revokedAt: text('revoked_at'),
+  ...timestamps,
+}, (t) => [uniqueIndex('guardian_active_identity_uq').on(t.tenantId, t.athleteId, t.fullName, t.authorityConfirmedAt)]);
