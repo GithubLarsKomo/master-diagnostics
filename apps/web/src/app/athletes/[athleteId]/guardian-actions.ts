@@ -1,7 +1,7 @@
 'use server';
 
 import { authorize } from '@masters/domain';
-import { registerGuardian, revokeGuardian } from '@masters/db';
+import { registerGuardian, revokeGuardian, type GuardianInput } from '@masters/db';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { db } from '@/lib/db';
@@ -18,14 +18,22 @@ const guardianSchema = z.object({
 export async function addGuardian(athleteId: string, formData: FormData) {
   const context = await getTenantContext();
   authorize(context, 'athlete.manage');
-  const input = guardianSchema.parse(Object.fromEntries(formData));
-  await registerGuardian(db, context.tenantId, athleteId, { userId: context.userId, role: context.role }, {
-    fullName: input.fullName,
-    relationship: input.relationship,
-    email: input.email || undefined,
-    phone: input.phone || undefined,
-    validUntil: input.validUntil || undefined,
-  });
+  const parsed = guardianSchema.parse(Object.fromEntries(formData));
+  const input: GuardianInput = {
+    fullName: parsed.fullName,
+    relationship: parsed.relationship,
+  };
+  if (parsed.email) input.email = parsed.email;
+  if (parsed.phone) input.phone = parsed.phone;
+  if (parsed.validUntil) input.validUntil = parsed.validUntil;
+
+  await registerGuardian(
+    db,
+    context.tenantId,
+    athleteId,
+    { userId: context.userId, role: context.role },
+    input,
+  );
   revalidatePath(`/athletes/${athleteId}`);
 }
 
