@@ -75,11 +75,20 @@ describe('factory protocol template bootstrap', () => {
         partialInclusionPercent: 50,
         createdByUserId: userId,
       });
+      const template = templates.find((candidate) => candidate.id === version.templateId);
+      expect(template).toBeDefined();
       expect(JSON.parse(version.configJson)).toEqual({
+        schemaVersion: 1,
+        name: template!.name,
+        deviceType: template!.deviceType,
+        startPowerWatts: null,
+        incrementWatts: null,
+        warmupPowerWatts: null,
+        abortHints: [],
+        optionalInputFields: [],
         audioWarningSeconds: [30, 10, 3],
         restingMeasurement: 'BEFORE_WARMUP',
       });
-      expect(templates.some((template) => template.id === version.templateId)).toBe(true);
     }
 
     const [auditEvent] = await db.select().from(schema.auditEvents);

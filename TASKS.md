@@ -39,7 +39,7 @@
 ## Epic 3 — Protokolle und Testplanung
 
 - [x] drei Werksvorlagen seed-en
-- [ ] versionierte Tenant-Vorlagen
+- [x] versionierte Tenant-Vorlagen
 - [ ] erwartete LT2 als Planungseingabe
 - [ ] Berechnung Start = 60 % LT2, LT2 in Stufe 5
 - [ ] Rundung auf 5 W und Warnregeln
