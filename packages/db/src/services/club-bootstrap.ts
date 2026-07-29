@@ -3,11 +3,14 @@ import type { Database } from '../client';
 import {
   auditEvents,
   authUsers,
+  protocolTemplates,
+  protocolTemplateVersions,
   tenantMemberships,
   tenants,
   userIdentities,
   users,
 } from '../schema';
+import { buildFactoryProtocolTemplateSeed } from './factory-protocol-templates';
 
 export interface ClubBootstrapInput {
   clubName: string;
@@ -37,6 +40,11 @@ export async function bootstrapClub(db: Database, input: ClubBootstrapInput): Pr
   const tenantId = crypto.randomUUID();
   const userId = crypto.randomUUID();
   const correlationId = crypto.randomUUID();
+  const factoryProtocolTemplateSeed = buildFactoryProtocolTemplateSeed(
+    tenantId,
+    userId,
+    now,
+  );
 
   await db.transaction(async (tx) => {
     const existingTenants = await tx
@@ -86,10 +94,20 @@ export async function bootstrapClub(db: Database, input: ClubBootstrapInput): Pr
       createdAt: now,
       updatedAt: now,
     });
+    await tx
+      .insert(protocolTemplates)
+      .values(factoryProtocolTemplateSeed.map(({ template }) => template));
+    await tx
+      .insert(protocolTemplateVersions)
+      .values(factoryProtocolTemplateSeed.map(({ version }) => version));
     await tx.insert(auditEvents).values({
       id: crypto.randomUUID(), tenantId, occurredAt: now, actorUserId: userId, actorRole: 'TENANT_ADMIN',
       action: 'club.bootstrap.completed', entityType: 'tenant', entityId: tenantId, source: 'SETUP_WIZARD',
-      correlationId, afterJson: JSON.stringify({ clubName: input.clubName, slug: input.slug }), createdAt: now, updatedAt: now,
+      correlationId, afterJson: JSON.stringify({
+        clubName: input.clubName,
+        slug: input.slug,
+        factoryProtocolTemplateCount: factoryProtocolTemplateSeed.length,
+      }), createdAt: now, updatedAt: now,
     });
   });
 
