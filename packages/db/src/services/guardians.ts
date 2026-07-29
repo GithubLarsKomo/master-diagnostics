@@ -16,17 +16,23 @@ export interface GuardianActor {
 }
 
 function normalize(input: GuardianInput): GuardianInput {
-  const value = {
-    fullName: input.fullName.trim(),
-    relationship: input.relationship.trim(),
-    email: input.email?.trim() || undefined,
-    phone: input.phone?.trim() || undefined,
-    validUntil: input.validUntil?.trim() || undefined,
+  const fullName = input.fullName.trim();
+  const relationship = input.relationship.trim();
+  const email = input.email?.trim();
+  const phone = input.phone?.trim();
+  const validUntil = input.validUntil?.trim();
+
+  if (!fullName || !relationship) throw new Error('Guardian name and relationship are required');
+  if (email && !/^\S+@\S+\.\S+$/.test(email)) throw new Error('Guardian email is invalid');
+  if (validUntil && !/^\d{4}-\d{2}-\d{2}$/.test(validUntil)) throw new Error('Guardian validity must use YYYY-MM-DD');
+
+  return {
+    fullName,
+    relationship,
+    ...(email ? { email } : {}),
+    ...(phone ? { phone } : {}),
+    ...(validUntil ? { validUntil } : {}),
   };
-  if (!value.fullName || !value.relationship) throw new Error('Guardian name and relationship are required');
-  if (value.email && !/^\S+@\S+\.\S+$/.test(value.email)) throw new Error('Guardian email is invalid');
-  if (value.validUntil && !/^\d{4}-\d{2}-\d{2}$/.test(value.validUntil)) throw new Error('Guardian validity must use YYYY-MM-DD');
-  return value;
 }
 
 async function requireAthlete(db: Database, tenantId: string, athleteId: string) {
