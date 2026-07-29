@@ -16,7 +16,7 @@ async function expectTenantAdminHome(page: Page) {
   await expect(page.getByRole('heading', { name: 'Tenant-Kontext' })).toBeVisible();
 }
 
-test('bootstraps a club and manages athlete consent', async ({ page }) => {
+test('bootstraps a club and manages minor athlete consent and guardians', async ({ page }) => {
   await page.goto('/');
   await expect(page).toHaveURL(/\/setup$/);
   await page.getByLabel('Clubname', { exact: true }).fill('Ratzeburger Ruderclub');
@@ -33,8 +33,8 @@ test('bootstraps a club and manages athlete consent', async ({ page }) => {
   await page.getByRole('link', { name: 'Athleten öffnen' }).click();
   await page.getByLabel('Vorname', { exact: true }).fill('Petra');
   await page.getByLabel('Nachname', { exact: true }).fill('Muster');
-  await page.getByLabel('Geburtsdatum', { exact: true }).fill('1992-04-18');
-  await page.getByLabel('Referenzkategorie', { exact: true }).fill('Masters A');
+  await page.getByLabel('Geburtsdatum', { exact: true }).fill('2012-04-18');
+  await page.getByLabel('Referenzkategorie', { exact: true }).fill('Junior');
   await page.getByLabel('Körpergröße (cm)', { exact: true }).fill('174');
   await page.getByLabel('Gewicht (kg)', { exact: true }).fill('68.5');
   await page.getByLabel('Disziplin', { exact: true }).fill('Einer');
@@ -42,6 +42,19 @@ test('bootstraps a club and manages athlete consent', async ({ page }) => {
   await page.getByRole('button', { name: 'Athlet speichern' }).click();
 
   await page.getByRole('link', { name: 'Bearbeiten' }).click();
+  await expect(page.getByRole('heading', { name: 'Guardian erforderlich' })).toBeVisible();
+
+  await page.getByLabel('Vollständiger Name', { exact: true }).fill('Erika Muster');
+  await page.getByLabel('Beziehung', { exact: true }).fill('Mutter');
+  await page.getByRole('button', { name: 'Vertretung dokumentieren' }).click();
+  await expect(page.getByRole('heading', { name: 'Guardian erforderlich' })).toBeHidden();
+  await expect(page.getByText(/Erika Muster · Mutter · aktiv/)).toBeVisible();
+
+  await page.getByLabel('Grund der Aufhebung', { exact: true }).fill('Vertretung beendet');
+  await page.getByRole('button', { name: 'Vertretung aufheben' }).click();
+  await expect(page.getByRole('heading', { name: 'Guardian erforderlich' })).toBeVisible();
+  await expect(page.getByText(/Erika Muster · Mutter · widerrufen/)).toBeVisible();
+
   await page.getByLabel('Dokumentversion', { exact: true }).fill('v1.0');
   await page.getByRole('button', { name: 'Einwilligung erteilen' }).click();
   await expect(page.getByText(/DIAGNOSTIC_TESTING · v1.0 · GRANTED/)).toBeVisible();
