@@ -84,7 +84,11 @@ export function LiveTestTimer({
           <p className="eyebrow">{pausedAt === null ? 'Test läuft' : 'Test pausiert'}</p>
           <h2>{phaseLabels[phase.kind]}{phase.stageNumber ? ` ${phase.stageNumber}` : ''}</h2>
         </div>
-        <button type="button" onClick={pausedAt === null ? pause : resume}>
+        <button
+          type="button"
+          disabled={now === 0}
+          onClick={pausedAt === null ? pause : resume}
+        >
           {pausedAt === null ? 'Pause' : 'Fortsetzen'}
         </button>
       </div>
