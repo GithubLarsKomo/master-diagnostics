@@ -34,10 +34,12 @@ export function LiveTestTimer({
   plan,
   testId,
   startedAt,
+  onActiveElapsedSecondsChange,
 }: {
   plan: TestTimerPlan;
   testId: string;
   startedAt: string;
+  onActiveElapsedSecondsChange: (seconds: number) => void;
 }) {
   const [now, setNow] = useState(0);
   const [timerState, setTimerState] = useState<LiveTestTimerState | null>(null);
@@ -89,6 +91,9 @@ export function LiveTestTimer({
       ) / 1000,
     );
   }, [now, startedAt, timerState]);
+  useEffect(() => {
+    onActiveElapsedSecondsChange(activeElapsedSeconds);
+  }, [activeElapsedSeconds, onActiveElapsedSecondsChange]);
   const position = getTestTimerPosition(plan, activeElapsedSeconds);
   const warning = (
     position.phase?.kind === 'STAGE'
