@@ -12,3 +12,23 @@ code { overflow-wrap: anywhere; }
 .setup-form button { min-height: 2.75rem; font: inherit; font-weight: 700; cursor: pointer; }
 .app-header { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
 .app-header button { min-height: 2.75rem; padding-inline: 1rem; }
+
+.setup-form textarea { padding: .55rem .7rem; font: inherit; }
+.safety-checklist { display: grid; gap: .75rem; max-width: 48rem; }
+.safety-checklist label { display: flex; align-items: center; gap: .75rem; min-height: 2.5rem; }
+.safety-checklist input { width: 1.25rem; height: 1.25rem; }
+.safety-checklist button, .primary-action { min-height: 3rem; padding-inline: 1.25rem; font: inherit; font-weight: 800; cursor: pointer; }
+.live-test { border-width: 3px; }
+.live-test-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
+.live-test-heading button { min-height: 3rem; min-width: 9rem; font: inherit; font-weight: 800; cursor: pointer; }
+.eyebrow { margin: 0; text-transform: uppercase; letter-spacing: .08em; font-weight: 800; }
+.timer-display { font-variant-numeric: tabular-nums; font-size: clamp(4rem, 16vw, 9rem); line-height: 1; font-weight: 900; text-align: center; padding-block: 1rem; }
+.live-test-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: 1rem; }
+.live-test-metrics div { border: 1px solid currentColor; border-radius: .5rem; padding: .75rem; }
+.live-test-metrics dt { font-size: .9rem; }
+.live-test-metrics dd { margin: .25rem 0 0; font-size: 1.4rem; font-weight: 800; }
+.sample-window, .timer-alert { font-size: 1.2rem; font-weight: 800; }
+.timer-warning { background: #fff3cd; color: #241a00; }
+.critical-action { border-color: #b42318; border-width: 3px; }
+.critical-action button { background: #b42318; color: white; border: 0; }
+.connection-state { opacity: .8; }
