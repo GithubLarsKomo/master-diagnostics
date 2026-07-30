@@ -198,6 +198,9 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
     page.getByRole('row').filter({ hasText: 'Stufe 1' })
       .getByText('Dauer — / 04:00'),
   ).toBeVisible();
+  await expect(
+    page.getByText(/Stufe 1 enthält einen qualifizierten Laktatwert/),
+  ).toBeVisible();
 
   await page.getByLabel('Laktat Stufe 1').fill('2,50');
   await page.getByLabel('Korrekturgrund Stufe 1')
@@ -218,6 +221,9 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
   await page.getByRole('button', { name: 'Stufe 1 speichern' }).click();
   await expect(page.getByLabel('Qualität Stufe 1')).toHaveValue('EXCLUDED');
   await expect(page.getByText('Gespeichert · Version 3')).toBeVisible();
+  await expect(
+    page.getByText(/Stufe 1 enthält einen qualifizierten Laktatwert/),
+  ).toBeHidden();
 
   await page.getByLabel('Laktat Ruhewert').fill('1,30');
   await page.getByLabel('Korrekturgrund Ruhewert')
