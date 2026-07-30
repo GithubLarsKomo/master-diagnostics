@@ -5,6 +5,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { Database } from '../src/client';
 import * as schema from '../src/schema';
 import { finishTest } from '../src/services/test-lifecycle';
+import { hashTestLockToken } from '../src/services/test-locks';
+
+const lockToken = '11111111-1111-4111-8111-111111111111';
 
 async function createTestDatabase(): Promise<Database> {
   const databasePath = `/tmp/masters-test-lifecycle-finish-${crypto.randomUUID()}.db`;
@@ -15,6 +18,8 @@ async function createTestDatabase(): Promise<Database> {
     `CREATE UNIQUE INDEX test_termination_event_test_uq ON test_termination_events (tenant_id, test_id)`,
     `CREATE TRIGGER test_termination_events_immutable_update BEFORE UPDATE ON test_termination_events BEGIN SELECT RAISE(ABORT, 'test termination events are immutable'); END`,
     `CREATE TRIGGER test_termination_events_immutable_delete BEFORE DELETE ON test_termination_events BEGIN SELECT RAISE(ABORT, 'test termination events are immutable'); END`,
+    `CREATE TABLE test_locks (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, test_id TEXT NOT NULL, owner_user_id TEXT NOT NULL, token_hash TEXT NOT NULL, acquired_at TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE UNIQUE INDEX test_lock_test_uq ON test_locks (tenant_id, test_id)`,
     `CREATE TABLE audit_events (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, occurred_at TEXT NOT NULL, actor_user_id TEXT, actor_role TEXT, action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, source TEXT NOT NULL, reason TEXT, before_json TEXT, after_json TEXT, correlation_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   ]);
   return drizzle(client, { schema }) as Database;
@@ -44,6 +49,20 @@ async function seedTests(db: Database): Promise<void> {
       currentVersion: 2, createdAt: now, updatedAt: now,
     },
   ]);
+  await db.insert(schema.testLocks).values([
+    {
+      id: 'lock-running', tenantId: 'tenant-a', testId: 'test-running',
+      ownerUserId: 'trainer-a', tokenHash: hashTestLockToken(lockToken),
+      acquiredAt: now, expiresAt: '2099-01-01T00:00:00.000Z',
+      createdAt: now, updatedAt: now,
+    },
+    {
+      id: 'lock-running-other', tenantId: 'tenant-a', testId: 'test-running-other',
+      ownerUserId: 'trainer-a', tokenHash: hashTestLockToken(lockToken),
+      acquiredAt: now, expiresAt: '2099-01-01T00:00:00.000Z',
+      createdAt: now, updatedAt: now,
+    },
+  ]);
 }
 
 const trainer = { userId: 'trainer-a', role: 'TRAINER' };
@@ -59,6 +78,7 @@ describe('test lifecycle finish transition', () => {
   it('atomically moves a running test to data review with an immutable event and audit', async () => {
     const finished = await finishTest(db, 'tenant-a', trainer, 'test-running', {
       reason: 'REGULAR_EXHAUSTION',
+      lockToken,
     });
 
     expect(finished).toMatchObject({
@@ -84,6 +104,7 @@ describe('test lifecycle finish transition', () => {
 
     await expect(finishTest(db, 'tenant-a', trainer, 'test-running', {
       reason: 'VOLUNTARY_STOP',
+      lockToken,
     })).rejects.toThrow('cannot finish from status DATA_REVIEW');
     expect(await db.select().from(schema.testTerminationEvents)).toHaveLength(1);
     expect(await db.select().from(schema.auditEvents)).toHaveLength(1);
@@ -92,6 +113,7 @@ describe('test lifecycle finish transition', () => {
   it('records a normalized explanatory note for OTHER', async () => {
     await finishTest(db, 'tenant-a', trainer, 'test-running-other', {
       reason: 'OTHER', notes: '  Athlete requested a protocol-specific stop  ',
+      lockToken,
     });
 
     const [termination] = await db
@@ -106,6 +128,7 @@ describe('test lifecycle finish transition', () => {
   it('allows safe stopping without rechecking consent or an active assignment', async () => {
     const finished = await finishTest(db, 'tenant-a', trainer, 'test-running', {
       reason: 'PAIN_OR_DISCOMFORT', notes: 'Chest discomfort reported',
+      lockToken,
     });
 
     expect(finished.status).toBe('DATA_REVIEW');
@@ -114,22 +137,32 @@ describe('test lifecycle finish transition', () => {
   it('rejects invalid actors, tenants, states and details without partial writes', async () => {
     await expect(finishTest(db, 'tenant-a', { userId: 'athlete-a', role: 'ATHLETE' }, 'test-running', {
       reason: 'VOLUNTARY_STOP',
+      lockToken,
     })).rejects.toThrow('Only trainers and tenant admins');
     await expect(finishTest(db, 'tenant-a', { userId: 'trainer-other', role: 'TRAINER' }, 'test-running', {
       reason: 'VOLUNTARY_STOP',
+      lockToken,
     })).rejects.toThrow('Only the conducting trainer');
     await expect(finishTest(db, 'tenant-a', trainer, 'test-b', {
       reason: 'TECHNICAL_FAILURE',
+      lockToken,
     })).rejects.toThrow('Running test not found');
     await expect(finishTest(db, 'tenant-a', trainer, 'test-planned', {
       reason: 'PROTOCOL_ERROR',
+      lockToken,
     })).rejects.toThrow('cannot finish from status PLANNED');
     await expect(finishTest(db, 'tenant-a', trainer, 'test-running', {
       reason: 'OTHER', notes: '  ',
+      lockToken,
     })).rejects.toThrow('notes are required for OTHER');
     await expect(finishTest(db, 'tenant-a', trainer, 'test-running', {
       reason: 'UNKNOWN' as 'OTHER',
+      lockToken,
     })).rejects.toThrow('Invalid test termination reason');
+    await expect(finishTest(db, 'tenant-a', trainer, 'test-running', {
+      reason: 'VOLUNTARY_STOP',
+      lockToken: '22222222-2222-4222-8222-222222222222',
+    })).rejects.toThrow('active test lock');
 
     expect(await db.select().from(schema.testTerminationEvents)).toHaveLength(0);
     expect(await db.select().from(schema.auditEvents)).toHaveLength(0);
@@ -141,6 +174,7 @@ describe('test lifecycle finish transition', () => {
   it('prevents direct changes to the immutable termination event', async () => {
     await finishTest(db, 'tenant-a', trainer, 'test-running', {
       reason: 'TECHNICAL_FAILURE', notes: 'Sensor disconnected',
+      lockToken,
     });
     const [event] = await db.select().from(schema.testTerminationEvents);
 

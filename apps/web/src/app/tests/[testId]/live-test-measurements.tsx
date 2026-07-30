@@ -69,10 +69,12 @@ export function LiveTestMeasurements({
   testId,
   startedAt,
   stageCount,
+  lockToken,
 }: {
   testId: string;
   startedAt: string;
   stageCount: number;
+  lockToken: string;
 }) {
   const [state, setState] = useState<LiveTestMeasurementsState | null>(null);
   const [selectedKey, setSelectedKey] = useState('REST');
@@ -122,7 +124,7 @@ export function LiveTestMeasurements({
         if (disposed) return;
         setState(next);
         setStatus('SAVED');
-        const syncResult = await synchronizePendingLiveTestMeasurements(testId);
+        const syncResult = await synchronizePendingLiveTestMeasurements(testId, lockToken);
         if (disposed) return;
         setSyncStatus(syncResult.status);
         setConflict(syncResult.status === 'CONFLICT' ? syncResult : null);
@@ -143,7 +145,7 @@ export function LiveTestMeasurements({
     return () => {
       disposed = true;
     };
-  }, [stageCount, startedAt, testId]);
+  }, [lockToken, stageCount, startedAt, testId]);
 
   useEffect(() => {
     if (!state) return;
@@ -190,7 +192,7 @@ export function LiveTestMeasurements({
       try {
         await enqueueLiveTestMeasurementSync(testId, next.measurements[selectedKey]!);
         setSyncStatus('SYNCING');
-        const syncResult = await synchronizePendingLiveTestMeasurements(testId);
+        const syncResult = await synchronizePendingLiveTestMeasurements(testId, lockToken);
         setSyncStatus(syncResult.status);
         setConflict(syncResult.status === 'CONFLICT' ? syncResult : null);
       } catch (syncError) {

@@ -115,10 +115,6 @@ export async function getTestTimerPlan(
   if (!context) {
     throw new Error('Test timer context not found');
   }
-  if (context.test.conductingTrainerUserId !== actor.userId) {
-    throw new Error('Only the conducting trainer may load the test timer');
-  }
-
   return buildTimerFromSnapshot(
     context.snapshot.snapshotJson,
     context.snapshot.maximumStages,

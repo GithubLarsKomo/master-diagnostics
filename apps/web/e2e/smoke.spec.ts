@@ -101,6 +101,7 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
 
   await expect(page.getByRole('heading', { name: 'Startbereit' })).toBeVisible();
   await page.getByRole('button', { name: 'Test starten' }).click();
+  await expect(page.getByText('Bearbeitungssperre aktiv')).toBeVisible();
   await expect(page.getByText('Test läuft')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Warm-up' })).toBeVisible();
 
@@ -125,6 +126,7 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
       && response.request().method() === 'POST',
   );
   await page.reload();
+  await expect(page.getByText('Bearbeitungssperre aktiv')).toBeVisible();
   expect((await retriedRestSync).ok()).toBe(true);
   await expect(page.getByText(/Server-Sync: Synchronisiert/)).toBeVisible();
   await expect(page.getByLabel('Laktat (mmol/L)')).toHaveValue('1,2');

@@ -69,7 +69,7 @@
   - [x] Ruhe-, Stufen- und Erholungswerte mit optimistischer Version synchronisieren
   - [x] ausstehende Messwertoperationen nach Verbindungsfehler erneut senden
   - [x] Serverkonflikte ohne automatisches Überschreiben lokal sichtbar halten
-- [ ] exklusive Bearbeitungssperre und Übernahme
+- [x] exklusive Bearbeitungssperre und Übernahme
 - [ ] nachträgliche Tabellenbearbeitung
 
 ## Epic 5 — Qualitätsmodell

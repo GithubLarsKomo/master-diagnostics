@@ -114,13 +114,13 @@ describe('snapshot-backed test timer', () => {
     ]);
   });
 
-  it('rejects unauthorized and cross-tenant timer access', async () => {
+  it('allows tenant-scoped read access but rejects unauthorized and cross-tenant access', async () => {
     await expect(getTestTimerPlan(
       db, 'tenant-a', { userId: 'viewer-a', role: 'VIEWER' }, 'test-running',
     )).rejects.toThrow('Only trainers and tenant admins');
     await expect(getTestTimerPlan(
       db, 'tenant-a', trainer, 'test-other-conductor',
-    )).rejects.toThrow('Only the conducting trainer');
+    )).resolves.toMatchObject({ stageCount: 7 });
     await expect(getTestTimerPlan(
       db, 'tenant-a', trainer, 'test-b',
     )).rejects.toThrow('Test timer context not found');
