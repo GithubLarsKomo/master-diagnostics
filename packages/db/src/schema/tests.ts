@@ -20,6 +20,13 @@ export const testPlanSnapshots = sqliteTable('test_plan_snapshots', {
   snapshotJson: text('snapshot_json').notNull(), ...timestamps,
 }, (t) => [uniqueIndex('test_plan_snapshot_test_uq').on(t.tenantId, t.testId)]);
 
+export const testSafetyChecklistConfirmations = sqliteTable('test_safety_checklist_confirmations', {
+  id: id(), tenantId: tenantId(), testId: text('test_id').notNull().references(() => tests.id),
+  checklistVersion: text('checklist_version').notNull(), confirmationsJson: text('confirmations_json').notNull(),
+  confirmedByUserId: text('confirmed_by_user_id').notNull(), confirmedAt: text('confirmed_at').notNull(),
+  ...timestamps,
+}, (t) => [uniqueIndex('test_safety_checklist_test_uq').on(t.tenantId, t.testId)]);
+
 export const testStages = sqliteTable('test_stages', {
   id: id(), tenantId: tenantId(), testId: text('test_id').notNull().references(() => tests.id), stageNumber: integer('stage_number').notNull(),
   targetWatts: integer('target_watts').notNull(), plannedSeconds: integer('planned_seconds').notNull(), actualSeconds: integer('actual_seconds'),
