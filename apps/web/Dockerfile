@@ -19,7 +19,14 @@ CMD ["pnpm", "--filter", "@masters/db", "db:migrate"]
 
 FROM deps AS builder
 COPY . .
-ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    DEPLOYMENT_MODE=club \
+    AUTH_PROVIDER=better-auth \
+    BETTER_AUTH_SECRET=build-only-secret-not-used-at-runtime-1234567890 \
+    BETTER_AUTH_URL=http://127.0.0.1:3000 \
+    NEXT_PUBLIC_APP_URL=http://127.0.0.1:3000 \
+    DATABASE_URL=file:/tmp/master-diagnostics-build.db \
+    DATABASE_AUTH_TOKEN=
 RUN pnpm --filter @masters/web build
 
 FROM node:22-alpine AS runner
