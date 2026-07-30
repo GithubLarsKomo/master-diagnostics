@@ -17,7 +17,6 @@ async function expectTenantAdminHome(page: Page) {
 }
 
 test('bootstraps a club and manages minor athlete consent and guardians', async ({ page }) => {
-  test.setTimeout(90_000);
   await page.goto('/');
   await expect(page).toHaveURL(/\/setup$/);
   await page.getByLabel('Clubname', { exact: true }).fill('Ratzeburger Ruderclub');
@@ -84,7 +83,10 @@ test('bootstraps a club and manages minor athlete consent and guardians', async 
 
   await page.goto('/');
   await page.getByRole('link', { name: 'Tests öffnen' }).click();
-  await page.getByLabel('Athlet', { exact: true }).selectOption({ label: 'Max Test' });
+  const adultOption = page.locator('select[name="athleteId"] option').filter({ hasText: 'Max Test' });
+  const adultId = await adultOption.getAttribute('value');
+  expect(adultId).not.toBeNull();
+  await page.getByLabel('Athlet', { exact: true }).selectOption(adultId!);
   await page.getByLabel('Protokoll', { exact: true }).selectOption({ index: 1 });
   await page.getByLabel('Erwartete LT2 (W)', { exact: true }).fill('350');
   await page.getByLabel('Stufenzahl', { exact: true }).fill('7');
