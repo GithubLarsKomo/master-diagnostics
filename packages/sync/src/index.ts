@@ -16,3 +16,4 @@ export type SyncResult =
 
 export * from './live-test-timer-state';
 export * from './live-test-measurements-state';
+export * from './live-test-measurement-sync';
