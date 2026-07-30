@@ -10,3 +10,4 @@ export * from './services/consents';
 export * from './services/guardians';
 export * from './services/test-plans';
 export * from './services/test-safety';
+export * from './services/test-lifecycle';

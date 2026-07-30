@@ -8,6 +8,7 @@ import type { Database } from '../client';
 import {
   athletes,
   auditEvents,
+  testPlanSnapshots,
   testSafetyChecklistConfirmations,
   tests,
 } from '../schema';
@@ -22,6 +23,7 @@ export type TestStartReadinessBlocker =
   | 'TEST_NOT_PLANNED'
   | 'ATHLETE_NOT_AVAILABLE'
   | 'ATHLETE_CONSENT_BLOCKED'
+  | 'TEST_PLAN_NOT_FOUND'
   | 'SAFETY_CHECKLIST_NOT_CONFIRMED';
 
 function requireSafetyRole(actor: TestSafetyActor): void {
@@ -67,6 +69,18 @@ export async function confirmTestSafetyChecklist(
     }
     if (plannedTest.athlete.consentBlockedAt) {
       throw new Error('Athlete is blocked from diagnostic use');
+    }
+
+    const [planSnapshot] = await tx
+      .select({ id: testPlanSnapshots.id })
+      .from(testPlanSnapshots)
+      .where(and(
+        eq(testPlanSnapshots.tenantId, tenantId),
+        eq(testPlanSnapshots.testId, testId),
+      ))
+      .limit(1);
+    if (!planSnapshot) {
+      throw new Error('Immutable test plan snapshot is required before safety confirmation');
     }
 
     const [existing] = await tx
@@ -139,6 +153,15 @@ export async function getTestStartReadiness(
     return { ready: false, blockers: ['TEST_NOT_FOUND'], confirmation: null };
   }
 
+  const [planSnapshot] = await db
+    .select({ id: testPlanSnapshots.id })
+    .from(testPlanSnapshots)
+    .where(and(
+      eq(testPlanSnapshots.tenantId, tenantId),
+      eq(testPlanSnapshots.testId, testId),
+    ))
+    .limit(1);
+
   const [confirmation] = await db
     .select()
     .from(testSafetyChecklistConfirmations)
@@ -155,6 +178,7 @@ export async function getTestStartReadiness(
   if (plannedTest.test.status !== 'PLANNED') blockers.push('TEST_NOT_PLANNED');
   if (plannedTest.athlete.deletedAt) blockers.push('ATHLETE_NOT_AVAILABLE');
   if (plannedTest.athlete.consentBlockedAt) blockers.push('ATHLETE_CONSENT_BLOCKED');
+  if (!planSnapshot) blockers.push('TEST_PLAN_NOT_FOUND');
   if (!confirmation) blockers.push('SAFETY_CHECKLIST_NOT_CONFIRMED');
 
   return { ready: blockers.length === 0, blockers, confirmation: confirmation ?? null };

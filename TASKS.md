@@ -49,6 +49,7 @@
 ## Epic 4 — Testdurchführung und Offline
 
 - [ ] Testzustandsmaschine implementieren
+  - [x] Startübergang `PLANNED → IN_PROGRESS` mit Readiness-Gate
 - [ ] timergeführten Ablauf bauen
 - [ ] akustische und visuelle Warnungen
 - [ ] Ruhe-, Stufen- und 5-Minuten-Erholungsmessung
