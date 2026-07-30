@@ -29,6 +29,13 @@
       "when": 1785387600000,
       "tag": "0003_immutable_test_plan_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785391200000,
+      "tag": "0004_test_safety_checklist",
+      "breakpoints": true
     }
   ]
 }
