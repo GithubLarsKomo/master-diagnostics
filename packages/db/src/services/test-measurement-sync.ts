@@ -5,9 +5,11 @@ import {
   recoveryMeasurements,
   restMeasurements,
   syncOperations,
+  testLocks,
   testStages,
   tests,
 } from '../schema';
+import { hashTestLockToken } from './test-locks';
 import { getTestTimerPlan } from './test-timer';
 
 export const TEST_MEASUREMENT_SYNC_OPERATION = 'TEST_MEASUREMENT_UPSERT';
@@ -158,6 +160,7 @@ export async function syncTestMeasurement(
   tenantId: string,
   actor: TestMeasurementSyncActor,
   operation: TestMeasurementSyncOperation,
+  lockToken: string,
 ): Promise<TestMeasurementSyncResult> {
   requireActor(actor);
   requireOperation(operation);
@@ -200,6 +203,15 @@ export async function syncTestMeasurement(
     }
     if (test.status !== 'IN_PROGRESS' && test.status !== 'DATA_REVIEW') {
       throw new Error(`Measurements cannot synchronize while test is ${test.status}`);
+    }
+    const [lock] = await tx.select().from(testLocks).where(and(
+      eq(testLocks.tenantId, tenantId),
+      eq(testLocks.testId, operation.testId),
+      eq(testLocks.ownerUserId, actor.userId),
+      eq(testLocks.tokenHash, hashTestLockToken(lockToken)),
+    )).limit(1);
+    if (!lock || lock.expiresAt <= new Date().toISOString()) {
+      throw new Error('An active test lock is required for measurement synchronization');
     }
 
     const now = new Date().toISOString();
