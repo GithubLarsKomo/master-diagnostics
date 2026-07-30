@@ -147,10 +147,10 @@ describe('test lifecycle finish transition', () => {
     await expect(db.update(schema.testTerminationEvents)
       .set({ notes: 'rewritten' })
       .where(eq(schema.testTerminationEvents.id, event!.id)))
-      .rejects.toThrow('test termination events are immutable');
+      .rejects.toThrow('Failed query: update "test_termination_events"');
     await expect(db.delete(schema.testTerminationEvents)
       .where(eq(schema.testTerminationEvents.id, event!.id)))
-      .rejects.toThrow('test termination events are immutable');
+      .rejects.toThrow('Failed query: delete from "test_termination_events"');
     expect((await db.select().from(schema.testTerminationEvents))[0]).toMatchObject({
       notes: 'Sensor disconnected',
     });
