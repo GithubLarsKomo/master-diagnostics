@@ -4,6 +4,7 @@ import {
 } from '@masters/domain';
 import {
   getTestForExecution,
+  getTestReviewRows,
   getTestStartReadiness,
   getTestTimerPlan,
 } from '@masters/db';
@@ -17,6 +18,7 @@ import {
   startPlannedTest,
 } from '../actions';
 import { LiveTestSession } from './live-test-session';
+import { TestReviewTable } from './test-review-table';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +50,10 @@ export default async function TestPage({
     || (
       execution.test.status !== 'IN_PROGRESS'
       && execution.test.conductingTrainerUserId !== context.userId
+      && !(
+        execution.test.status === 'DATA_REVIEW'
+        && context.role === 'TENANT_ADMIN'
+      )
     )
   ) notFound();
 
@@ -59,6 +65,14 @@ export default async function TestPage({
   );
   const readiness = execution.test.status === 'PLANNED'
     ? await getTestStartReadiness(db, context.tenantId, testId)
+    : null;
+  const reviewRows = execution.test.status === 'DATA_REVIEW'
+    ? await getTestReviewRows(
+      db,
+      context.tenantId,
+      { userId: context.userId, role: context.role },
+      testId,
+    )
     : null;
   const safetyAction = confirmSafety.bind(null, testId);
   const startAction = startPlannedTest.bind(null, testId);
@@ -118,10 +132,13 @@ export default async function TestPage({
       )}
 
       {execution.test.status === 'DATA_REVIEW' && (
-        <section className="card" role="status">
-          <h2>Datenprüfung</h2>
-          <p>Der Test wurde beendet und befindet sich jetzt in der Datenprüfung.</p>
-        </section>
+        <>
+          <section className="card" role="status">
+            <h2>Datenprüfung</h2>
+            <p>Der Test wurde beendet und befindet sich jetzt in der Datenprüfung.</p>
+          </section>
+          {reviewRows && <TestReviewTable testId={testId} rows={reviewRows} />}
+        </>
       )}
     </main>
   );
