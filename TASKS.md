@@ -77,6 +77,9 @@
 - [x] Status `VALID`, `PARTIAL`, `EXCLUDED`, `MISSING`, `MANUALLY_CORRECTED`
 - [x] Teilstufenregel ab mindestens 50 %
 - [ ] automatische Plausibilitätswarnungen
+  - [x] deterministische Rohdatenwarnungen ohne Messwertänderung
+  - [ ] versionierte Schwellen für große Laktatsprünge und Probenzeitabweichungen
+  - [ ] Warnungen aus LT- und Dmax-Interpretation
 - [x] Messwertkorrektur mit Pflichtvermerk
 - [x] Ausschluss/Wiedereinschluss mit Grund
 - [ ] Laktat-Qualifier `EXACT`, `LESS_THAN`, `GREATER_THAN`
