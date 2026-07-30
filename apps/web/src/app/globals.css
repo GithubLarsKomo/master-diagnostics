@@ -44,3 +44,5 @@ code { overflow-wrap: anywhere; }
 .review-row input, .review-row select, .review-row button { min-height: 2.75rem; padding: .45rem .55rem; font: inherit; }
 .review-row button { font-weight: 800; cursor: pointer; }
 .review-row small { display: block; margin-top: .3rem; }
+.review-warnings { margin: 1rem 0; padding: 1rem; border: 2px solid #8a5a00; background: #fff3cd; color: #241a00; }
+.review-warnings ul { display: grid; gap: .5rem; padding-left: 1.25rem; }
