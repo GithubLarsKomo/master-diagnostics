@@ -11,10 +11,12 @@ import {
   auditEvents,
   coachAthleteAssignments,
   testPlanSnapshots,
+  testLocks,
   testSafetyChecklistConfirmations,
   testTerminationEvents,
   tests,
 } from '../schema';
+import { hashTestLockToken } from './test-locks';
 
 export interface TestLifecycleActor {
   userId: string;
@@ -24,6 +26,7 @@ export interface TestLifecycleActor {
 export interface FinishTestInput {
   reason: TestTerminationReason;
   notes?: string | null;
+  lockToken: string;
 }
 
 function requireStartRole(actor: TestLifecycleActor): void {
@@ -193,6 +196,15 @@ export async function finishTest(
     }
 
     const now = new Date().toISOString();
+    const [lock] = await tx.select().from(testLocks).where(and(
+      eq(testLocks.tenantId, tenantId),
+      eq(testLocks.testId, testId),
+      eq(testLocks.ownerUserId, actor.userId),
+      eq(testLocks.tokenHash, hashTestLockToken(input.lockToken)),
+    )).limit(1);
+    if (!lock || lock.expiresAt <= now) {
+      throw new Error('An active test lock is required to finish the test');
+    }
     const [finished] = await tx
       .update(tests)
       .set({
@@ -226,6 +238,10 @@ export async function finishTest(
     if (!terminationEvent) {
       throw new Error('Test termination event was not recorded');
     }
+    await tx.delete(testLocks).where(and(
+      eq(testLocks.id, lock.id),
+      eq(testLocks.tenantId, tenantId),
+    ));
 
     await tx.insert(auditEvents).values({
       id: crypto.randomUUID(),
