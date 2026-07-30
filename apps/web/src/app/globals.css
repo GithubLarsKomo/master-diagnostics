@@ -32,3 +32,8 @@ code { overflow-wrap: anywhere; }
 .critical-action { border-color: #b42318; border-width: 3px; }
 .critical-action button { background: #b42318; color: white; border: 0; }
 .connection-state { opacity: .8; }
+.measurement-form { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); align-items: end; }
+.measurement-form label { display: grid; gap: .35rem; font-weight: 700; }
+.measurement-form input, .measurement-form select, .measurement-form button { min-height: 3rem; padding: .55rem .7rem; font: inherit; }
+.measurement-form button { font-weight: 800; cursor: pointer; }
+.measurement-summary { display: grid; gap: .5rem; padding-left: 1.25rem; }

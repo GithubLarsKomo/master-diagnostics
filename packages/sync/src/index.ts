@@ -15,3 +15,4 @@ export type SyncResult =
   | { status: 'REJECTED'; code: string };
 
 export * from './live-test-timer-state';
+export * from './live-test-measurements-state';
