@@ -1,13 +1,38 @@
 services:
+  migrate:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    env_file: ../.env
+    environment:
+      DATABASE_URL: http://libsql:8080
+    depends_on:
+      libsql:
+        condition: service_healthy
+    networks: [internal]
+
   app:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
+      target: runner
     restart: unless-stopped
     env_file: ../.env
+    environment:
+      DATABASE_URL: http://libsql:8080
+      NEXT_PUBLIC_APP_URL: https://${APP_HOST}
+      BETTER_AUTH_URL: https://${APP_HOST}
     depends_on:
-      libsql:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     networks: [internal]
 
   libsql:
@@ -28,11 +53,15 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     ports: ["80:80", "443:443"]
+    environment:
+      APP_HOST: ${APP_HOST}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
-    depends_on: [app]
+    depends_on:
+      app:
+        condition: service_healthy
     networks: [internal]
 
 networks:
