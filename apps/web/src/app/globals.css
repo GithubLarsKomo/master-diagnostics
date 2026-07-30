@@ -37,3 +37,10 @@ code { overflow-wrap: anywhere; }
 .measurement-form input, .measurement-form select, .measurement-form button { min-height: 3rem; padding: .55rem .7rem; font: inherit; }
 .measurement-form button { font-weight: 800; cursor: pointer; }
 .measurement-summary { display: grid; gap: .5rem; padding-left: 1.25rem; }
+.review-table { overflow-x: auto; }
+.review-header, .review-row { display: grid; grid-template-columns: 9rem 7rem 8rem 7rem 12rem 10rem 12rem 14rem 10rem; gap: .5rem; min-width: 92rem; align-items: end; padding: .75rem; border-bottom: 1px solid currentColor; }
+.review-header { align-items: center; background: color-mix(in srgb, CanvasText 8%, Canvas); }
+.review-row label, .review-row > div { display: grid; gap: .3rem; }
+.review-row input, .review-row select, .review-row button { min-height: 2.75rem; padding: .45rem .55rem; font: inherit; }
+.review-row button { font-weight: 800; cursor: pointer; }
+.review-row small { display: block; margin-top: .3rem; }
