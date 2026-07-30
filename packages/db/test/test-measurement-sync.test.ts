@@ -5,9 +5,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { Database } from '../src/client';
 import * as schema from '../src/schema';
 import {
-  syncTestMeasurement,
+  syncTestMeasurement as syncTestMeasurementWithLock,
   type TestMeasurementSyncOperation,
 } from '../src/services/test-measurement-sync';
+import { hashTestLockToken } from '../src/services/test-locks';
+
+const lockToken = '11111111-1111-4111-8111-111111111111';
 
 async function createTestDatabase(): Promise<Database> {
   const databasePath = `/tmp/masters-test-measurement-sync-${crypto.randomUUID()}.db`;
@@ -23,6 +26,8 @@ async function createTestDatabase(): Promise<Database> {
     `CREATE UNIQUE INDEX recovery_measurement_test_uq ON recovery_measurements (tenant_id, test_id)`,
     `CREATE TABLE sync_operations (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, operation_id TEXT NOT NULL, test_id TEXT NOT NULL, entity_id TEXT NOT NULL, expected_version INTEGER NOT NULL, occurred_at TEXT NOT NULL, operation_type TEXT NOT NULL, schema_version TEXT NOT NULL, payload_json TEXT NOT NULL, status TEXT NOT NULL, result_json TEXT, applied_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
     `CREATE UNIQUE INDEX sync_operation_uq ON sync_operations (operation_id)`,
+    `CREATE TABLE test_locks (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, test_id TEXT NOT NULL, owner_user_id TEXT NOT NULL, token_hash TEXT NOT NULL, acquired_at TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE UNIQUE INDEX test_lock_test_uq ON test_locks (tenant_id, test_id)`,
     `CREATE TABLE audit_events (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, occurred_at TEXT NOT NULL, actor_user_id TEXT, actor_role TEXT, action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, source TEXT NOT NULL, reason TEXT, before_json TEXT, after_json TEXT, correlation_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   ]);
   return drizzle(client, { schema }) as Database;
@@ -74,6 +79,17 @@ async function seedContext(db: Database): Promise<void> {
       maximumStages: 7, snapshotJson: frozenSnapshot(), createdAt: now, updatedAt: now,
     },
   ]);
+  await db.insert(schema.testLocks).values({
+    id: 'lock-a',
+    tenantId: 'tenant-a',
+    testId: 'test-a',
+    ownerUserId: 'trainer-a',
+    tokenHash: hashTestLockToken(lockToken),
+    acquiredAt: now,
+    expiresAt: '2099-01-01T00:00:00.000Z',
+    createdAt: now,
+    updatedAt: now,
+  });
 }
 
 function operation(
@@ -99,6 +115,15 @@ function operation(
 }
 
 const trainer = { userId: 'trainer-a', role: 'TRAINER' };
+
+function syncTestMeasurement(
+  db: Database,
+  tenantId: string,
+  actor: { userId: string; role: string },
+  input: TestMeasurementSyncOperation,
+) {
+  return syncTestMeasurementWithLock(db, tenantId, actor, input, lockToken);
+}
 
 describe('test measurement synchronization', () => {
   let db: Database;
@@ -229,5 +254,28 @@ describe('test measurement synchronization', () => {
 
     expect(await db.select().from(schema.testStages)).toHaveLength(1);
     expect(await db.select().from(schema.auditEvents)).toHaveLength(1);
+  });
+
+  it('rejects server writes without the active lease token', async () => {
+    await expect(syncTestMeasurementWithLock(
+      db,
+      'tenant-a',
+      trainer,
+      operation(),
+      '22222222-2222-4222-8222-222222222222',
+    )).rejects.toThrow('active test lock');
+    await db.update(schema.testLocks).set({
+      expiresAt: '2020-01-01T00:00:00.000Z',
+    });
+    await expect(syncTestMeasurementWithLock(
+      db,
+      'tenant-a',
+      trainer,
+      operation(),
+      lockToken,
+    )).rejects.toThrow('active test lock');
+    expect(await db.select().from(schema.testStages)).toHaveLength(0);
+    expect(await db.select().from(schema.syncOperations)).toHaveLength(0);
+    expect(await db.select().from(schema.auditEvents)).toHaveLength(0);
   });
 });
