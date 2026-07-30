@@ -27,6 +27,21 @@ export const testSafetyChecklistConfirmations = sqliteTable('test_safety_checkli
   ...timestamps,
 }, (t) => [uniqueIndex('test_safety_checklist_test_uq').on(t.tenantId, t.testId)]);
 
+export const testTerminationEvents = sqliteTable('test_termination_events', {
+  id: id(), tenantId: tenantId(), testId: text('test_id').notNull().references(() => tests.id),
+  reason: text('reason', { enum: [
+    'REGULAR_EXHAUSTION',
+    'VOLUNTARY_STOP',
+    'TECHNICAL_FAILURE',
+    'PAIN_OR_DISCOMFORT',
+    'ABNORMAL_HEART_RATE',
+    'PROTOCOL_ERROR',
+    'OTHER',
+  ] }).notNull(),
+  notes: text('notes'), endedByUserId: text('ended_by_user_id').notNull(),
+  endedAt: text('ended_at').notNull(), ...timestamps,
+}, (t) => [uniqueIndex('test_termination_event_test_uq').on(t.tenantId, t.testId)]);
+
 export const testStages = sqliteTable('test_stages', {
   id: id(), tenantId: tenantId(), testId: text('test_id').notNull().references(() => tests.id), stageNumber: integer('stage_number').notNull(),
   targetWatts: integer('target_watts').notNull(), plannedSeconds: integer('planned_seconds').notNull(), actualSeconds: integer('actual_seconds'),
