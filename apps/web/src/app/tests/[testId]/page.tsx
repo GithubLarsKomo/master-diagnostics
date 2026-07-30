@@ -18,6 +18,7 @@ import {
   startPlannedTest,
 } from '../actions';
 import { LiveTestSession } from './live-test-session';
+import { getReviewPlausibilityWarnings } from './review-plausibility';
 import { TestReviewTable } from './test-review-table';
 
 export const dynamic = 'force-dynamic';
@@ -36,26 +37,16 @@ const safetyLabels = {
   trainerResponsibilityAccepted: 'Verantwortung für Start und Abbruch übernommen',
 } as const;
 
-export default async function TestPage({
-  params,
-}: {
-  params: Promise<{ testId: string }>;
-}) {
+export default async function TestPage({ params }: { params: Promise<{ testId: string }> }) {
   const context = await getTenantContext();
   authorize(context, 'test.run');
   const { testId } = await params;
   const execution = await getTestForExecution(db, context.tenantId, testId);
-  if (
-    !execution
-    || (
-      execution.test.status !== 'IN_PROGRESS'
-      && execution.test.conductingTrainerUserId !== context.userId
-      && !(
-        execution.test.status === 'DATA_REVIEW'
-        && context.role === 'TENANT_ADMIN'
-      )
-    )
-  ) notFound();
+  if (!execution || (
+    execution.test.status !== 'IN_PROGRESS'
+    && execution.test.conductingTrainerUserId !== context.userId
+    && !(execution.test.status === 'DATA_REVIEW' && context.role === 'TENANT_ADMIN')
+  )) notFound();
 
   const timer = await getTestTimerPlan(
     db,
@@ -74,6 +65,7 @@ export default async function TestPage({
       testId,
     )
     : null;
+  const warnings = reviewRows ? getReviewPlausibilityWarnings(reviewRows) : [];
   const safetyAction = confirmSafety.bind(null, testId);
   const startAction = startPlannedTest.bind(null, testId);
   const finishAction = finishRunningTest.bind(null, testId);
@@ -137,6 +129,21 @@ export default async function TestPage({
             <h2>Datenprüfung</h2>
             <p>Der Test wurde beendet und befindet sich jetzt in der Datenprüfung.</p>
           </section>
+          {warnings.length > 0 && (
+            <section className="card" aria-labelledby="plausibility-heading">
+              <p className="eyebrow">Automatische Review-Hilfe</p>
+              <h2 id="plausibility-heading">Plausibilitätswarnungen</h2>
+              <p>Diese Hinweise verändern keine Messwerte und keinen Qualitätsstatus.</p>
+              <ul aria-label="Plausibilitätswarnungen">
+                {warnings.map((warning, index) => (
+                  <li key={`${warning.code}:${warning.stageNumber ?? 'all'}:${index}`}>
+                    <strong>{warning.severity === 'WARNING' ? 'Warnung' : 'Hinweis'}:</strong>
+                    {' '}{warning.message}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           {reviewRows && <TestReviewTable testId={testId} rows={reviewRows} />}
         </>
       )}
