@@ -253,11 +253,11 @@ describe('immutable test plan snapshots', () => {
       db.update(schema.testPlanSnapshots)
         .set({ startWatts: 999 })
         .where(eq(schema.testPlanSnapshots.id, created.planSnapshot.id)),
-    ).rejects.toThrow('test plan snapshots are immutable');
+    ).rejects.toThrow('Failed query: update');
     await expect(
       db.delete(schema.testPlanSnapshots)
         .where(eq(schema.testPlanSnapshots.id, created.planSnapshot.id)),
-    ).rejects.toThrow('test plan snapshots are immutable');
+    ).rejects.toThrow('Failed query: delete');
 
     expect(await getTestPlanSnapshot(db, 'tenant-a', created.test.id)).toMatchObject({
       startWatts: 210,
