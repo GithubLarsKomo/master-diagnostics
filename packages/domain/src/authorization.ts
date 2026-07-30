@@ -22,7 +22,7 @@ export interface AuthorizationContext {
 
 const grants: Record<Role, ReadonlySet<Capability>> = {
   PLATFORM_ADMIN: new Set(['tenant.manage', 'platform.inspect']),
-  TENANT_ADMIN: new Set(['tenant.manage', 'athlete.manage', 'test.read.all', 'test.release']),
+  TENANT_ADMIN: new Set(['tenant.manage', 'athlete.manage', 'test.read.all', 'test.plan', 'test.run', 'test.release']),
   TRAINER: new Set(['athlete.read.assigned', 'test.plan', 'test.run', 'test.interpret']),
   ATHLETE: new Set(['profile.read.self', 'profile.context.update.self', 'report.read.self']),
 };

@@ -12,3 +12,4 @@ export * from './services/test-plans';
 export * from './services/test-safety';
 export * from './services/test-lifecycle';
 export * from './services/test-timer';
+export * from './services/test-workflow';
