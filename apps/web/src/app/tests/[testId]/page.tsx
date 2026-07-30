@@ -16,8 +16,7 @@ import {
   finishRunningTest,
   startPlannedTest,
 } from '../actions';
-import { LiveTestMeasurements } from './live-test-measurements';
-import { LiveTestTimer } from './live-test-timer';
+import { LiveTestSession } from './live-test-session';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,16 +34,6 @@ const safetyLabels = {
   trainerResponsibilityAccepted: 'Verantwortung für Start und Abbruch übernommen',
 } as const;
 
-const terminationLabels = {
-  REGULAR_EXHAUSTION: 'Reguläre Ausbelastung',
-  VOLUNTARY_STOP: 'Freiwilliger Abbruch',
-  TECHNICAL_FAILURE: 'Technische Störung',
-  PAIN_OR_DISCOMFORT: 'Schmerzen oder Unwohlsein',
-  ABNORMAL_HEART_RATE: 'Auffällige Herzfrequenz',
-  PROTOCOL_ERROR: 'Protokollfehler',
-  OTHER: 'Sonstiger Grund',
-} as const;
-
 export default async function TestPage({
   params,
 }: {
@@ -54,7 +43,13 @@ export default async function TestPage({
   authorize(context, 'test.run');
   const { testId } = await params;
   const execution = await getTestForExecution(db, context.tenantId, testId);
-  if (!execution || execution.test.conductingTrainerUserId !== context.userId) notFound();
+  if (
+    !execution
+    || (
+      execution.test.status !== 'IN_PROGRESS'
+      && execution.test.conductingTrainerUserId !== context.userId
+    )
+  ) notFound();
 
   const timer = await getTestTimerPlan(
     db,
@@ -114,36 +109,12 @@ export default async function TestPage({
       )}
 
       {execution.test.status === 'IN_PROGRESS' && execution.test.startedAt && (
-        <>
-          <LiveTestTimer
-            plan={timer}
-            testId={testId}
-            startedAt={execution.test.startedAt}
-          />
-          <LiveTestMeasurements
-            testId={testId}
-            startedAt={execution.test.startedAt}
-            stageCount={timer.stageCount}
-          />
-          <section className="card critical-action" aria-label="Testabschluss">
-            <h2>Test sofort abbrechen</h2>
-            <p>Diese Aktion bleibt während des gesamten laufenden Tests verfügbar.</p>
-            <form action={finishAction} className="setup-form">
-              <label>Abschluss- oder Abbruchgrund
-                <select name="reason" required defaultValue="">
-                  <option value="" disabled>Grund auswählen</option>
-                  {Object.entries(terminationLabels).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </label>
-              <label>Vermerk
-                <textarea name="notes" rows={3} maxLength={2000} />
-              </label>
-              <button type="submit">Test sofort abbrechen</button>
-            </form>
-          </section>
-        </>
+        <LiveTestSession
+          plan={timer}
+          testId={testId}
+          startedAt={execution.test.startedAt}
+          finishAction={finishAction}
+        />
       )}
 
       {execution.test.status === 'DATA_REVIEW' && (
