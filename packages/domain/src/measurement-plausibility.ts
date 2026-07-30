@@ -1,4 +1,4 @@
-export type LactateQualifier = 'EXACT' | 'LESS_THAN' | 'GREATER_THAN';
+import type { LactateQualifier, QualityStatus } from './types';
 
 export interface PlausibilityMeasurement {
   kind: 'REST' | 'STAGE' | 'RECOVERY';
@@ -6,7 +6,7 @@ export interface PlausibilityMeasurement {
   heartRate: number | null;
   lactateValueX100: number | null;
   lactateQualifier: LactateQualifier | null;
-  qualityStatus?: 'VALID' | 'PARTIAL' | 'EXCLUDED' | 'MISSING' | 'MANUALLY_CORRECTED' | null;
+  qualityStatus?: QualityStatus | null;
 }
 
 export type MeasurementPlausibilityCode =
