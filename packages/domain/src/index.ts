@@ -5,6 +5,7 @@ export * from './test-planning';
 export * from './test-safety';
 export * from './test-termination';
 export * from './stage-quality';
+export * from './review-plausibility';
 export * from './test-timer';
 
 export * from './authorization';
