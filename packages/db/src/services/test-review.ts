@@ -27,6 +27,8 @@ export interface TestReviewRow {
   stageNumber: number | null;
   entityId: string | null;
   targetWatts: number | null;
+  plannedSeconds: number | null;
+  actualSeconds: number | null;
   heartRate: number | null;
   lactateValueX100: number | null;
   lactateQualifier: 'EXACT' | 'LESS_THAN' | 'GREATER_THAN' | null;
@@ -62,6 +64,7 @@ function requireReviewActor(actor: TestReviewActor): void {
 function stageRow(
   stageNumber: number,
   targetWatts: number,
+  plannedSeconds: number,
   stage?: typeof testStages.$inferSelect,
 ): TestReviewRow {
   return {
@@ -69,6 +72,8 @@ function stageRow(
     stageNumber,
     entityId: stage?.id ?? null,
     targetWatts,
+    plannedSeconds: stage?.plannedSeconds ?? plannedSeconds,
+    actualSeconds: stage?.actualSeconds ?? null,
     heartRate: stage?.endHeartRate ?? null,
     lactateValueX100: stage?.lactateValueX100 ?? null,
     lactateQualifier: stage?.lactateQualifier ?? null,
@@ -87,6 +92,8 @@ function restRow(
     stageNumber: null,
     entityId: measurement?.id ?? null,
     targetWatts: null,
+    plannedSeconds: null,
+    actualSeconds: null,
     heartRate: measurement?.heartRate ?? null,
     lactateValueX100: measurement?.lactateValueX100 ?? null,
     lactateQualifier: measurement?.lactateQualifier ?? null,
@@ -105,6 +112,8 @@ function recoveryRow(
     stageNumber: null,
     entityId: measurement?.id ?? null,
     targetWatts: null,
+    plannedSeconds: null,
+    actualSeconds: null,
     heartRate: measurement?.heartRate ?? null,
     lactateValueX100: measurement?.lactateValueX100 ?? null,
     lactateQualifier: measurement?.lactateQualifier ?? null,
@@ -169,6 +178,7 @@ export async function getTestReviewRows(
     )).limit(1),
   ]);
   const stagesByNumber = new Map(stages.map((stage) => [stage.stageNumber, stage]));
+  const stageSeconds = plannedStageSeconds(context.plan.snapshotJson);
   return [
     restRow(rest[0]),
     ...Array.from(
@@ -179,6 +189,7 @@ export async function getTestReviewRows(
           stageNumber,
           context.plan.startWatts
             + context.plan.incrementWatts * index,
+          stageSeconds,
           stagesByNumber.get(stageNumber),
         );
       },
@@ -406,12 +417,13 @@ export async function correctTestMeasurement(
       }
       const targetWatts = context.plan.startWatts
         + context.plan.incrementWatts * (stageNumber - 1);
+      const stageSeconds = plannedStageSeconds(context.plan.snapshotJson);
       const [existing] = await tx.select().from(testStages).where(and(
         eq(testStages.tenantId, tenantId),
         eq(testStages.testId, testId),
         eq(testStages.stageNumber, stageNumber),
       )).limit(1);
-      before = stageRow(stageNumber, targetWatts, existing);
+      before = stageRow(stageNumber, targetWatts, stageSeconds, existing);
       if (before.version !== input.expectedVersion) {
         return { status: 'CONFLICT', row: before };
       }
@@ -446,7 +458,7 @@ export async function correctTestMeasurement(
           eq(testStages.currentVersion, input.expectedVersion),
         )).returning();
         if (!updated) return { status: 'CONFLICT', row: before };
-        after = stageRow(stageNumber, targetWatts, updated);
+        after = stageRow(stageNumber, targetWatts, stageSeconds, updated);
       } else {
         const [created] = await tx.insert(testStages).values({
           id: crypto.randomUUID(),
@@ -454,7 +466,7 @@ export async function correctTestMeasurement(
           testId,
           stageNumber,
           targetWatts,
-          plannedSeconds: plannedStageSeconds(context.plan.snapshotJson),
+          plannedSeconds: stageSeconds,
           endHeartRate: input.heartRate,
           lactateValueX100: input.lactateValueX100,
           lactateQualifier: input.lactateQualifier,
@@ -466,7 +478,7 @@ export async function correctTestMeasurement(
           updatedAt: now,
         }).returning();
         if (!created) throw new Error('Stage measurement was not created');
-        after = stageRow(stageNumber, targetWatts, created);
+        after = stageRow(stageNumber, targetWatts, stageSeconds, created);
       }
     }
 
