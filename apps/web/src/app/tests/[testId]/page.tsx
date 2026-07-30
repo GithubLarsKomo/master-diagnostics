@@ -1,7 +1,6 @@
 import {
   TEST_START_SAFETY_CHECKLIST_ITEMS,
   authorize,
-  evaluateMeasurementPlausibility,
 } from '@masters/domain';
 import {
   getTestForExecution,
@@ -19,6 +18,7 @@ import {
   startPlannedTest,
 } from '../actions';
 import { LiveTestSession } from './live-test-session';
+import { getReviewPlausibilityWarnings } from './review-plausibility';
 import { TestReviewTable } from './test-review-table';
 
 export const dynamic = 'force-dynamic';
@@ -65,7 +65,7 @@ export default async function TestPage({ params }: { params: Promise<{ testId: s
       testId,
     )
     : null;
-  const warnings = reviewRows ? evaluateMeasurementPlausibility(reviewRows) : [];
+  const warnings = reviewRows ? getReviewPlausibilityWarnings(reviewRows) : [];
   const safetyAction = confirmSafety.bind(null, testId);
   const startAction = startPlannedTest.bind(null, testId);
   const finishAction = finishRunningTest.bind(null, testId);
