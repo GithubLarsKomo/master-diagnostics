@@ -19,6 +19,7 @@ async function createTestDatabase(): Promise<Database> {
   await client.batch([
     `CREATE TABLE athletes (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, linked_user_id TEXT, first_name TEXT NOT NULL, last_name TEXT NOT NULL, birth_date TEXT NOT NULL, reference_category TEXT NOT NULL, height_cm INTEGER NOT NULL, current_weight_kg_x100 INTEGER NOT NULL, primary_sport TEXT NOT NULL, primary_discipline TEXT NOT NULL, training_status TEXT NOT NULL, consent_blocked_at TEXT, deleted_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
     `CREATE TABLE tests (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, athlete_id TEXT NOT NULL, device_type TEXT NOT NULL, status TEXT NOT NULL, conducting_trainer_user_id TEXT NOT NULL, scheduled_at TEXT, started_at TEXT, ended_at TEXT, version INTEGER NOT NULL, released_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE test_plan_snapshots (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, test_id TEXT NOT NULL, protocol_version_id TEXT NOT NULL, athlete_snapshot_id TEXT NOT NULL, expected_lt2_watts INTEGER NOT NULL, start_watts INTEGER NOT NULL, increment_watts INTEGER NOT NULL, maximum_stages INTEGER NOT NULL, snapshot_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
     `CREATE TABLE test_safety_checklist_confirmations (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, test_id TEXT NOT NULL, checklist_version TEXT NOT NULL, confirmations_json TEXT NOT NULL, confirmed_by_user_id TEXT NOT NULL, confirmed_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
     `CREATE UNIQUE INDEX test_safety_checklist_test_uq ON test_safety_checklist_confirmations (tenant_id, test_id)`,
     `CREATE TABLE audit_events (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, occurred_at TEXT NOT NULL, actor_user_id TEXT, actor_role TEXT, action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, source TEXT NOT NULL, reason TEXT, before_json TEXT, after_json TEXT, correlation_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
@@ -71,6 +72,18 @@ async function seedTestContext(db: Database): Promise<void> {
       status: 'PLANNED', conductingTrainerUserId: 'trainer-b', currentVersion: 1,
       createdAt: now, updatedAt: now,
     },
+  ]);
+  const plan = (testId: string, tenantId = 'tenant-a') => ({
+    id: `plan-${testId}`, tenantId, testId, protocolVersionId: `protocol-${tenantId}`,
+    athleteSnapshotId: `athlete-snapshot-${testId}`, expectedLt2Watts: 350,
+    startWatts: 210, incrementWatts: 35, maximumStages: 7,
+    snapshotJson: '{}', createdAt: now, updatedAt: now,
+  });
+  await db.insert(schema.testPlanSnapshots).values([
+    plan('test-a'),
+    plan('test-blocked'),
+    plan('test-running'),
+    plan('test-b', 'tenant-b'),
   ]);
 }
 
