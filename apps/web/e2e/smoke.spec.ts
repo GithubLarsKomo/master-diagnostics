@@ -106,9 +106,16 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
 
   await page.getByRole('button', { name: 'Pause' }).click();
   await expect(page.getByText('Test pausiert')).toBeVisible();
+  await expect(page.getByText(/Lokaler Timer: Gespeichert/)).toBeVisible();
   const pausedCountdown = await page.getByLabel('Countdown').textContent();
   await page.waitForTimeout(1_100);
   await expect(page.getByLabel('Countdown')).toHaveText(pausedCountdown ?? '');
+
+  await page.reload();
+  await expect(page.getByText('Test pausiert')).toBeVisible();
+  await expect(page.getByLabel('Countdown')).toHaveText(pausedCountdown ?? '');
+  await expect(page.getByText(/Lokaler Timer: Gespeichert/)).toBeVisible();
+
   await page.getByRole('button', { name: 'Fortsetzen' }).click();
   await expect(page.getByText('Test läuft')).toBeVisible();
 
