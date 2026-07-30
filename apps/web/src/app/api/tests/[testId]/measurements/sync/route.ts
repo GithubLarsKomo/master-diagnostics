@@ -40,6 +40,13 @@ export async function POST(
     authorize(context, 'test.run');
     const { testId } = await params;
     const operation = operationSchema.parse(await request.json());
+    const lockToken = request.headers.get('x-test-lock-token');
+    if (!lockToken) {
+      return NextResponse.json(
+        { error: 'Active test lock token is required' },
+        { status: 409 },
+      );
+    }
     if (operation.testId !== testId) {
       return NextResponse.json(
         { error: 'Path and operation test IDs do not match' },
@@ -51,6 +58,7 @@ export async function POST(
       context.tenantId,
       { userId: context.userId, role: context.role },
       operation as TestMeasurementSyncOperation,
+      lockToken,
     );
     return NextResponse.json(result);
   } catch (error) {
