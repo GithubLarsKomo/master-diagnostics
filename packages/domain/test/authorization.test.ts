@@ -10,7 +10,7 @@ import type { Role } from '../src/roles';
 
 const expected: Record<Role, readonly Capability[]> = {
   PLATFORM_ADMIN: ['tenant.manage', 'platform.inspect'],
-  TENANT_ADMIN: ['tenant.manage', 'athlete.manage', 'test.read.all', 'test.release'],
+  TENANT_ADMIN: ['tenant.manage', 'athlete.manage', 'test.read.all', 'test.plan', 'test.run', 'test.release'],
   TRAINER: ['athlete.read.assigned', 'test.plan', 'test.run', 'test.interpret'],
   ATHLETE: ['profile.read.self', 'profile.context.update.self', 'report.read.self'],
 };
