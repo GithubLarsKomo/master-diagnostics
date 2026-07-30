@@ -76,6 +76,8 @@ function buildTimerFromSnapshot(
     throw new Error('Immutable test plan snapshot stage count is inconsistent');
   }
 
+  const warningSeconds = parseWarningSeconds(frozen.protocolVersion.configJson);
+
   return buildTestTimerPlan({
     warmupSeconds: requireNumber(frozen.protocolVersion.warmupSeconds, 'warm-up seconds'),
     readinessSeconds: requireNumber(frozen.protocolVersion.readinessSeconds, 'readiness seconds'),
@@ -89,7 +91,7 @@ function buildTimerFromSnapshot(
     stageTargetsWatts: frozen.plan.powersWatts.map((value) => (
       requireNumber(value, 'stage target watts')
     )),
-    warningSeconds: parseWarningSeconds(frozen.protocolVersion.configJson),
+    ...(warningSeconds === undefined ? {} : { warningSeconds }),
   });
 }
 
