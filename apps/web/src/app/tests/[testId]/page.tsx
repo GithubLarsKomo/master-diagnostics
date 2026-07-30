@@ -1,6 +1,7 @@
 import {
   TEST_START_SAFETY_CHECKLIST_ITEMS,
   authorize,
+  evaluateMeasurementPlausibility,
 } from '@masters/domain';
 import {
   getTestForExecution,
@@ -74,6 +75,9 @@ export default async function TestPage({
       testId,
     )
     : null;
+  const plausibilityWarnings = reviewRows
+    ? evaluateMeasurementPlausibility(reviewRows)
+    : [];
   const safetyAction = confirmSafety.bind(null, testId);
   const startAction = startPlannedTest.bind(null, testId);
   const finishAction = finishRunningTest.bind(null, testId);
@@ -137,7 +141,13 @@ export default async function TestPage({
             <h2>Datenprüfung</h2>
             <p>Der Test wurde beendet und befindet sich jetzt in der Datenprüfung.</p>
           </section>
-          {reviewRows && <TestReviewTable testId={testId} rows={reviewRows} />}
+          {reviewRows && (
+            <TestReviewTable
+              testId={testId}
+              rows={reviewRows}
+              warnings={plausibilityWarnings}
+            />
+          )}
         </>
       )}
     </main>
