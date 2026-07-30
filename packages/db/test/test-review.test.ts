@@ -122,6 +122,8 @@ describe('post-test measurement review', () => {
         ['RECOVERY', null, null],
       ]);
     expect(rows[1]).toMatchObject({
+      plannedSeconds: 240,
+      actualSeconds: null,
       heartRate: 130,
       lactateValueX100: 180,
       qualityStatus: 'MISSING',
