@@ -16,6 +16,7 @@ import {
   finishRunningTest,
   startPlannedTest,
 } from '../actions';
+import { LiveTestMeasurements } from './live-test-measurements';
 import { LiveTestTimer } from './live-test-timer';
 
 export const dynamic = 'force-dynamic';
@@ -118,6 +119,11 @@ export default async function TestPage({
             plan={timer}
             testId={testId}
             startedAt={execution.test.startedAt}
+          />
+          <LiveTestMeasurements
+            testId={testId}
+            startedAt={execution.test.startedAt}
+            stageCount={timer.stageCount}
           />
           <section className="card critical-action" aria-label="Testabschluss">
             <h2>Test sofort abbrechen</h2>
