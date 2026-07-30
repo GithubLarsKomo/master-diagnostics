@@ -114,7 +114,11 @@ export default async function TestPage({
 
       {execution.test.status === 'IN_PROGRESS' && execution.test.startedAt && (
         <>
-          <LiveTestTimer plan={timer} startedAt={execution.test.startedAt} />
+          <LiveTestTimer
+            plan={timer}
+            testId={testId}
+            startedAt={execution.test.startedAt}
+          />
           <section className="card critical-action" aria-label="Testabschluss">
             <h2>Test sofort abbrechen</h2>
             <p>Diese Aktion bleibt während des gesamten laufenden Tests verfügbar.</p>

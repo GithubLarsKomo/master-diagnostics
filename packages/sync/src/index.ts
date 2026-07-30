@@ -13,3 +13,5 @@ export type SyncResult =
   | { status: 'APPLIED'; newVersion: number }
   | { status: 'CONFLICT'; serverVersion: number; serverState: unknown }
   | { status: 'REJECTED'; code: string };
+
+export * from './live-test-timer-state';
