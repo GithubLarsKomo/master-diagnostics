@@ -52,6 +52,7 @@
   - [x] Startübergang `PLANNED → IN_PROGRESS` mit Readiness-Gate
   - [x] Abschlussübergang `IN_PROGRESS → DATA_REVIEW` mit strukturiertem Grund
 - [ ] timergeführten Ablauf bauen
+  - [x] deterministischen, snapshotbasierten Timer-Fachkern implementieren
 - [ ] akustische und visuelle Warnungen
 - [ ] Ruhe-, Stufen- und 5-Minuten-Erholungsmessung
 - [ ] IndexedDB-Speicher mit Dexie
