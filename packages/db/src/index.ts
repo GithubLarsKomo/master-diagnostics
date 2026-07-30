@@ -9,3 +9,4 @@ export * from './services/athlete-context';
 export * from './services/consents';
 export * from './services/guardians';
 export * from './services/test-plans';
+export * from './services/test-safety';
