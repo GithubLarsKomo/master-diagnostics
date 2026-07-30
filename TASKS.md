@@ -65,6 +65,10 @@
   - [x] laufenden oder pausierten Timer aus dem lokalen Zustand wiederherstellen
   - [x] Messwertentwurf nach Neustart validiert wiederherstellen
 - [ ] idempotente Sync-API
+  - [x] Messwertoperationen mit globaler `operation_id` höchstens einmal anwenden
+  - [x] Ruhe-, Stufen- und Erholungswerte mit optimistischer Version synchronisieren
+  - [x] ausstehende Messwertoperationen nach Verbindungsfehler erneut senden
+  - [x] Serverkonflikte ohne automatisches Überschreiben lokal sichtbar halten
 - [ ] exklusive Bearbeitungssperre und Übernahme
 - [ ] nachträgliche Tabellenbearbeitung
 
