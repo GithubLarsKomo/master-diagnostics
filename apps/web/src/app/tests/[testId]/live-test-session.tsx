@@ -1,7 +1,13 @@
 'use client';
 
 import type { TestTimerPlan, TestTerminationReason } from '@masters/domain';
-import { type FormEvent, useCallback, useEffect, useState } from 'react';
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { LiveTestMeasurements } from './live-test-measurements';
 import { LiveTestTimer } from './live-test-timer';
 
@@ -46,6 +52,7 @@ export function LiveTestSession({
   const [lease, setLease] = useState<LeaseState>({ status: 'ACQUIRING' });
   const [takeoverReason, setTakeoverReason] = useState('');
   const [takingOver, setTakingOver] = useState(false);
+  const initialAcquireStarted = useRef(false);
   const storageKey = `masters:test-lock:${testId}`;
 
   const acquire = useCallback(async () => {
@@ -103,6 +110,8 @@ export function LiveTestSession({
   }, [storageKey, testId]);
 
   useEffect(() => {
+    if (initialAcquireStarted.current) return;
+    initialAcquireStarted.current = true;
     void acquire();
   }, [acquire]);
 
