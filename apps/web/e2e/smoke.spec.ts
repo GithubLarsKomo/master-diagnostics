@@ -104,6 +104,28 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
   await expect(page.getByText('Test läuft')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Warm-up' })).toBeVisible();
 
+  await page.getByLabel('Laktat (mmol/L)').fill('1,20');
+  await page.getByLabel('Herzfrequenz (1/min)').fill('52');
+  await page.getByRole('button', { name: 'Messwert lokal speichern' }).click();
+  await expect(page.getByText(/Lokale Messwerte: Gespeichert/)).toBeVisible();
+
+  await page.getByLabel('Messpunkt').selectOption('STAGE:1');
+  await page.getByLabel('Laktat (mmol/L)').fill('2,40');
+  await page.getByLabel('Qualifier').selectOption('LESS_THAN');
+  await page.getByLabel('Herzfrequenz (1/min)').fill('128');
+  await page.getByRole('button', { name: 'Messwert lokal speichern' }).click();
+  await expect(
+    page.getByRole('listitem').filter({ hasText: 'Stufe 1 · Laktat < 2,4 mmol/L · HF 128' }),
+  ).toBeVisible();
+
+  await page.getByLabel('Messpunkt').selectOption('RECOVERY');
+  await page.getByLabel('Laktat (mmol/L)').fill('');
+  await page.getByLabel('Herzfrequenz (1/min)').fill('88');
+  await page.getByRole('button', { name: 'Messwert lokal speichern' }).click();
+  await expect(
+    page.getByRole('listitem').filter({ hasText: '5-Minuten-Erholung · Laktat — · HF 88' }),
+  ).toBeVisible();
+
   await page.getByRole('button', { name: 'Pause' }).click();
   await expect(page.getByText('Test pausiert')).toBeVisible();
   await expect(page.getByText(/Lokaler Timer: Gespeichert/)).toBeVisible();
@@ -115,6 +137,16 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
   await expect(page.getByText('Test pausiert')).toBeVisible();
   await expect(page.getByLabel('Countdown')).toHaveText(pausedCountdown ?? '');
   await expect(page.getByText(/Lokaler Timer: Gespeichert/)).toBeVisible();
+  await expect(page.getByText(/Lokale Messwerte: Gespeichert/)).toBeVisible();
+  await expect(page.getByLabel('Messpunkt')).toHaveValue('REST');
+  await expect(page.getByLabel('Laktat (mmol/L)')).toHaveValue('1,2');
+  await expect(page.getByLabel('Herzfrequenz (1/min)')).toHaveValue('52');
+  await expect(
+    page.getByRole('listitem').filter({ hasText: 'Stufe 1 · Laktat < 2,4 mmol/L · HF 128' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('listitem').filter({ hasText: '5-Minuten-Erholung · Laktat — · HF 88' }),
+  ).toBeVisible();
 
   await page.getByRole('button', { name: 'Fortsetzen' }).click();
   await expect(page.getByText('Test läuft')).toBeVisible();
