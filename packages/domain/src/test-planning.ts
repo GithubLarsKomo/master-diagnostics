@@ -96,7 +96,8 @@ export function planTestFromExpectedLt2(input: Lt2TestPlanInput): Lt2TestPlan {
       message: 'The plan has more than the recommended 8 stages',
     });
   }
-  if (powersWatts[0] <= 0 || powersWatts[powersWatts.length - 1] > 2_000) {
+  const finalPowerWatts = startPowerWatts + (stageCount - 1) * incrementWatts;
+  if (startPowerWatts <= 0 || finalPowerWatts > 2_000) {
     warnings.push({
       code: 'POWER_SEQUENCE_IMPLAUSIBLE',
       severity: 'WARNING',
