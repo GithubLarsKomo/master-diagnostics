@@ -43,7 +43,7 @@
 - [x] erwartete LT2 als Planungseingabe
 - [x] Berechnung Start = 60 % LT2, LT2 in Stufe 5
 - [x] Rundung auf 5 W und Warnregeln
-- [ ] unveränderlichen Testplan-Snapshot erzeugen
+- [x] unveränderlichen Testplan-Snapshot erzeugen
 - [ ] Sicherheitscheckliste vor Start
 
 ## Epic 4 — Testdurchführung und Offline

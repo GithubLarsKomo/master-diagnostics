@@ -4,6 +4,9 @@ export const DEFAULT_STAGE_COUNT = 7;
 export type TestPlanWarningCode =
   | 'EXPECTED_LT2_ROUNDED'
   | 'EXPECTED_LT2_IMPLAUSIBLE'
+  | 'START_POWER_ROUNDED'
+  | 'INCREMENT_ROUNDED'
+  | 'LT2_TARGET_MISMATCH'
   | 'STAGE_COUNT_TOO_SHORT'
   | 'STAGE_COUNT_TOO_LONG'
   | 'POWER_SEQUENCE_IMPLAUSIBLE';
@@ -17,6 +20,8 @@ export interface TestPlanWarning {
 export interface Lt2TestPlanInput {
   expectedLt2Watts: number;
   stageCount?: number;
+  startPowerWatts?: number;
+  incrementWatts?: number;
 }
 
 export interface Lt2TestPlan {
@@ -28,6 +33,11 @@ export interface Lt2TestPlan {
   startPowerWatts: number;
   incrementWatts: number;
   powersWatts: number[];
+  trainerOverrides: {
+    stageCount: number | null;
+    startPowerWatts: number | null;
+    incrementWatts: number | null;
+  };
   warnings: TestPlanWarning[];
 }
 
@@ -36,6 +46,13 @@ export function roundWattsToFive(watts: number): number {
     throw new Error('Power must be finite');
   }
   return Math.round(watts / 5) * 5;
+}
+
+function validatePowerOverride(value: number | undefined, field: string): void {
+  if (value === undefined) return;
+  if (!Number.isFinite(value) || value < 5 || value > 2_000) {
+    throw new Error(`${field} must be between 5 and 2000 watts`);
+  }
 }
 
 export function planTestFromExpectedLt2(input: Lt2TestPlanInput): Lt2TestPlan {
@@ -48,16 +65,25 @@ export function planTestFromExpectedLt2(input: Lt2TestPlanInput): Lt2TestPlan {
   if (!Number.isInteger(stageCount) || stageCount < LT2_TARGET_STAGE || stageCount > 12) {
     throw new Error('Stage count must be an integer between 5 and 12');
   }
+  validatePowerOverride(input.startPowerWatts, 'Start power');
+  validatePowerOverride(input.incrementWatts, 'Power increment');
 
   const plannedLt2Watts = roundWattsToFive(expectedLt2Watts);
   const idealStartPowerWatts = expectedLt2Watts * 0.6;
-  const incrementWatts = Math.max(
+  const automaticIncrementWatts = Math.max(
     5,
     roundWattsToFive(
       (plannedLt2Watts - idealStartPowerWatts) / (LT2_TARGET_STAGE - 1),
     ),
   );
-  const startPowerWatts = plannedLt2Watts - incrementWatts * (LT2_TARGET_STAGE - 1);
+  const automaticStartPowerWatts = plannedLt2Watts
+    - automaticIncrementWatts * (LT2_TARGET_STAGE - 1);
+  const startPowerWatts = input.startPowerWatts === undefined
+    ? automaticStartPowerWatts
+    : roundWattsToFive(input.startPowerWatts);
+  const incrementWatts = input.incrementWatts === undefined
+    ? automaticIncrementWatts
+    : roundWattsToFive(input.incrementWatts);
   if (startPowerWatts <= 0) {
     throw new Error('Expected LT2 does not produce a positive start power');
   }
@@ -80,6 +106,28 @@ export function planTestFromExpectedLt2(input: Lt2TestPlanInput): Lt2TestPlan {
       code: 'EXPECTED_LT2_IMPLAUSIBLE',
       severity: 'WARNING',
       message: 'Expected LT2 is outside the default plausibility range of 50 to 1000 W',
+    });
+  }
+  if (input.startPowerWatts !== undefined && startPowerWatts !== input.startPowerWatts) {
+    warnings.push({
+      code: 'START_POWER_ROUNDED',
+      severity: 'INFO',
+      message: `Start power was rounded from ${input.startPowerWatts} W to ${startPowerWatts} W`,
+    });
+  }
+  if (input.incrementWatts !== undefined && incrementWatts !== input.incrementWatts) {
+    warnings.push({
+      code: 'INCREMENT_ROUNDED',
+      severity: 'INFO',
+      message: `Power increment was rounded from ${input.incrementWatts} W to ${incrementWatts} W`,
+    });
+  }
+  const stageFivePowerWatts = startPowerWatts + (LT2_TARGET_STAGE - 1) * incrementWatts;
+  if (stageFivePowerWatts !== plannedLt2Watts) {
+    warnings.push({
+      code: 'LT2_TARGET_MISMATCH',
+      severity: 'WARNING',
+      message: `Stage 5 targets ${stageFivePowerWatts} W instead of planned LT2 ${plannedLt2Watts} W`,
     });
   }
   if (stageCount < 7) {
@@ -114,6 +162,11 @@ export function planTestFromExpectedLt2(input: Lt2TestPlanInput): Lt2TestPlan {
     startPowerWatts,
     incrementWatts,
     powersWatts,
+    trainerOverrides: {
+      stageCount: input.stageCount ?? null,
+      startPowerWatts: input.startPowerWatts ?? null,
+      incrementWatts: input.incrementWatts ?? null,
+    },
     warnings,
   };
 }
