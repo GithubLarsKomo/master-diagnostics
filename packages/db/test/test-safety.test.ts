@@ -58,6 +58,11 @@ async function seedTestContext(db: Database): Promise<void> {
       createdAt: now, updatedAt: now,
     },
     {
+      id: 'test-no-plan', tenantId: 'tenant-a', athleteId: 'athlete-a', deviceType: 'BIKEERG',
+      status: 'PLANNED', conductingTrainerUserId: 'trainer-a', currentVersion: 1,
+      createdAt: now, updatedAt: now,
+    },
+    {
       id: 'test-blocked', tenantId: 'tenant-a', athleteId: 'athlete-blocked', deviceType: 'BIKEERG',
       status: 'PLANNED', conductingTrainerUserId: 'trainer-a', currentVersion: 1,
       createdAt: now, updatedAt: now,
@@ -104,6 +109,11 @@ describe('test safety start gate', () => {
     expect(await getTestStartReadiness(db, 'tenant-a', 'test-a')).toEqual({
       ready: false,
       blockers: ['SAFETY_CHECKLIST_NOT_CONFIRMED'],
+      confirmation: null,
+    });
+    expect(await getTestStartReadiness(db, 'tenant-a', 'test-no-plan')).toEqual({
+      ready: false,
+      blockers: ['TEST_PLAN_NOT_FOUND', 'SAFETY_CHECKLIST_NOT_CONFIRMED'],
       confirmation: null,
     });
 
@@ -153,6 +163,9 @@ describe('test safety start gate', () => {
     await expect(confirmTestSafetyChecklist(
       db, 'tenant-a', trainer, 'test-b', completeChecklist,
     )).rejects.toThrow('Planned test not found');
+    await expect(confirmTestSafetyChecklist(
+      db, 'tenant-a', trainer, 'test-no-plan', completeChecklist,
+    )).rejects.toThrow('test plan snapshot is required');
     await expect(confirmTestSafetyChecklist(
       db, 'tenant-a', trainer, 'test-blocked', completeChecklist,
     )).rejects.toThrow('blocked from diagnostic use');
