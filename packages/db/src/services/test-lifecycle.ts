@@ -1,6 +1,8 @@
 import {
   canTransition,
   TEST_START_SAFETY_CHECKLIST_VERSION,
+  validateTestTerminationDetails,
+  type TestTerminationReason,
 } from '@masters/domain';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../client';
@@ -10,6 +12,7 @@ import {
   coachAthleteAssignments,
   testPlanSnapshots,
   testSafetyChecklistConfirmations,
+  testTerminationEvents,
   tests,
 } from '../schema';
 
@@ -18,9 +21,20 @@ export interface TestLifecycleActor {
   role: string;
 }
 
+export interface FinishTestInput {
+  reason: TestTerminationReason;
+  notes?: string | null;
+}
+
 function requireStartRole(actor: TestLifecycleActor): void {
   if (actor.role !== 'TRAINER' && actor.role !== 'TENANT_ADMIN') {
     throw new Error('Only trainers and tenant admins may start tests');
+  }
+}
+
+function requireFinishRole(actor: TestLifecycleActor): void {
+  if (actor.role !== 'TRAINER' && actor.role !== 'TENANT_ADMIN') {
+    throw new Error('Only trainers and tenant admins may finish tests');
   }
 }
 
@@ -149,5 +163,98 @@ export async function startTest(
     });
 
     return started;
+  });
+}
+
+export async function finishTest(
+  db: Database,
+  tenantId: string,
+  actor: TestLifecycleActor,
+  testId: string,
+  input: FinishTestInput,
+) {
+  requireFinishRole(actor);
+  const details = validateTestTerminationDetails(input);
+
+  return db.transaction(async (tx) => {
+    const [runningTest] = await tx
+      .select()
+      .from(tests)
+      .where(and(eq(tests.id, testId), eq(tests.tenantId, tenantId)))
+      .limit(1);
+    if (!runningTest) {
+      throw new Error('Running test not found');
+    }
+    if (!canTransition(runningTest.status, 'DATA_REVIEW')) {
+      throw new Error(`Test cannot finish from status ${runningTest.status}`);
+    }
+    if (runningTest.conductingTrainerUserId !== actor.userId) {
+      throw new Error('Only the conducting trainer may finish the test');
+    }
+
+    const now = new Date().toISOString();
+    const [finished] = await tx
+      .update(tests)
+      .set({
+        status: 'DATA_REVIEW',
+        endedAt: now,
+        currentVersion: runningTest.currentVersion + 1,
+        updatedAt: now,
+      })
+      .where(and(
+        eq(tests.id, testId),
+        eq(tests.tenantId, tenantId),
+        eq(tests.status, 'IN_PROGRESS'),
+        eq(tests.currentVersion, runningTest.currentVersion),
+      ))
+      .returning();
+    if (!finished) {
+      throw new Error('Test changed concurrently and was not finished');
+    }
+
+    const [terminationEvent] = await tx.insert(testTerminationEvents).values({
+      id: crypto.randomUUID(),
+      tenantId,
+      testId,
+      reason: details.reason,
+      notes: details.notes,
+      endedByUserId: actor.userId,
+      endedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    }).returning();
+    if (!terminationEvent) {
+      throw new Error('Test termination event was not recorded');
+    }
+
+    await tx.insert(auditEvents).values({
+      id: crypto.randomUUID(),
+      tenantId,
+      occurredAt: now,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'test.finished',
+      entityType: 'test',
+      entityId: testId,
+      source: 'WEB',
+      reason: details.reason,
+      correlationId: crypto.randomUUID(),
+      beforeJson: JSON.stringify({
+        status: runningTest.status,
+        version: runningTest.currentVersion,
+      }),
+      afterJson: JSON.stringify({
+        status: finished.status,
+        version: finished.currentVersion,
+        endedAt: finished.endedAt,
+        reason: details.reason,
+        notes: details.notes,
+        terminationEventId: terminationEvent.id,
+      }),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return finished;
   });
 }
