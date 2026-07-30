@@ -6,7 +6,9 @@ import {
   listAthleteSnapshots,
   listCoachAssignments,
   listConsents,
+  listDeletionRequests,
   listGuardians,
+  previewAthleteDeletion,
 } from '@masters/db';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -15,6 +17,7 @@ import { getTenantContext } from '@/lib/tenant-context';
 import { editAthlete } from '../actions';
 import { addCoachAssignment, captureAthleteSnapshot } from './context-actions';
 import { addConsent, withdrawAthleteConsent } from './consent-actions';
+import { completeDeletionRequest, decideDeletionRequest, submitDeletionRequest } from './deletion-actions';
 import { addGuardian, removeGuardian } from './guardian-actions';
 
 export const dynamic = 'force-dynamic';
@@ -26,21 +29,25 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
   const athlete = await getAthlete(db, context.tenantId, athleteId);
   if (!athlete) notFound();
 
-  const [trainers, assignments, snapshots, consentRows, guardians] = await Promise.all([
+  const [trainers, assignments, snapshots, consentRows, guardians, deletionRequests, deletionPreview] = await Promise.all([
     listActiveTrainers(db, context.tenantId),
     listCoachAssignments(db, context.tenantId, athlete.id),
     listAthleteSnapshots(db, context.tenantId, athlete.id),
     listConsents(db, context.tenantId, athlete.id),
     listGuardians(db, context.tenantId, athlete.id),
+    listDeletionRequests(db, context.tenantId, athlete.id),
+    previewAthleteDeletion(db, context.tenantId, athlete.id),
   ]);
   const editAction = editAthlete.bind(null, athlete.id);
   const assignmentAction = addCoachAssignment.bind(null, athlete.id);
   const snapshotAction = captureAthleteSnapshot.bind(null, athlete.id);
   const consentAction = addConsent.bind(null, athlete.id);
   const guardianAction = addGuardian.bind(null, athlete.id);
+  const deletionAction = submitDeletionRequest.bind(null, athlete.id);
   const blocked = Boolean(athlete.consentBlockedAt);
   const minor = athleteIsMinor(athlete.birthDate);
   const activeGuardian = guardians.some((guardian) => !guardian.revokedAt && (!guardian.validUntil || guardian.validUntil >= new Date().toISOString().slice(0, 10)));
+  const openDeletionRequest = deletionRequests.find((request) => request.status === 'REQUESTED');
 
   return (
     <main>
@@ -49,7 +56,7 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
         <Link href="/athletes">Zur Athletenliste</Link>
       </header>
 
-      {blocked && <section className="card" role="alert"><h2>Nutzung gesperrt</h2><p>Die Einwilligung wurde widerrufen. Neue Tests dürfen erst nach erneuter Erteilung gestartet werden.</p></section>}
+      {blocked && <section className="card" role="alert"><h2>Nutzung gesperrt</h2><p>Für diesen Athleten besteht eine Einwilligungs- oder Löschsperre. Neue Tests dürfen nicht gestartet werden.</p></section>}
       {minor && !activeGuardian && <section className="card" role="alert"><h2>Guardian erforderlich</h2><p>Für diesen minderjährigen Athleten ist noch keine aktive gesetzliche Vertretung dokumentiert. Ein Teststart muss blockiert bleiben.</p></section>}
 
       <section className="card">
@@ -81,24 +88,13 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
         </form>
         {guardians.length === 0 ? <p>Noch keine gesetzliche Vertretung dokumentiert.</p> : <ul>{guardians.map((guardian) => {
           const revokeAction = removeGuardian.bind(null, athlete.id);
-          return <li key={guardian.id}>
-            <strong>{guardian.fullName}</strong> · {guardian.relationship} · {guardian.revokedAt ? 'widerrufen' : 'aktiv'}
-            {!guardian.revokedAt && <form action={revokeAction} className="setup-form">
-              <input type="hidden" name="guardianId" value={guardian.id} />
-              <label>Grund der Aufhebung<input name="reason" required minLength={3} /></label>
-              <button type="submit">Vertretung aufheben</button>
-            </form>}
-          </li>;
+          return <li key={guardian.id}><strong>{guardian.fullName}</strong> · {guardian.relationship} · {guardian.revokedAt ? 'widerrufen' : 'aktiv'}{!guardian.revokedAt && <form action={revokeAction} className="setup-form"><input type="hidden" name="guardianId" value={guardian.id} /><label>Grund der Aufhebung<input name="reason" required minLength={3} /></label><button type="submit">Vertretung aufheben</button></form>}</li>;
         })}</ul>}
       </section>
 
       <section className="card">
         <h2>Einwilligungen</h2>
-        <form action={consentAction} className="setup-form">
-          <label>Einwilligungstyp<input name="consentType" required defaultValue="DIAGNOSTIC_TESTING" /></label>
-          <label>Dokumentversion<input name="documentVersion" required placeholder="v1.0" /></label>
-          <button type="submit">Einwilligung erteilen</button>
-        </form>
+        <form action={consentAction} className="setup-form"><label>Einwilligungstyp<input name="consentType" required defaultValue="DIAGNOSTIC_TESTING" /></label><label>Dokumentversion<input name="documentVersion" required placeholder="v1.0" /></label><button type="submit">Einwilligung erteilen</button></form>
         {consentRows.length === 0 ? <p>Noch keine Einwilligung dokumentiert.</p> : <ul>{consentRows.map((consent) => {
           const withdrawAction = withdrawAthleteConsent.bind(null, athlete.id);
           return <li key={consent.id}><strong>{consent.consentType}</strong> · {consent.documentVersion} · {consent.status}{consent.status === 'GRANTED' && <form action={withdrawAction} className="setup-form"><input type="hidden" name="consentId" value={consent.id} /><label>Widerrufsgrund<input name="reason" required minLength={3} /></label><button type="submit">Einwilligung widerrufen</button></form>}</li>;
@@ -115,6 +111,20 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
         <h2>Athleten-Snapshots</h2><p>Snapshots sind unveränderliche, versionierte Abbilder der aktuellen Stammdaten.</p>
         <form action={snapshotAction}><button type="submit">Snapshot erzeugen</button></form>
         {snapshots.length === 0 ? <p>Noch kein Snapshot vorhanden.</p> : <ol>{snapshots.map((snapshot) => <li key={snapshot.id}>Version {snapshot.version} · {new Date(snapshot.createdAt).toLocaleString('de-DE')}</li>)}</ol>}
+      </section>
+
+      <section className="card">
+        <h2>Löschantrag</h2>
+        <p>Vorschau: {deletionPreview.relatedRecords.snapshots} Snapshots, {deletionPreview.relatedRecords.coachAssignments} Trainerzuordnungen, {deletionPreview.relatedRecords.consents} Einwilligungen und {deletionPreview.relatedRecords.guardians} Guardian-Einträge. Auditdaten bleiben erhalten.</p>
+        {!openDeletionRequest && !deletionRequests.some((request) => request.status === 'APPROVED') && <form action={deletionAction} className="setup-form"><label>Begründung<input name="reason" required minLength={3} /></label><button type="submit">Löschantrag stellen und Nutzung sperren</button></form>}
+        {deletionRequests.length === 0 ? <p>Noch kein Löschantrag vorhanden.</p> : <ol>{deletionRequests.map((request) => {
+          const decisionAction = decideDeletionRequest.bind(null, athlete.id);
+          const completionAction = completeDeletionRequest.bind(null, athlete.id);
+          return <li key={request.id}><strong>{request.status}</strong> · {new Date(request.requestedAt).toLocaleString('de-DE')} · {request.reason}
+            {request.status === 'REQUESTED' && <form action={decisionAction} className="setup-form"><input type="hidden" name="requestId" value={request.id} /><label>Entscheidung<select name="decision" defaultValue="APPROVED"><option value="APPROVED">Genehmigen</option><option value="REJECTED">Ablehnen</option></select></label><label>Entscheidungsgrund<input name="reason" required minLength={3} /></label><button type="submit">Entscheidung dokumentieren</button></form>}
+            {request.status === 'APPROVED' && <form action={completionAction} className="setup-form"><input type="hidden" name="requestId" value={request.id} /><label>Abschlussvermerk<input name="reason" required minLength={3} /></label><button type="submit">Soft-Delete abschließen</button></form>}
+          </li>;
+        })}</ol>}
       </section>
     </main>
   );
