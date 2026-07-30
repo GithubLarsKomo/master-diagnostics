@@ -70,15 +70,15 @@
   - [x] ausstehende Messwertoperationen nach Verbindungsfehler erneut senden
   - [x] Serverkonflikte ohne automatisches Überschreiben lokal sichtbar halten
 - [x] exklusive Bearbeitungssperre und Übernahme
-- [ ] nachträgliche Tabellenbearbeitung
+- [x] nachträgliche Tabellenbearbeitung
 
 ## Epic 5 — Qualitätsmodell
 
-- [ ] Status `VALID`, `PARTIAL`, `EXCLUDED`, `MISSING`, `MANUALLY_CORRECTED`
+- [x] Status `VALID`, `PARTIAL`, `EXCLUDED`, `MISSING`, `MANUALLY_CORRECTED`
 - [ ] Teilstufenregel ab mindestens 50 %
 - [ ] automatische Plausibilitätswarnungen
-- [ ] Messwertkorrektur mit Pflichtvermerk
-- [ ] Ausschluss/Wiedereinschluss mit Grund
+- [x] Messwertkorrektur mit Pflichtvermerk
+- [x] Ausschluss/Wiedereinschluss mit Grund
 - [ ] Laktat-Qualifier `EXACT`, `LESS_THAN`, `GREATER_THAN`
 
 ## Epic 6 — Diagnostischer Fachkern
