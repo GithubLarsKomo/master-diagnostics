@@ -43,6 +43,13 @@
       "when": 1785394800000,
       "tag": "0005_test_termination_events",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1785414000000,
+      "tag": "0006_measurement_sync",
+      "breakpoints": true
     }
   ]
 }

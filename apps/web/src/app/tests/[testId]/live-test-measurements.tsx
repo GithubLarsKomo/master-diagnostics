@@ -13,8 +13,14 @@ import {
   loadLiveTestMeasurementsState,
   saveLiveTestMeasurementsState,
 } from '@/lib/live-test-measurements-storage';
+import {
+  enqueueLiveTestMeasurementSync,
+  synchronizePendingLiveTestMeasurements,
+  type LiveTestMeasurementSyncStatus,
+} from '@/lib/live-test-measurement-sync';
 
 type PersistenceStatus = 'LOADING' | 'SAVING' | 'SAVED' | 'ERROR';
+type SyncStatus = 'LOADING' | 'SYNCING' | 'SYNCED' | 'PENDING' | 'CONFLICT';
 
 const qualifierLabels: Record<LactateQualifier, string> = {
   EXACT: 'Exakt',
@@ -75,6 +81,10 @@ export function LiveTestMeasurements({
   const [heartRate, setHeartRate] = useState('');
   const [measuredAt, setMeasuredAt] = useState('');
   const [status, setStatus] = useState<PersistenceStatus>('LOADING');
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('LOADING');
+  const [conflict, setConflict] = useState<
+    Extract<LiveTestMeasurementSyncStatus, { status: 'CONFLICT' }> | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
 
   const targets = useMemo<LiveTestMeasurementTarget[]>(
@@ -112,6 +122,10 @@ export function LiveTestMeasurements({
         if (disposed) return;
         setState(next);
         setStatus('SAVED');
+        const syncResult = await synchronizePendingLiveTestMeasurements(testId);
+        if (disposed) return;
+        setSyncStatus(syncResult.status);
+        setConflict(syncResult.status === 'CONFLICT' ? syncResult : null);
       } catch {
         if (disposed) return;
         setState(createLiveTestMeasurementsState(
@@ -121,6 +135,7 @@ export function LiveTestMeasurements({
           timestamp,
         ));
         setStatus('ERROR');
+        setSyncStatus('PENDING');
         setError('Der lokale Messwertspeicher ist nicht verfügbar.');
       }
     }
@@ -172,6 +187,20 @@ export function LiveTestMeasurements({
       setError(null);
       await saveLiveTestMeasurementsState(next);
       setStatus('SAVED');
+      try {
+        await enqueueLiveTestMeasurementSync(testId, next.measurements[selectedKey]!);
+        setSyncStatus('SYNCING');
+        const syncResult = await synchronizePendingLiveTestMeasurements(testId);
+        setSyncStatus(syncResult.status);
+        setConflict(syncResult.status === 'CONFLICT' ? syncResult : null);
+      } catch (syncError) {
+        setSyncStatus('PENDING');
+        setError(
+          syncError instanceof Error
+            ? `Lokal gespeichert; Server-Sync ausstehend: ${syncError.message}`
+            : 'Lokal gespeichert; Server-Sync ausstehend.',
+        );
+      }
     } catch (caught) {
       setStatus('ERROR');
       setError(caught instanceof Error ? caught.message : 'Messwert konnte nicht gespeichert werden.');
@@ -198,7 +227,7 @@ export function LiveTestMeasurements({
           <select
             value={selectedKey}
             onChange={(event) => setSelectedKey(event.target.value)}
-            disabled={!state || status === 'SAVING'}
+            disabled={!state || status === 'SAVING' || syncStatus === 'SYNCING'}
           >
             {targets.map((target) => {
               const key = liveTestMeasurementKey(target);
@@ -212,14 +241,19 @@ export function LiveTestMeasurements({
             onChange={(event) => setLactate(event.target.value)}
             inputMode="decimal"
             placeholder="z. B. 1,20"
-            disabled={!state || status === 'SAVING'}
+            disabled={!state || status === 'SAVING' || syncStatus === 'SYNCING'}
           />
         </label>
         <label>Qualifier
           <select
             value={qualifier}
             onChange={(event) => setQualifier(event.target.value as LactateQualifier)}
-            disabled={!state || status === 'SAVING' || !lactate.trim()}
+            disabled={
+              !state
+              || status === 'SAVING'
+              || syncStatus === 'SYNCING'
+              || !lactate.trim()
+            }
           >
             {Object.entries(qualifierLabels).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
@@ -232,7 +266,7 @@ export function LiveTestMeasurements({
             onChange={(event) => setHeartRate(event.target.value)}
             inputMode="numeric"
             placeholder="z. B. 128"
-            disabled={!state || status === 'SAVING'}
+            disabled={!state || status === 'SAVING' || syncStatus === 'SYNCING'}
           />
         </label>
         <label>Tatsächlicher Messzeitpunkt
@@ -241,10 +275,18 @@ export function LiveTestMeasurements({
             value={measuredAt}
             onChange={(event) => setMeasuredAt(event.target.value)}
             required
-            disabled={!state || status === 'SAVING'}
+            disabled={!state || status === 'SAVING' || syncStatus === 'SYNCING'}
           />
         </label>
-        <button type="submit" disabled={!state || status === 'SAVING'}>
+        <button
+          type="submit"
+          disabled={
+            !state
+            || status === 'SAVING'
+            || syncStatus === 'SYNCING'
+            || syncStatus === 'CONFLICT'
+          }
+        >
           Messwert lokal speichern
         </button>
       </form>
@@ -260,7 +302,37 @@ export function LiveTestMeasurements({
                 : 'Fehler'
         }
       </p>
+      <p className="connection-state" role="status">
+        Server-Sync: {
+          syncStatus === 'LOADING'
+            ? 'Wird geprüft'
+            : syncStatus === 'SYNCING'
+              ? 'Wird synchronisiert'
+              : syncStatus === 'SYNCED'
+                ? 'Synchronisiert'
+                : syncStatus === 'PENDING'
+                  ? 'Ausstehend'
+                  : 'Konflikt'
+        }
+      </p>
       {error && <p className="timer-alert" role="alert">{error}</p>}
+      {syncStatus === 'PENDING' && status !== 'ERROR' && (
+        <p className="sample-window">
+          Die lokalen Werte bleiben erhalten und werden beim nächsten Öffnen erneut gesendet.
+        </p>
+      )}
+      {conflict && (
+        <div className="timer-alert" role="alert">
+          <p>
+            Der lokale Wert wurde nicht überschrieben. Auf dem Server liegt Version
+            {' '}{conflict.serverVersion}.
+          </p>
+          <details>
+            <summary>Serverstand anzeigen</summary>
+            <pre>{JSON.stringify(conflict.serverState, null, 2)}</pre>
+          </details>
+        </div>
+      )}
 
       {savedMeasurements.length > 0 && (
         <ul className="measurement-summary" aria-label="Gespeicherte Messwerte">

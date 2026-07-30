@@ -3,9 +3,11 @@ import { id, tenantId, timestamps } from './common';
 
 export const syncOperations = sqliteTable('sync_operations', {
   id: id(), tenantId: tenantId(), operationId: text('operation_id').notNull(), testId: text('test_id').notNull(),
+  entityId: text('entity_id').notNull(), expectedVersion: integer('expected_version').notNull(),
+  occurredAt: text('occurred_at').notNull(),
   operationType: text('operation_type').notNull(), schemaVersion: text('schema_version').notNull(), payloadJson: text('payload_json').notNull(),
   status: text('status', { enum: ['APPLIED','CONFLICT','REJECTED'] }).notNull(), resultJson: text('result_json'), appliedAt: text('applied_at'), ...timestamps,
-}, (t) => [uniqueIndex('sync_operation_uq').on(t.tenantId, t.operationId)]);
+}, (t) => [uniqueIndex('sync_operation_uq').on(t.operationId)]);
 
 export const auditEvents = sqliteTable('audit_events', {
   id: id(), tenantId: tenantId(), occurredAt: text('occurred_at').notNull(), actorUserId: text('actor_user_id'), actorRole: text('actor_role'),

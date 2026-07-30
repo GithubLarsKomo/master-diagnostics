@@ -1,6 +1,7 @@
 'use client';
 
 import type {
+  LiveTestMeasurementSyncOperation,
   LiveTestMeasurementsState,
   LiveTestTimerState,
 } from '@masters/sync';
@@ -9,6 +10,7 @@ import Dexie, { type Table } from 'dexie';
 class MastersDiagnosticsBrowserDatabase extends Dexie {
   liveTestTimers!: Table<LiveTestTimerState, string>;
   liveTestMeasurements!: Table<LiveTestMeasurementsState, string>;
+  liveTestMeasurementSyncOperations!: Table<LiveTestMeasurementSyncOperation, string>;
 
   constructor() {
     super('masters-diagnostics');
@@ -18,6 +20,12 @@ class MastersDiagnosticsBrowserDatabase extends Dexie {
     this.version(2).stores({
       liveTestTimers: 'testId, updatedAtMs',
       liveTestMeasurements: 'testId, updatedAtMs',
+    });
+    this.version(3).stores({
+      liveTestTimers: 'testId, updatedAtMs',
+      liveTestMeasurements: 'testId, updatedAtMs',
+      liveTestMeasurementSyncOperations:
+        'operationId, testId, entityKey, status, updatedAtMs',
     });
   }
 }
