@@ -52,6 +52,7 @@ export function LiveTestSession({
   const [lease, setLease] = useState<LeaseState>({ status: 'ACQUIRING' });
   const [takeoverReason, setTakeoverReason] = useState('');
   const [takingOver, setTakingOver] = useState(false);
+  const [activeElapsedSeconds, setActiveElapsedSeconds] = useState(0);
   const initialAcquireStarted = useRef(false);
   const storageKey = `masters:test-lock:${testId}`;
 
@@ -239,7 +240,12 @@ export function LiveTestSession({
           Bearbeitung freigeben
         </button>
       </section>
-      <LiveTestTimer plan={plan} testId={testId} startedAt={startedAt} />
+      <LiveTestTimer
+        plan={plan}
+        testId={testId}
+        startedAt={startedAt}
+        onActiveElapsedSecondsChange={setActiveElapsedSeconds}
+      />
       <LiveTestMeasurements
         testId={testId}
         startedAt={startedAt}
@@ -251,6 +257,11 @@ export function LiveTestSession({
         <p>Diese Aktion bleibt während des gesamten laufenden Tests verfügbar.</p>
         <form action={finishAction} className="setup-form">
           <input type="hidden" name="lockToken" value={lease.token} />
+          <input
+            type="hidden"
+            name="activeElapsedSeconds"
+            value={activeElapsedSeconds}
+          />
           <label>Abschluss- oder Abbruchgrund
             <select name="reason" required defaultValue="">
               <option value="" disabled>Grund auswählen</option>
