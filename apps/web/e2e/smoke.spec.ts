@@ -191,6 +191,35 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
   await page.getByLabel('Vermerk').fill('E2E Testabbruch');
   await page.getByRole('button', { name: 'Test sofort abbrechen' }).click();
   await expect(page.getByRole('heading', { name: 'Datenprüfung' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Messwerte prüfen und korrigieren' }),
+  ).toBeVisible();
+
+  await page.getByLabel('Laktat Stufe 1').fill('2,50');
+  await page.getByLabel('Korrekturgrund Stufe 1')
+    .fill('Kontrollmessung aus Papierprotokoll');
+  const stageCorrection = page.waitForResponse(
+    (response) => response.url().includes('/review/measurements')
+      && response.request().method() === 'POST',
+  );
+  await page.getByRole('button', { name: 'Stufe 1 speichern' }).click();
+  expect((await stageCorrection).ok()).toBe(true);
+  await expect(page.getByLabel('Qualität Stufe 1'))
+    .toHaveValue('MANUALLY_CORRECTED');
+  await expect(page.getByText('Gespeichert · Version 2')).toBeVisible();
+
+  await page.getByLabel('Qualität Stufe 1').selectOption('EXCLUDED');
+  await page.getByLabel('Korrekturgrund Stufe 1')
+    .fill('Probe für Auswertung ausgeschlossen');
+  await page.getByRole('button', { name: 'Stufe 1 speichern' }).click();
+  await expect(page.getByLabel('Qualität Stufe 1')).toHaveValue('EXCLUDED');
+  await expect(page.getByText('Gespeichert · Version 3')).toBeVisible();
+
+  await page.getByLabel('Laktat Ruhewert').fill('1,30');
+  await page.getByLabel('Korrekturgrund Ruhewert')
+    .fill('Übertragungsfehler im Ruhewert korrigiert');
+  await page.getByRole('button', { name: 'Ruhewert speichern' }).click();
+  await expect(page.getByText('Gespeichert · Version 2')).toBeVisible();
 
   await page.goto('/setup');
   await expectTenantAdminHome(page);
