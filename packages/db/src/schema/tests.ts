@@ -48,20 +48,25 @@ export const testStages = sqliteTable('test_stages', {
   meanWatts: integer('mean_watts'), endWatts: integer('end_watts'), meanHeartRate: integer('mean_heart_rate'), endHeartRate: integer('end_heart_rate'),
   meanCadence: integer('mean_cadence'), endCadence: integer('end_cadence'), distanceMeters: integer('distance_meters'),
   lactateValueX100: integer('lactate_value_x100'), lactateQualifier: text('lactate_qualifier', { enum: ['EXACT','LESS_THAN','GREATER_THAN'] }),
+  lactateMeasuredAt: text('lactate_measured_at'),
   rpeX10: integer('rpe_x10'), qualityStatus: text('quality_status', { enum: ['VALID','PARTIAL','EXCLUDED','MISSING','MANUALLY_CORRECTED'] }).notNull().default('MISSING'),
   dataSource: text('data_source', { enum: ['MANUAL','BLUETOOTH','SYSTEM_DERIVED'] }).notNull().default('MANUAL'), notes: text('notes'), currentVersion: version(), ...timestamps,
 }, (t) => [uniqueIndex('test_stage_number_uq').on(t.tenantId, t.testId, t.stageNumber)]);
 
 export const restMeasurements = sqliteTable('rest_measurements', {
   id: id(), tenantId: tenantId(), testId: text('test_id').notNull().references(() => tests.id),
-  heartRate: integer('heart_rate'), lactateValueX100: integer('lactate_value_x100'), lactateQualifier: text('lactate_qualifier'), measuredAt: text('measured_at'), ...timestamps,
-});
+  heartRate: integer('heart_rate'), lactateValueX100: integer('lactate_value_x100'),
+  lactateQualifier: text('lactate_qualifier', { enum: ['EXACT','LESS_THAN','GREATER_THAN'] }),
+  measuredAt: text('measured_at'), currentVersion: version(), ...timestamps,
+}, (t) => [uniqueIndex('rest_measurement_test_uq').on(t.tenantId, t.testId)]);
 
 export const recoveryMeasurements = sqliteTable('recovery_measurements', {
   id: id(), tenantId: tenantId(), testId: text('test_id').notNull().references(() => tests.id),
   targetOffsetSeconds: integer('target_offset_seconds').notNull().default(300), actualOffsetSeconds: integer('actual_offset_seconds'),
-  heartRate: integer('heart_rate'), lactateValueX100: integer('lactate_value_x100'), lactateQualifier: text('lactate_qualifier'), measuredAt: text('measured_at'), ...timestamps,
-});
+  heartRate: integer('heart_rate'), lactateValueX100: integer('lactate_value_x100'),
+  lactateQualifier: text('lactate_qualifier', { enum: ['EXACT','LESS_THAN','GREATER_THAN'] }),
+  measuredAt: text('measured_at'), currentVersion: version(), ...timestamps,
+}, (t) => [uniqueIndex('recovery_measurement_test_uq').on(t.tenantId, t.testId)]);
 
 export const testLocks = sqliteTable('test_locks', {
   id: id(), tenantId: tenantId(), testId: text('test_id').notNull().references(() => tests.id),
