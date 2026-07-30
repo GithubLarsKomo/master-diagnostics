@@ -30,6 +30,12 @@ function lactateText(value: number | null): string {
     : (value / 100).toFixed(2).replace('.', ',');
 }
 
+function durationText(seconds: number | null): string {
+  if (seconds === null) return '—';
+  const minutes = Math.floor(seconds / 60);
+  return `${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
 function parseLactate(value: string): number | null {
   if (!value.trim()) return null;
   const parsed = Number(value.trim().replace(',', '.'));
@@ -157,6 +163,11 @@ function ReviewRowEditor({
       <div role="cell">
         <strong>{label}</strong>
         <small>{row.targetWatts === null ? '—' : `${row.targetWatts} W`}</small>
+        {row.kind === 'STAGE' && (
+          <small>
+            Dauer {durationText(row.actualSeconds)} / {durationText(row.plannedSeconds)}
+          </small>
+        )}
       </div>
       <label role="cell">Laktat
         <input

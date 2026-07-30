@@ -59,7 +59,7 @@ function parseWarningSeconds(configJson: unknown): readonly number[] | undefined
   return config.audioWarningSeconds as number[];
 }
 
-function buildTimerFromSnapshot(
+export function buildTimerFromSnapshot(
   snapshotJson: string,
   expectedStageCount: number,
 ): TestTimerPlan {

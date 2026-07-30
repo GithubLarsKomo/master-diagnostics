@@ -75,7 +75,7 @@
 ## Epic 5 — Qualitätsmodell
 
 - [x] Status `VALID`, `PARTIAL`, `EXCLUDED`, `MISSING`, `MANUALLY_CORRECTED`
-- [ ] Teilstufenregel ab mindestens 50 %
+- [x] Teilstufenregel ab mindestens 50 %
 - [ ] automatische Plausibilitätswarnungen
 - [x] Messwertkorrektur mit Pflichtvermerk
 - [x] Ausschluss/Wiedereinschluss mit Grund

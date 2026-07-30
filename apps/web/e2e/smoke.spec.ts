@@ -194,6 +194,10 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
   await expect(
     page.getByRole('heading', { name: 'Messwerte prüfen und korrigieren' }),
   ).toBeVisible();
+  await expect(
+    page.getByRole('row').filter({ hasText: 'Stufe 1' })
+      .getByText('Dauer — / 04:00'),
+  ).toBeVisible();
 
   await page.getByLabel('Laktat Stufe 1').fill('2,50');
   await page.getByLabel('Korrekturgrund Stufe 1')
