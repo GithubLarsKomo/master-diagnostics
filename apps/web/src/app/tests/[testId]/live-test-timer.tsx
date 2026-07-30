@@ -4,7 +4,17 @@ import {
   getTestTimerPosition,
   type TestTimerPlan,
 } from '@masters/domain';
-import { useEffect, useMemo, useState } from 'react';
+import {
+  createLiveTestTimerState,
+  pauseLiveTestTimerState,
+  resumeLiveTestTimerState,
+  type LiveTestTimerState,
+} from '@masters/sync';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  loadLiveTestTimerState,
+  saveLiveTestTimerState,
+} from '@/lib/live-test-timer-storage';
 
 const phaseLabels = {
   WARMUP: 'Warm-up',
@@ -22,48 +32,102 @@ function formatDuration(seconds: number): string {
 
 export function LiveTestTimer({
   plan,
+  testId,
   startedAt,
 }: {
   plan: TestTimerPlan;
+  testId: string;
   startedAt: string;
 }) {
   const [now, setNow] = useState(0);
-  const [pausedAt, setPausedAt] = useState<number | null>(null);
-  const [accumulatedPauseMs, setAccumulatedPauseMs] = useState(0);
+  const [timerState, setTimerState] = useState<LiveTestTimerState | null>(null);
+  const [persistenceStatus, setPersistenceStatus] = useState<
+    'LOADING' | 'SAVING' | 'SAVED' | 'ERROR'
+  >('LOADING');
+  const writeQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const writeRevision = useRef(0);
 
   useEffect(() => {
-    setNow(Date.now());
-    if (pausedAt !== null) return;
+    let disposed = false;
+    async function hydrate() {
+      const timestamp = Date.now();
+      try {
+        const restored = await loadLiveTestTimerState(testId, startedAt);
+        const state = restored ?? createLiveTestTimerState(testId, startedAt, timestamp);
+        if (!restored) await saveLiveTestTimerState(state);
+        if (disposed) return;
+        setTimerState(state);
+        setPersistenceStatus('SAVED');
+      } catch {
+        if (disposed) return;
+        setTimerState(createLiveTestTimerState(testId, startedAt, timestamp));
+        setPersistenceStatus('ERROR');
+      }
+      if (!disposed) setNow(timestamp);
+    }
+    void hydrate();
+    return () => {
+      disposed = true;
+    };
+  }, [startedAt, testId]);
+
+  useEffect(() => {
+    if (!timerState || timerState.pausedAtMs !== null) return;
     const interval = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(interval);
-  }, [pausedAt]);
+  }, [timerState]);
 
   const activeElapsedSeconds = useMemo(() => {
-    if (now === 0) return 0;
-    const effectiveNow = pausedAt ?? now;
+    if (now === 0 || !timerState) return 0;
+    const effectiveNow = timerState.pausedAtMs ?? now;
     return Math.max(
       0,
-      (effectiveNow - Date.parse(startedAt) - accumulatedPauseMs) / 1000,
+      (
+        effectiveNow
+        - Date.parse(startedAt)
+        - timerState.accumulatedPauseMs
+      ) / 1000,
     );
-  }, [accumulatedPauseMs, now, pausedAt]);
+  }, [now, startedAt, timerState]);
   const position = getTestTimerPosition(plan, activeElapsedSeconds);
   const warning = (
     position.phase?.kind === 'STAGE'
     && position.phaseRemainingSeconds <= 30
   );
+  const isPaused = timerState?.pausedAtMs != null;
+
+  function persist(state: LiveTestTimerState) {
+    const revision = ++writeRevision.current;
+    setPersistenceStatus('SAVING');
+    writeQueue.current = writeQueue.current
+      .catch(() => undefined)
+      .then(() => saveLiveTestTimerState(state));
+    void writeQueue.current.then(
+      () => {
+        if (revision === writeRevision.current) setPersistenceStatus('SAVED');
+      },
+      () => {
+        if (revision === writeRevision.current) setPersistenceStatus('ERROR');
+      },
+    );
+  }
 
   function pause() {
+    if (!timerState) return;
     const timestamp = Date.now();
+    const state = pauseLiveTestTimerState(timerState, timestamp);
     setNow(timestamp);
-    setPausedAt(timestamp);
+    setTimerState(state);
+    persist(state);
   }
 
   function resume() {
-    if (pausedAt === null) return;
+    if (!timerState || timerState.pausedAtMs === null) return;
     const timestamp = Date.now();
-    setAccumulatedPauseMs((value) => value + timestamp - pausedAt);
-    setPausedAt(null);
+    const state = resumeLiveTestTimerState(timerState, timestamp);
+    setTimerState(state);
     setNow(timestamp);
+    persist(state);
   }
 
   if (position.completed) {
@@ -81,15 +145,17 @@ export function LiveTestTimer({
     <section className={`live-test card${warning ? ' timer-warning' : ''}`} aria-live="polite">
       <div className="live-test-heading">
         <div>
-          <p className="eyebrow">{pausedAt === null ? 'Test läuft' : 'Test pausiert'}</p>
+          <p className="eyebrow">
+            {isPaused ? 'Test pausiert' : 'Test läuft'}
+          </p>
           <h2>{phaseLabels[phase.kind]}{phase.stageNumber ? ` ${phase.stageNumber}` : ''}</h2>
         </div>
         <button
           type="button"
-          disabled={now === 0}
-          onClick={pausedAt === null ? pause : resume}
+          disabled={!timerState}
+          onClick={isPaused ? resume : pause}
         >
-          {pausedAt === null ? 'Pause' : 'Fortsetzen'}
+          {isPaused ? 'Fortsetzen' : 'Pause'}
         </button>
       </div>
 
@@ -114,7 +180,22 @@ export function LiveTestTimer({
           Stufenende in {Math.ceil(position.phaseRemainingSeconds)} Sekunden
         </p>
       )}
-      <p className="connection-state">Verbindung: Online · Synchronisation: Serverstand</p>
+      <p className="connection-state">
+        Verbindung: Online · Lokaler Timer: {
+          persistenceStatus === 'LOADING'
+            ? 'Wird geladen'
+            : persistenceStatus === 'SAVING'
+              ? 'Wird gespeichert'
+              : persistenceStatus === 'SAVED'
+                ? 'Gespeichert'
+                : 'Fehler'
+        }
+      </p>
+      {persistenceStatus === 'ERROR' && (
+        <p className="timer-alert" role="alert">
+          Der lokale Timerzustand konnte nicht gespeichert werden.
+        </p>
+      )}
     </section>
   );
 }
