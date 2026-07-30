@@ -14,6 +14,10 @@ async function createTestDatabase(): Promise<Database> {
   const client = createClient({ url: `file:${databasePath}` });
   await client.batch([
     `CREATE TABLE tests (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, athlete_id TEXT NOT NULL, device_type TEXT NOT NULL, status TEXT NOT NULL, conducting_trainer_user_id TEXT NOT NULL, scheduled_at TEXT, started_at TEXT, ended_at TEXT, version INTEGER NOT NULL, released_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE test_plan_snapshots (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, test_id TEXT NOT NULL, protocol_version_id TEXT NOT NULL, athlete_snapshot_id TEXT NOT NULL, expected_lt2_watts INTEGER NOT NULL, start_watts INTEGER NOT NULL, increment_watts INTEGER NOT NULL, maximum_stages INTEGER NOT NULL, snapshot_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE UNIQUE INDEX test_plan_snapshot_test_uq ON test_plan_snapshots (tenant_id, test_id)`,
+    `CREATE TABLE test_stages (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, test_id TEXT NOT NULL, stage_number INTEGER NOT NULL, target_watts INTEGER NOT NULL, planned_seconds INTEGER NOT NULL, actual_seconds INTEGER, mean_watts INTEGER, end_watts INTEGER, mean_heart_rate INTEGER, end_heart_rate INTEGER, mean_cadence INTEGER, end_cadence INTEGER, distance_meters INTEGER, lactate_value_x100 INTEGER, lactate_qualifier TEXT, lactate_measured_at TEXT, rpe_x10 INTEGER, quality_status TEXT DEFAULT 'MISSING' NOT NULL, data_source TEXT DEFAULT 'MANUAL' NOT NULL, notes TEXT, version INTEGER DEFAULT 1 NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE UNIQUE INDEX test_stage_number_uq ON test_stages (tenant_id, test_id, stage_number)`,
     `CREATE TABLE test_termination_events (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, test_id TEXT NOT NULL, reason TEXT NOT NULL, notes TEXT, ended_by_user_id TEXT NOT NULL, ended_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
     `CREATE UNIQUE INDEX test_termination_event_test_uq ON test_termination_events (tenant_id, test_id)`,
     `CREATE TRIGGER test_termination_events_immutable_update BEFORE UPDATE ON test_termination_events BEGIN SELECT RAISE(ABORT, 'test termination events are immutable'); END`,
@@ -63,6 +67,48 @@ async function seedTests(db: Database): Promise<void> {
       createdAt: now, updatedAt: now,
     },
   ]);
+  const snapshotJson = JSON.stringify({
+    schemaVersion: 1,
+    protocolVersion: {
+      warmupSeconds: 60,
+      readinessSeconds: 30,
+      stageSeconds: 240,
+      pauseSeconds: 60,
+      sampleTargetSeconds: 30,
+      recoverySeconds: 300,
+      partialInclusionPercent: 50,
+      configJson: JSON.stringify({ audioWarningSeconds: [30, 10, 3] }),
+    },
+    plan: { powersWatts: [180] },
+  });
+  await db.insert(schema.testPlanSnapshots).values([
+    {
+      id: 'plan-running', tenantId: 'tenant-a', testId: 'test-running',
+      protocolVersionId: 'protocol-a', athleteSnapshotId: 'athlete-snapshot-a',
+      expectedLt2Watts: 300, startWatts: 180, incrementWatts: 30,
+      maximumStages: 1, snapshotJson, createdAt: now, updatedAt: now,
+    },
+    {
+      id: 'plan-running-other', tenantId: 'tenant-a', testId: 'test-running-other',
+      protocolVersionId: 'protocol-a', athleteSnapshotId: 'athlete-snapshot-b',
+      expectedLt2Watts: 300, startWatts: 180, incrementWatts: 30,
+      maximumStages: 1, snapshotJson, createdAt: now, updatedAt: now,
+    },
+  ]);
+  await db.insert(schema.testStages).values([
+    {
+      id: 'stage-running', tenantId: 'tenant-a', testId: 'test-running',
+      stageNumber: 1, targetWatts: 180, plannedSeconds: 240,
+      endHeartRate: 145, lactateValueX100: 240, lactateQualifier: 'EXACT',
+      qualityStatus: 'MISSING', currentVersion: 1, createdAt: now, updatedAt: now,
+    },
+    {
+      id: 'stage-running-other', tenantId: 'tenant-a', testId: 'test-running-other',
+      stageNumber: 1, targetWatts: 180, plannedSeconds: 240,
+      endHeartRate: 150, lactateValueX100: 260, lactateQualifier: 'EXACT',
+      qualityStatus: 'MISSING', currentVersion: 1, createdAt: now, updatedAt: now,
+    },
+  ]);
 }
 
 const trainer = { userId: 'trainer-a', role: 'TRAINER' };
@@ -79,6 +125,7 @@ describe('test lifecycle finish transition', () => {
     const finished = await finishTest(db, 'tenant-a', trainer, 'test-running', {
       reason: 'REGULAR_EXHAUSTION',
       lockToken,
+      activeElapsedSeconds: 0,
     });
 
     expect(finished).toMatchObject({
@@ -105,6 +152,7 @@ describe('test lifecycle finish transition', () => {
     await expect(finishTest(db, 'tenant-a', trainer, 'test-running', {
       reason: 'VOLUNTARY_STOP',
       lockToken,
+      activeElapsedSeconds: 0,
     })).rejects.toThrow('cannot finish from status DATA_REVIEW');
     expect(await db.select().from(schema.testTerminationEvents)).toHaveLength(1);
     expect(await db.select().from(schema.auditEvents)).toHaveLength(1);
@@ -114,6 +162,7 @@ describe('test lifecycle finish transition', () => {
     await finishTest(db, 'tenant-a', trainer, 'test-running-other', {
       reason: 'OTHER', notes: '  Athlete requested a protocol-specific stop  ',
       lockToken,
+      activeElapsedSeconds: 0,
     });
 
     const [termination] = await db
@@ -129,39 +178,92 @@ describe('test lifecycle finish transition', () => {
     const finished = await finishTest(db, 'tenant-a', trainer, 'test-running', {
       reason: 'PAIN_OR_DISCOMFORT', notes: 'Chest discomfort reported',
       lockToken,
+      activeElapsedSeconds: 0,
     });
 
     expect(finished.status).toBe('DATA_REVIEW');
+  });
+
+  it('classifies shortened stages at the immutable 50-percent boundary', async () => {
+    await finishTest(db, 'tenant-a', trainer, 'test-running', {
+      reason: 'REGULAR_EXHAUSTION',
+      lockToken,
+      activeElapsedSeconds: 210,
+    });
+    await finishTest(db, 'tenant-a', trainer, 'test-running-other', {
+      reason: 'VOLUNTARY_STOP',
+      lockToken,
+      activeElapsedSeconds: 209,
+    });
+
+    const stages = await db.select().from(schema.testStages);
+    expect(stages.find((stage) => stage.testId === 'test-running')).toMatchObject({
+      actualSeconds: 120,
+      qualityStatus: 'PARTIAL',
+      currentVersion: 2,
+    });
+    expect(stages.find((stage) => stage.testId === 'test-running-other')).toMatchObject({
+      actualSeconds: 119,
+      qualityStatus: 'EXCLUDED',
+      currentVersion: 2,
+    });
+
+    const audits = await db.select().from(schema.auditEvents);
+    expect(JSON.parse(audits.find(
+      (audit) => audit.entityId === 'test-running',
+    )!.afterJson!)).toMatchObject({
+      activeElapsedSeconds: 210,
+      partialInclusionPercent: 50,
+      stageClassifications: [{
+        stageNumber: 1,
+        beforeActualSeconds: null,
+        afterActualSeconds: 120,
+        beforeQualityStatus: 'MISSING',
+        afterQualityStatus: 'PARTIAL',
+      }],
+    });
   });
 
   it('rejects invalid actors, tenants, states and details without partial writes', async () => {
     await expect(finishTest(db, 'tenant-a', { userId: 'athlete-a', role: 'ATHLETE' }, 'test-running', {
       reason: 'VOLUNTARY_STOP',
       lockToken,
+      activeElapsedSeconds: 0,
     })).rejects.toThrow('Only trainers and tenant admins');
     await expect(finishTest(db, 'tenant-a', { userId: 'trainer-other', role: 'TRAINER' }, 'test-running', {
       reason: 'VOLUNTARY_STOP',
       lockToken,
+      activeElapsedSeconds: 0,
     })).rejects.toThrow('Only the conducting trainer');
     await expect(finishTest(db, 'tenant-a', trainer, 'test-b', {
       reason: 'TECHNICAL_FAILURE',
       lockToken,
+      activeElapsedSeconds: 0,
     })).rejects.toThrow('Running test not found');
     await expect(finishTest(db, 'tenant-a', trainer, 'test-planned', {
       reason: 'PROTOCOL_ERROR',
       lockToken,
+      activeElapsedSeconds: 0,
     })).rejects.toThrow('cannot finish from status PLANNED');
     await expect(finishTest(db, 'tenant-a', trainer, 'test-running', {
       reason: 'OTHER', notes: '  ',
       lockToken,
+      activeElapsedSeconds: 0,
     })).rejects.toThrow('notes are required for OTHER');
     await expect(finishTest(db, 'tenant-a', trainer, 'test-running', {
       reason: 'UNKNOWN' as 'OTHER',
       lockToken,
+      activeElapsedSeconds: 0,
     })).rejects.toThrow('Invalid test termination reason');
     await expect(finishTest(db, 'tenant-a', trainer, 'test-running', {
       reason: 'VOLUNTARY_STOP',
+      lockToken,
+      activeElapsedSeconds: 999_999_999,
+    })).rejects.toThrow('exceed the elapsed wall time');
+    await expect(finishTest(db, 'tenant-a', trainer, 'test-running', {
+      reason: 'VOLUNTARY_STOP',
       lockToken: '22222222-2222-4222-8222-222222222222',
+      activeElapsedSeconds: 0,
     })).rejects.toThrow('active test lock');
 
     expect(await db.select().from(schema.testTerminationEvents)).toHaveLength(0);
@@ -175,6 +277,7 @@ describe('test lifecycle finish transition', () => {
     await finishTest(db, 'tenant-a', trainer, 'test-running', {
       reason: 'TECHNICAL_FAILURE', notes: 'Sensor disconnected',
       lockToken,
+      activeElapsedSeconds: 0,
     });
     const [event] = await db.select().from(schema.testTerminationEvents);
 
