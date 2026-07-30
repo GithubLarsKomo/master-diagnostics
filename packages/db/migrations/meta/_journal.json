@@ -50,6 +50,13 @@
       "when": 1785414000000,
       "tag": "0006_measurement_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1785417600000,
+      "tag": "0007_athlete_deletion_requests",
+      "breakpoints": true
     }
   ]
 }
