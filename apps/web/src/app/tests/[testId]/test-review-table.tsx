@@ -79,11 +79,22 @@ function ReviewRowEditor({
   const [qualityStatus, setQualityStatus] = useState(
     initialRow.qualityStatus ?? 'MISSING',
   );
+  const [qualityTouched, setQualityTouched] = useState(false);
   const [notes, setNotes] = useState(initialRow.notes ?? '');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [conflict, setConflict] = useState<TestReviewRow | null>(null);
+
+  function markMeasurementEdit() {
+    if (
+      row.kind === 'STAGE'
+      && !qualityTouched
+      && qualityStatus === 'MISSING'
+    ) {
+      setQualityStatus('MANUALLY_CORRECTED');
+    }
+  }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -130,6 +141,7 @@ function ReviewRowEditor({
       setHeartRate(result.row.heartRate?.toString() ?? '');
       setMeasuredAt(toLocalDateTime(result.row.measuredAt));
       setQualityStatus(result.row.qualityStatus ?? 'MISSING');
+      setQualityTouched(false);
       setNotes(result.row.notes ?? '');
       setReason('');
       setMessage(`Gespeichert · Version ${result.row.version}`);
@@ -150,7 +162,10 @@ function ReviewRowEditor({
         <input
           aria-label={`Laktat ${label}`}
           value={lactate}
-          onChange={(event) => setLactate(event.target.value)}
+          onChange={(event) => {
+            markMeasurementEdit();
+            setLactate(event.target.value);
+          }}
           inputMode="decimal"
         />
       </label>
@@ -158,7 +173,10 @@ function ReviewRowEditor({
         <select
           aria-label={`Qualifier ${label}`}
           value={qualifier}
-          onChange={(event) => setQualifier(event.target.value as typeof qualifier)}
+          onChange={(event) => {
+            markMeasurementEdit();
+            setQualifier(event.target.value as typeof qualifier);
+          }}
           disabled={!lactate.trim()}
         >
           <option value="EXACT">Exakt</option>
@@ -170,7 +188,10 @@ function ReviewRowEditor({
         <input
           aria-label={`Herzfrequenz ${label}`}
           value={heartRate}
-          onChange={(event) => setHeartRate(event.target.value)}
+          onChange={(event) => {
+            markMeasurementEdit();
+            setHeartRate(event.target.value);
+          }}
           inputMode="numeric"
         />
       </label>
@@ -179,7 +200,10 @@ function ReviewRowEditor({
           aria-label={`Messzeitpunkt ${label}`}
           type="datetime-local"
           value={measuredAt}
-          onChange={(event) => setMeasuredAt(event.target.value)}
+          onChange={(event) => {
+            markMeasurementEdit();
+            setMeasuredAt(event.target.value);
+          }}
         />
       </label>
       <label role="cell">Qualität
@@ -187,9 +211,10 @@ function ReviewRowEditor({
           <select
             aria-label={`Qualität ${label}`}
             value={qualityStatus}
-            onChange={(event) => setQualityStatus(
-              event.target.value as typeof qualityStatus,
-            )}
+            onChange={(event) => {
+              setQualityTouched(true);
+              setQualityStatus(event.target.value as typeof qualityStatus);
+            }}
           >
             {Object.entries(qualityLabels).map(([value, text]) => (
               <option key={value} value={value}>{text}</option>
