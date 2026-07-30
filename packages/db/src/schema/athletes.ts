@@ -51,3 +51,16 @@ export const athleteGuardians = sqliteTable('athlete_guardians', {
   revokedAt: text('revoked_at'),
   ...timestamps,
 }, (t) => [uniqueIndex('guardian_active_identity_uq').on(t.tenantId, t.athleteId, t.fullName, t.authorityConfirmedAt)]);
+
+export const athleteDeletionRequests = sqliteTable('athlete_deletion_requests', {
+  id: id(),
+  tenantId: tenantId(),
+  athleteId: text('athlete_id').notNull().references(() => athletes.id),
+  status: text('status', { enum: ['REQUESTED', 'APPROVED', 'REJECTED', 'COMPLETED'] }).notNull(),
+  reason: text('reason').notNull(),
+  requestedAt: text('requested_at').notNull(),
+  decidedAt: text('decided_at'),
+  decisionReason: text('decision_reason'),
+  completedAt: text('completed_at'),
+  ...timestamps,
+}, (t) => [uniqueIndex('athlete_deletion_request_version_uq').on(t.tenantId, t.athleteId, t.requestedAt)]);
