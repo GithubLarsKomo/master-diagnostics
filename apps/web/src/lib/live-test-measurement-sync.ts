@@ -79,6 +79,7 @@ function requestBody(operation: LiveTestMeasurementSyncOperation) {
 
 export async function synchronizePendingLiveTestMeasurements(
   testId: string,
+  lockToken: string,
 ): Promise<LiveTestMeasurementSyncStatus> {
   const table = getBrowserDatabase().liveTestMeasurementSyncOperations;
   const operations = await table.where('testId').equals(testId).toArray();
@@ -102,7 +103,10 @@ export async function synchronizePendingLiveTestMeasurements(
         `/api/tests/${encodeURIComponent(testId)}/measurements/sync`,
         {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: {
+            'content-type': 'application/json',
+            'x-test-lock-token': lockToken,
+          },
           body: JSON.stringify(requestBody(operation)),
         },
       );
