@@ -40,6 +40,7 @@ const terminationReasons = [
 const finishSchema = z.object({
   reason: z.enum(terminationReasons),
   notes: z.string().max(2000).optional(),
+  lockToken: z.string().min(32).max(256),
 });
 
 function actor(context: Awaited<ReturnType<typeof getTenantContext>>) {
@@ -91,6 +92,7 @@ export async function finishRunningTest(testId: string, formData: FormData) {
   const input = finishSchema.parse(Object.fromEntries(formData));
   await finishTest(db, context.tenantId, actor(context), testId, {
     reason: input.reason as TestTerminationReason,
+    lockToken: input.lockToken,
     ...(input.notes?.trim() ? { notes: input.notes.trim() } : {}),
   });
   revalidatePath('/tests');
