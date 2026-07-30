@@ -142,7 +142,7 @@ export async function createTestPlanSnapshot(
       createdAt: now,
       updatedAt: now,
     };
-    const test = {
+    const test: typeof tests.$inferInsert = {
       id: testId,
       tenantId,
       athleteId: input.athleteId,
