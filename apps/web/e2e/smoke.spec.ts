@@ -84,6 +84,7 @@ test('bootstraps a club and manages minor athlete consent and guardians', async 
   await page.goto('/');
   await page.getByRole('link', { name: 'Tests öffnen' }).click();
   const adultOption = page.locator('select[name="athleteId"] option').filter({ hasText: 'Max Test' });
+  await expect(adultOption).toHaveCount(1);
   const adultId = await adultOption.getAttribute('value');
   expect(adultId).not.toBeNull();
   await page.getByLabel('Athlet', { exact: true }).selectOption(adultId!);
