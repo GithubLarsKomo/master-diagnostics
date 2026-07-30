@@ -170,7 +170,9 @@ describe('immutable test plan snapshots', () => {
       maximumStages: 8,
     });
 
-    const frozen = JSON.parse(created.planSnapshot.snapshotJson) as Record<string, any>;
+    const frozen = JSON.parse(created.planSnapshot.snapshotJson) as {
+      plan: { warnings: Array<{ code: string }> };
+    };
     expect(frozen).toMatchObject({
       schemaVersion: 1,
       athlete: { id: 'athlete-a', currentWeightKgX100: 6850 },
@@ -187,7 +189,7 @@ describe('immutable test plan snapshots', () => {
         },
       },
     });
-    expect(frozen.plan.warnings.map((warning: { code: string }) => warning.code)).toEqual([
+    expect(frozen.plan.warnings.map((warning) => warning.code)).toEqual([
       'START_POWER_ROUNDED',
       'INCREMENT_ROUNDED',
       'LT2_TARGET_MISMATCH',
