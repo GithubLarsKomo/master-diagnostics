@@ -1,7 +1,16 @@
 'use client';
 
 import type { TestReviewRow } from '@masters/db';
-import { type FormEvent, useState } from 'react';
+import {
+  evaluateReviewPlausibility,
+  type ReviewPlausibilityWarningCode,
+  type ReviewPlausibilityStage,
+} from '@masters/domain';
+import {
+  type FormEvent,
+  useMemo,
+  useState,
+} from 'react';
 
 const qualityLabels = {
   VALID: 'Gültig',
@@ -10,6 +19,17 @@ const qualityLabels = {
   MISSING: 'Fehlend',
   MANUALLY_CORRECTED: 'Manuell korrigiert',
 } as const;
+
+const warningLabels: Record<ReviewPlausibilityWarningCode, string> = {
+  LACTATE_DECREASE: 'Laktatabfall',
+  IDENTICAL_LACTATE_SERIES: 'Identische Laktatwerte',
+  INTERNAL_MISSING_LACTATE: 'Interner Laktatwert fehlt',
+  HEART_RATE_DECREASE: 'Herzfrequenzabfall',
+  REST_ABOVE_FIRST_STAGE: 'Ruhewert auffällig',
+  SHORTENED_STAGE: 'Verkürzte Stufe',
+  QUALIFIED_LACTATE: 'Qualifizierter Laktatwert',
+  LIMITED_EXACT_DATA_BASIS: 'Eingeschränkte Datenbasis',
+};
 
 function rowLabel(row: TestReviewRow): string {
   if (row.kind === 'REST') return 'Ruhewert';
@@ -66,9 +86,11 @@ function summary(row: TestReviewRow): string {
 function ReviewRowEditor({
   testId,
   initialRow,
+  onApplied,
 }: {
   testId: string;
   initialRow: TestReviewRow;
+  onApplied: (row: TestReviewRow) => void;
 }) {
   const label = rowLabel(initialRow);
   const [row, setRow] = useState(initialRow);
@@ -151,6 +173,7 @@ function ReviewRowEditor({
       setNotes(result.row.notes ?? '');
       setReason('');
       setMessage(`Gespeichert · Version ${result.row.version}`);
+      onApplied(result.row);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Korrektur fehlgeschlagen.');
     } finally {
@@ -278,6 +301,46 @@ export function TestReviewTable({
   testId: string;
   rows: TestReviewRow[];
 }) {
+  const [currentRows, setCurrentRows] = useState(rows);
+  const warnings = useMemo(() => {
+    const rest = currentRows.find((row) => row.kind === 'REST');
+    const stages = currentRows.filter((row): row is TestReviewRow & {
+      stageNumber: number;
+      targetWatts: number;
+      plannedSeconds: number;
+      qualityStatus: NonNullable<TestReviewRow['qualityStatus']>;
+    } => (
+      row.kind === 'STAGE'
+      && row.stageNumber !== null
+      && row.targetWatts !== null
+      && row.plannedSeconds !== null
+      && row.qualityStatus !== null
+    )).map((row): ReviewPlausibilityStage => ({
+      stageNumber: row.stageNumber,
+      targetWatts: row.targetWatts,
+      plannedSeconds: row.plannedSeconds,
+      actualSeconds: row.actualSeconds,
+      heartRate: row.heartRate,
+      lactateValueX100: row.lactateValueX100,
+      lactateQualifier: row.lactateQualifier,
+      qualityStatus: row.qualityStatus,
+    }));
+    return evaluateReviewPlausibility({
+      restLactateValueX100: rest?.lactateValueX100 ?? null,
+      restLactateQualifier: rest?.lactateQualifier ?? null,
+      stages,
+    });
+  }, [currentRows]);
+
+  function updateRow(updated: TestReviewRow) {
+    setCurrentRows((current) => current.map((row) => (
+      row.kind === updated.kind
+      && row.stageNumber === updated.stageNumber
+        ? updated
+        : row
+    )));
+  }
+
   return (
     <section className="card" aria-labelledby="review-heading">
       <p className="eyebrow">Versionierte Nachbearbeitung</p>
@@ -286,6 +349,25 @@ export function TestReviewTable({
         Jede Speicherung benötigt eine Begründung. Parallele Änderungen werden
         als Konflikt angezeigt und niemals überschrieben.
       </p>
+      <aside className="review-warnings" aria-labelledby="review-warnings-heading">
+        <h3 id="review-warnings-heading">Automatische Plausibilitätswarnungen</h3>
+        {warnings.length === 0 ? (
+          <p>Keine deterministischen Auffälligkeiten in den aktuell prüfbaren Daten.</p>
+        ) : (
+          <ul>
+            {warnings.map((warning, index) => (
+              <li key={`${warning.code}:${warning.stageNumbers.join('-')}:${index}`}>
+                <strong>{warningLabels[warning.code]}</strong>: {warning.message}
+              </li>
+            ))}
+          </ul>
+        )}
+        <small>
+          Hinweise verändern keine Messwerte. Große Laktatsprünge sowie
+          schwellen- und modellabhängige Prüfungen folgen erst mit
+          konfigurierten Fachgrenzen und Interpretationsergebnissen.
+        </small>
+      </aside>
       <div className="review-table" role="table" aria-label="Messwerttabelle">
         <div className="review-header" role="row">
           <strong role="columnheader">Messpunkt</strong>
@@ -298,11 +380,12 @@ export function TestReviewTable({
           <strong role="columnheader">Grund</strong>
           <strong role="columnheader">Aktion</strong>
         </div>
-        {rows.map((row) => (
+        {currentRows.map((row) => (
           <ReviewRowEditor
             key={`${row.kind}:${row.stageNumber ?? ''}`}
             testId={testId}
             initialRow={row}
+            onApplied={updateRow}
           />
         ))}
       </div>
