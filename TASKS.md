@@ -40,9 +40,9 @@
 
 - [x] drei Werksvorlagen seed-en
 - [x] versionierte Tenant-Vorlagen
-- [ ] erwartete LT2 als Planungseingabe
-- [ ] Berechnung Start = 60 % LT2, LT2 in Stufe 5
-- [ ] Rundung auf 5 W und Warnregeln
+- [x] erwartete LT2 als Planungseingabe
+- [x] Berechnung Start = 60 % LT2, LT2 in Stufe 5
+- [x] Rundung auf 5 W und Warnregeln
 - [ ] unveränderlichen Testplan-Snapshot erzeugen
 - [ ] Sicherheitscheckliste vor Start
 
