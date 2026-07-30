@@ -33,6 +33,29 @@ describe('LT2 test planning', () => {
     expect(roundWattsToFive(332.5)).toBe(335);
   });
 
+  it('preserves trainer overrides and warns when they move LT2 away from stage 5', () => {
+    const plan = planTestFromExpectedLt2({
+      expectedLt2Watts: 350,
+      stageCount: 8,
+      startPowerWatts: 207,
+      incrementWatts: 33,
+    });
+
+    expect(plan.startPowerWatts).toBe(205);
+    expect(plan.incrementWatts).toBe(35);
+    expect(plan.powersWatts[4]).toBe(345);
+    expect(plan.trainerOverrides).toEqual({
+      stageCount: 8,
+      startPowerWatts: 207,
+      incrementWatts: 33,
+    });
+    expect(plan.warnings.map((warning) => warning.code)).toEqual([
+      'START_POWER_ROUNDED',
+      'INCREMENT_ROUNDED',
+      'LT2_TARGET_MISMATCH',
+    ]);
+  });
+
   it.each([
     { stageCount: 6, warning: 'STAGE_COUNT_TOO_SHORT' },
     { stageCount: 9, warning: 'STAGE_COUNT_TOO_LONG' },
