@@ -19,6 +19,7 @@ export default async function HomePage() {
       </header>
       <section className="grid" aria-label="Arbeitsbereiche">
         <article className="card"><h2>Athleten</h2><p>Tenant-gebundene Stammdaten anlegen und verwalten.</p><Link href="/athletes">Athleten öffnen</Link></article>
+        <article className="card"><h2>Tests</h2><p>Stufentests planen, vorbereiten und live durchführen.</p><Link href="/tests">Tests öffnen</Link></article>
         <article className="card"><h2>Tenant-Kontext</h2><p>Anfragen werden serverseitig dem aktiven Tenant und Benutzer zugeordnet.</p></article>
         <article className="card"><h2>Rollenmodell</h2><p>Berechtigungen und Tenant-Isolation werden gemeinsam geprüft.</p></article>
       </section>
