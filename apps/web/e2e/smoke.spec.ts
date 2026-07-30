@@ -87,8 +87,8 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
   await expect(adultOption).toHaveCount(1);
   const adultId = await adultOption.getAttribute('value');
   expect(adultId).not.toBeNull();
-  await page.getByLabel('Athlet', { exact: true }).selectOption(adultId!);
-  await page.getByLabel('Protokoll', { exact: true }).selectOption({ index: 1 });
+  await page.locator('select[name="athleteId"]').selectOption(adultId!);
+  await page.locator('select[name="protocolVersionId"]').selectOption({ index: 1 });
   await page.getByLabel('Erwartete LT2 (W)', { exact: true }).fill('350');
   await page.getByLabel('Stufenzahl', { exact: true }).fill('7');
   await page.getByRole('button', { name: 'Testplan erstellen' }).click();
@@ -112,7 +112,7 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
   await page.getByRole('button', { name: 'Fortsetzen' }).click();
   await expect(page.getByText('Test läuft')).toBeVisible();
 
-  await page.getByLabel('Abschluss- oder Abbruchgrund').selectOption('TECHNICAL_FAILURE');
+  await page.locator('select[name="reason"]').selectOption('TECHNICAL_FAILURE');
   await page.getByLabel('Vermerk').fill('E2E Testabbruch');
   await page.getByRole('button', { name: 'Test sofort abbrechen' }).click();
   await expect(page.getByRole('heading', { name: 'Datenprüfung' })).toBeVisible();
