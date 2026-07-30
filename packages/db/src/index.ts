@@ -13,3 +13,4 @@ export * from './services/test-safety';
 export * from './services/test-lifecycle';
 export * from './services/test-timer';
 export * from './services/test-workflow';
+export * from './services/test-measurement-sync';
