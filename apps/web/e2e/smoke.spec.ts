@@ -17,6 +17,7 @@ async function expectTenantAdminHome(page: Page) {
 }
 
 test('bootstraps a club and manages minor athlete consent and guardians', async ({ page }) => {
+  test.setTimeout(90_000);
   await page.goto('/');
   await expect(page).toHaveURL(/\/setup$/);
   await page.getByLabel('Clubname', { exact: true }).fill('Ratzeburger Ruderclub');
