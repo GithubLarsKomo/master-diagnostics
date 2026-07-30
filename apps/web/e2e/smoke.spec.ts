@@ -16,7 +16,7 @@ async function expectTenantAdminHome(page: Page) {
   await expect(page.getByRole('heading', { name: 'Tenant-Kontext' })).toBeVisible();
 }
 
-test('bootstraps a club and manages minor athlete consent and guardians', async ({ page }) => {
+test('bootstraps a club and completes the first live test workflow', async ({ page }) => {
   await page.goto('/');
   await expect(page).toHaveURL(/\/setup$/);
   await page.getByLabel('Clubname', { exact: true }).fill('Ratzeburger Ruderclub');
