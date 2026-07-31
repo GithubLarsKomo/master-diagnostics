@@ -43,8 +43,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
-      - name: Verify independent Python diagnostic reference
-        run: python3 packages/diagnostics/reference/verify_cubic_dmax_reference.py
+      - name: Verify independent Python diagnostic references
+        run: |
+          python3 packages/diagnostics/reference/verify_cubic_dmax_reference.py
+          python3 packages/diagnostics/reference/verify_asymmetric_dmax_reference.py
       - run: pnpm test
       - run: pnpm build
       - run: pnpm --filter @masters/web exec playwright install --with-deps chromium
