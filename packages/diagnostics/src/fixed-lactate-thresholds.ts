@@ -52,22 +52,30 @@ function estimateAt(
     };
   }
 
-  const brackets: Array<[DiagnosticPoint, DiagnosticPoint]> = [];
+  const crossings: Array<[DiagnosticPoint, DiagnosticPoint]> = [];
   for (let index = 1; index < points.length; index += 1) {
     const left = points[index - 1]!;
     const right = points[index]!;
-    if (left.lactate < targetLactate && right.lactate > targetLactate) {
-      brackets.push([left, right]);
+    const crossesTarget = (
+      (left.lactate < targetLactate && right.lactate > targetLactate)
+      || (left.lactate > targetLactate && right.lactate < targetLactate)
+    );
+    if (crossesTarget) {
+      crossings.push([left, right]);
     }
   }
-  if (brackets.length === 0) {
+  if (crossings.length === 0) {
     throw new Error(`No included exact points bracket ${targetLactate} mmol/L.`);
   }
-  if (brackets.length > 1) {
+  if (crossings.length > 1) {
     throw new Error(`Multiple intervals bracket ${targetLactate} mmol/L.`);
   }
 
-  const [left, right] = brackets[0]!;
+  const [left, right] = crossings[0]!;
+  if (left.lactate > right.lactate) {
+    throw new Error(`The only interval crossing ${targetLactate} mmol/L is descending.`);
+  }
+
   const watts = interpolateX(
     left.watts,
     left.lactate,
