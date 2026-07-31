@@ -49,7 +49,8 @@ function usablePoints(points: readonly DiagnosticPoint[]): DiagnosticPoint[] {
 
 function findStartPoint(points: readonly DiagnosticPoint[]): DiagnosticPoint {
   for (let index = 1; index < points.length; index += 1) {
-    if (points[index]!.lactate - points[index - 1]!.lactate > RISE_THRESHOLD) {
+    const rise = points[index]!.lactate - points[index - 1]!.lactate;
+    if (rise > RISE_THRESHOLD + EPSILON) {
       return points[index - 1]!;
     }
   }
