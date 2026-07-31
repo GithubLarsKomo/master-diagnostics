@@ -76,14 +76,14 @@
 
 - [x] Status `VALID`, `PARTIAL`, `EXCLUDED`, `MISSING`, `MANUALLY_CORRECTED`
 - [x] Teilstufenregel ab mindestens 50 %
-- [ ] automatische Plausibilitätswarnungen
+- [x] automatische Plausibilitätswarnungen
 - [x] Messwertkorrektur mit Pflichtvermerk
 - [x] Ausschluss/Wiedereinschluss mit Grund
-- [ ] Laktat-Qualifier `EXACT`, `LESS_THAN`, `GREATER_THAN`
+- [x] Laktat-Qualifier `EXACT`, `LESS_THAN`, `GREATER_THAN`
 
 ## Epic 6 — Diagnostischer Fachkern
 
-- [ ] lineare Interpolation implementieren
+- [x] lineare Interpolation implementieren
 - [ ] fixe 2-/4-mmol-Methode
 - [ ] Basis +1 mmol/l
 - [ ] kubische Regression
