@@ -35,7 +35,7 @@ export interface VerifiedStoredDiagnosticResult<Result> {
 }
 
 function verifiedStoredResult<Result>(
-  stored: StoredDiagnosticResultSnapshot<Result>,
+  stored: StoredDiagnosticResultSnapshot<unknown>,
   result: DeepReadonly<Result>,
 ): VerifiedStoredDiagnosticResult<Result> {
   return Object.freeze({
@@ -59,7 +59,7 @@ export function createDiagnosticResultService(repository: DiagnosticResultSnapsh
       const snapshot = await createDiagnosticResultSnapshot(result);
       const stored = await repository.append(tenantId, testId, snapshot);
       const verified = await verifyDiagnosticResultSnapshot<Result>(stored);
-      return verifiedStoredResult(stored, verified);
+      return verifiedStoredResult<Result>(stored, verified);
     },
 
     async load<Result>(
@@ -70,7 +70,7 @@ export function createDiagnosticResultService(repository: DiagnosticResultSnapsh
       const stored = await repository.get<Result>(tenantId, testId, versionNumber);
       if (!stored) return null;
       const verified = await verifyDiagnosticResultSnapshot<Result>(stored);
-      return verifiedStoredResult(stored, verified);
+      return verifiedStoredResult<Result>(stored, verified);
     },
   };
 }
