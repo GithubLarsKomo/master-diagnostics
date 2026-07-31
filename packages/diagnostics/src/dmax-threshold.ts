@@ -14,8 +14,7 @@ export interface DmaxThresholdResult {
 
 const ALGORITHM = 'dmax-cubic';
 const VERSION = '1.0.0';
-const ITERATIONS = 120;
-const GOLDEN_RATIO_CONJUGATE = (Math.sqrt(5) - 1) / 2;
+const EPSILON = 1e-12;
 
 function usablePoints(points: readonly DiagnosticPoint[]): DiagnosticPoint[] {
   const usable = points
@@ -26,6 +25,18 @@ function usablePoints(points: readonly DiagnosticPoint[]): DiagnosticPoint[] {
 
   if (usable.length < 4) {
     throw new Error('Dmax requires at least four included exact lactate points.');
+  }
+
+  for (const point of usable) {
+    if (!Number.isFinite(point.watts) || !Number.isFinite(point.lactate)) {
+      throw new TypeError('Dmax points must contain finite watts and lactate values.');
+    }
+  }
+
+  for (let index = 1; index < usable.length; index += 1) {
+    if (usable[index - 1]!.watts === usable[index]!.watts) {
+      throw new Error('Dmax points must have distinct watt values.');
+    }
   }
 
   return usable;
@@ -54,6 +65,43 @@ function perpendicularDistance(
   return numerator / denominator;
 }
 
+function derivativeCandidates(
+  regression: CubicLactateRegression,
+  start: DiagnosticPoint,
+  end: DiagnosticPoint,
+): number[] {
+  const [a0, a1, a2, a3] = regression.coefficients;
+  void a0;
+  const deltaWatts = end.watts - start.watts;
+  const deltaLactate = end.lactate - start.lactate;
+  const scale = regression.wattScale;
+
+  const quadratic = 3 * a3;
+  const linear = 2 * a2;
+  const constant = a1 - (deltaLactate * scale) / deltaWatts;
+  const normalizedRoots: number[] = [];
+
+  if (Math.abs(quadratic) <= EPSILON) {
+    if (Math.abs(linear) > EPSILON) {
+      normalizedRoots.push(-constant / linear);
+    }
+  } else {
+    const discriminant = linear * linear - 4 * quadratic * constant;
+    if (discriminant >= -EPSILON) {
+      const root = Math.sqrt(Math.max(0, discriminant));
+      normalizedRoots.push(
+        (-linear - root) / (2 * quadratic),
+        (-linear + root) / (2 * quadratic),
+      );
+    }
+  }
+
+  return normalizedRoots
+    .map((x) => regression.wattCenter + x * scale)
+    .filter((watts) => watts > start.watts && watts < end.watts)
+    .filter((watts, index, all) => all.findIndex((candidate) => Math.abs(candidate - watts) <= EPSILON) === index);
+}
+
 export function calculateDmaxThreshold(
   points: readonly DiagnosticPoint[],
 ): DmaxThresholdResult {
@@ -66,59 +114,45 @@ export function calculateDmaxThreshold(
     throw new Error('Dmax search interval requires increasing watt values.');
   }
 
-  const distanceAt = (watts: number): number => perpendicularDistance(
-    watts,
-    predictCubicLactate(regression, watts),
-    start,
-    end,
-  );
+  const candidates = [
+    start.watts,
+    ...derivativeCandidates(regression, start, end),
+    end.watts,
+  ];
 
-  let left = start.watts;
-  let right = end.watts;
-  let x1 = right - GOLDEN_RATIO_CONJUGATE * (right - left);
-  let x2 = left + GOLDEN_RATIO_CONJUGATE * (right - left);
-  let d1 = distanceAt(x1);
-  let d2 = distanceAt(x2);
+  const evaluated = candidates.map((watts) => {
+    const lactate = predictCubicLactate(regression, watts);
+    return {
+      watts,
+      lactate,
+      distance: perpendicularDistance(watts, lactate, start, end),
+    };
+  });
 
-  for (let iteration = 0; iteration < ITERATIONS; iteration += 1) {
-    if (d1 < d2) {
-      left = x1;
-      x1 = x2;
-      d1 = d2;
-      x2 = left + GOLDEN_RATIO_CONJUGATE * (right - left);
-      d2 = distanceAt(x2);
-    } else {
-      right = x2;
-      x2 = x1;
-      d2 = d1;
-      x1 = right - GOLDEN_RATIO_CONJUGATE * (right - left);
-      d1 = distanceAt(x1);
-    }
-  }
-
-  const watts = (left + right) / 2;
-  const lactate = predictCubicLactate(regression, watts);
-  const maximumDistance = distanceAt(watts);
+  evaluated.sort((left, right) => (
+    right.distance - left.distance || left.watts - right.watts
+  ));
+  const best = evaluated[0]!;
   const warnings = [...regression.warnings];
   const intervalWidth = end.watts - start.watts;
   const boundaryMargin = intervalWidth * 0.01;
 
-  if (watts - start.watts <= boundaryMargin || end.watts - watts <= boundaryMargin) {
+  if (best.watts - start.watts <= boundaryMargin || end.watts - best.watts <= boundaryMargin) {
     warnings.push('DMAX_NEAR_BOUNDARY: maximum distance lies within 1% of the measured interval boundary.');
   }
-  if (maximumDistance <= 1e-9) {
+  if (best.distance <= 1e-9) {
     warnings.push('DMAX_NEGLIGIBLE_DISTANCE: fitted curve has no meaningful separation from the reference line.');
   }
 
   return {
     threshold: {
-      watts,
-      lactate,
+      watts: best.watts,
+      lactate: best.lactate,
       algorithm: ALGORITHM,
       version: VERSION,
       warnings,
     },
-    maximumDistance,
+    maximumDistance: best.distance,
     searchIntervalWatts: [start.watts, end.watts],
     regression,
   };
