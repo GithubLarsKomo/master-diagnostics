@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0.0",
+  "id": "symmetric-quadratic-cubic-dmax-v1",
+  "description": "Exact symmetric quadratic represented by the cubic regression contract; Dmax lies at the interval midpoint.",
+  "points": [
+    { "watts": 100, "lactate": 2.0, "included": true },
+    { "watts": 150, "lactate": 1.25, "included": true },
+    { "watts": 200, "lactate": 1.0, "included": true },
+    { "watts": 250, "lactate": 1.25, "included": true },
+    { "watts": 300, "lactate": 2.0, "included": true }
+  ],
+  "expected": {
+    "wattCenter": 200,
+    "wattScale": 100,
+    "coefficients": [1, 0, 1, 0],
+    "rSquared": 1,
+    "rmse": 0,
+    "dmaxWatts": 200,
+    "dmaxLactate": 1,
+    "maximumDistance": 1,
+    "searchIntervalWatts": [100, 300]
+  },
+  "tolerance": 1e-9
+}
