@@ -53,7 +53,7 @@ describe('fixed 2/4 mmol thresholds', () => {
     ])).toThrow('No included exact points bracket 4 mmol/L');
   });
 
-  it('rejects ambiguous crossings and duplicate watt stages', () => {
+  it('rejects ambiguous crossings, descending crossings and duplicate watt stages', () => {
     expect(() => calculateFixedLactateThresholds([
       { watts: 180, lactate: 1, included: true },
       { watts: 200, lactate: 3, included: true },
@@ -61,6 +61,18 @@ describe('fixed 2/4 mmol thresholds', () => {
       { watts: 240, lactate: 3, included: true },
       { watts: 260, lactate: 5, included: true },
     ])).toThrow('Multiple intervals bracket 2 mmol/L');
+
+    expect(() => calculateFixedLactateThresholds([
+      { watts: 180, lactate: 3, included: true },
+      { watts: 220, lactate: 1, included: true },
+      { watts: 260, lactate: 5, included: true },
+    ])).toThrow('Multiple intervals bracket 2 mmol/L');
+
+    expect(() => calculateFixedLactateThresholds([
+      { watts: 180, lactate: 5, included: true },
+      { watts: 220, lactate: 3, included: true },
+      { watts: 260, lactate: 1, included: true },
+    ])).toThrow('The only interval crossing 4 mmol/L is descending');
 
     expect(() => calculateFixedLactateThresholds([
       { watts: 180, lactate: 1, included: true },
