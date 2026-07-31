@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Database, StoredDiagnosticResultSnapshot } from '@masters/db';
 
-const appendDiagnosticResultSnapshot = vi.fn();
-const getDiagnosticResultSnapshot = vi.fn();
+const { appendDiagnosticResultSnapshot, getDiagnosticResultSnapshot } = vi.hoisted(() => ({
+  appendDiagnosticResultSnapshot: vi.fn(),
+  getDiagnosticResultSnapshot: vi.fn(),
+}));
 
 vi.mock('@masters/db', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@masters/db')>()),
