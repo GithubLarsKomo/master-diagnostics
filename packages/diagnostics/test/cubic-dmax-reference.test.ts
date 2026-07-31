@@ -22,7 +22,23 @@ interface ReferenceDataset {
   tolerance: number;
 }
 
-const dataset = datasetJson as ReferenceDataset;
+function parseReferenceDataset(value: unknown): ReferenceDataset {
+  const candidate = value as Partial<ReferenceDataset>;
+  if (
+    !candidate.expected
+    || !Array.isArray(candidate.expected.coefficients)
+    || candidate.expected.coefficients.length !== 4
+    || !Array.isArray(candidate.expected.searchIntervalWatts)
+    || candidate.expected.searchIntervalWatts.length !== 2
+    || !Array.isArray(candidate.points)
+    || typeof candidate.tolerance !== 'number'
+  ) {
+    throw new TypeError('Invalid cubic Dmax reference dataset.');
+  }
+  return value as ReferenceDataset;
+}
+
+const dataset = parseReferenceDataset(datasetJson);
 
 function precisionFromTolerance(tolerance: number): number {
   return Math.max(0, Math.floor(-Math.log10(tolerance)));
