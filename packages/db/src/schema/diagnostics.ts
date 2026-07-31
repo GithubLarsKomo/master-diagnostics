@@ -23,6 +23,20 @@ export const thresholdResults = sqliteTable('threshold_results', {
   wattsX100: integer('watts_x100'), lactateX100: integer('lactate_x100'), heartRateX100: integer('heart_rate_x100'), valid: integer('valid', { mode: 'boolean' }).notNull(), resultJson: text('result_json').notNull(), ...timestamps,
 });
 
+export const diagnosticResultRecords = sqliteTable('diagnostic_result_records', {
+  id: id(),
+  tenantId: tenantId(),
+  testId: text('test_id').notNull().references(() => tests.id),
+  recordedAt: text('recorded_at').notNull(),
+  snapshotSchema: text('snapshot_schema').notNull(),
+  canonicalization: text('canonicalization').notNull(),
+  resultHash: text('result_hash').notNull(),
+  snapshotJson: text('snapshot_json').notNull(),
+}, (table) => [
+  uniqueIndex('diagnostic_result_record_tenant_id_uq').on(table.tenantId, table.id),
+  uniqueIndex('diagnostic_result_record_tenant_test_hash_uq').on(table.tenantId, table.testId, table.resultHash),
+]);
+
 export const interpretations = sqliteTable('interpretations', {
   id: id(), tenantId: tenantId(), testId: text('test_id').notNull().references(() => tests.id), versionNumber: integer('version_number').notNull(),
   lt1Json: text('lt1_json').notNull(), lt2Json: text('lt2_json').notNull(), rationale: text('rationale'), status: text('status', { enum: ['DRAFT','RELEASED'] }).notNull(),
