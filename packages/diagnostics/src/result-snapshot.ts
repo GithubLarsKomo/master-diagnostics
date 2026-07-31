@@ -60,14 +60,15 @@ function assertSnapshotEnvelope(value: unknown): asserts value is DiagnosticResu
 export async function createDiagnosticResultSnapshot<Result>(
   result: Result,
 ): Promise<DiagnosticResultSnapshot<Result>> {
-  const detachedResult = deepFreeze(cloneCanonical(result));
+  const detachedResult = deepFreeze(cloneCanonical(result)) as DeepReadonly<Result>;
   const resultHash = await createDiagnosticResultHash(detachedResult);
-  return deepFreeze({
+  const snapshot: DiagnosticResultSnapshot<Result> = {
     schemaVersion: DIAGNOSTIC_RESULT_SNAPSHOT_SCHEMA,
     canonicalization: DIAGNOSTIC_RESULT_CANONICALIZATION,
     resultHash,
     result: detachedResult,
-  });
+  };
+  return deepFreeze(snapshot) as DiagnosticResultSnapshot<Result>;
 }
 
 /** Verifies a persisted snapshot before returning a detached, immutable result payload. */
