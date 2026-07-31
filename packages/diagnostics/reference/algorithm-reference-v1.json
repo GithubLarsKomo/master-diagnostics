@@ -1,0 +1,43 @@
+{
+  "version": "1.0.0",
+  "source": "independent-python-standard-library",
+  "tolerance": 1e-9,
+  "thresholdDataset": {
+    "points": [
+      { "watts": 160, "lactate": 1.2, "heartRate": 130, "included": true },
+      { "watts": 200, "lactate": 2.4, "heartRate": 145, "included": true },
+      { "watts": 240, "lactate": 3.6, "heartRate": 160, "included": true },
+      { "watts": 280, "lactate": 5.2, "heartRate": 174, "included": true }
+    ],
+    "fixed": {
+      "lt1": { "watts": 186.66666666666666, "lactate": 2, "heartRate": 140 },
+      "lt2": { "watts": 250, "lactate": 4, "heartRate": 163.5 }
+    },
+    "baselinePlusOne": {
+      "baselineLactate": 1.2,
+      "threshold": { "watts": 193.33333333333334, "lactate": 2.2, "heartRate": 142.5 }
+    }
+  },
+  "curveDataset": {
+    "points": [
+      { "watts": 100, "lactate": 2, "included": true },
+      { "watts": 150, "lactate": 1.25, "included": true },
+      { "watts": 200, "lactate": 1, "included": true },
+      { "watts": 250, "lactate": 1.25, "included": true },
+      { "watts": 300, "lactate": 2, "included": true }
+    ],
+    "regression": {
+      "coefficients": [1, 0, 1, 0],
+      "wattCenter": 200,
+      "wattScale": 100,
+      "rSquared": 1,
+      "rmse": 0
+    },
+    "dmax": {
+      "watts": 200,
+      "lactate": 1,
+      "maximumDistance": 1,
+      "searchIntervalWatts": [100, 300]
+    }
+  }
+}
