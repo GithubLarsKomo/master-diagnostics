@@ -56,9 +56,9 @@
       "name": "descending-lt2-crossing",
       "algorithm": "fixed",
       "points": [
-        { "watts": 180, "lactate": 2.0, "included": true },
-        { "watts": 220, "lactate": 5.0, "included": true },
-        { "watts": 260, "lactate": 3.0, "included": true },
+        { "watts": 180, "lactate": 5.0, "included": true },
+        { "watts": 220, "lactate": 3.0, "included": true },
+        { "watts": 260, "lactate": 2.0, "included": true },
         { "watts": 300, "lactate": 2.5, "included": true }
       ],
       "expectedError": "The only interval crossing 4 mmol/L is descending"
