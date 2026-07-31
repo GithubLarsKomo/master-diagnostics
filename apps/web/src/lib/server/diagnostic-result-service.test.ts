@@ -22,24 +22,30 @@ function stored<Result>(
 }
 
 describe('diagnostic result application service', () => {
-  it('creates, persists and verifies a result before returning it', async () => {
+  it('creates, persists, reloads and verifies a result before returning it', async () => {
     let appended: DiagnosticResultSnapshotEnvelope<unknown> | null = null;
+    let loadedVersion: number | undefined;
     const repository: DiagnosticResultSnapshotRepository = {
       async append<Result>(
-        _tenantId: string,
-        _testId: string,
+        tenantId: string,
+        testId: string,
         snapshot: DiagnosticResultSnapshotEnvelope<Result>,
       ) {
+        expect(tenantId).toBe('tenant-a');
+        expect(testId).toBe('test-a');
         appended = snapshot as DiagnosticResultSnapshotEnvelope<unknown>;
         return stored(snapshot);
       },
-      async get() {
-        return null;
+      async get<Result>(tenantId: string, testId: string, versionNumber?: number) {
+        expect(tenantId).toBe('tenant-a');
+        expect(testId).toBe('test-a');
+        loadedVersion = versionNumber;
+        return stored(appended as DiagnosticResultSnapshotEnvelope<Result>);
       },
     };
     const service = createDiagnosticResultService(repository);
 
-    const saved = await service.persist('tenant-a', 'test-a', {
+    const saved = await service.persist(' tenant-a ', ' test-a ', {
       method: 'fixed',
       lt2: { watts: 270, lactate: 4 },
     });
@@ -49,6 +55,7 @@ describe('diagnostic result application service', () => {
       canonicalization: 'diagnostic-json-v1',
       resultHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
     });
+    expect(loadedVersion).toBe(1);
     expect(saved.result.lt2.watts).toBe(270);
     expect(Object.isFrozen(saved)).toBe(true);
     expect(Object.isFrozen(saved.result)).toBe(true);
@@ -82,6 +89,28 @@ describe('diagnostic result application service', () => {
 
     await expect(service.load('tenant-a', 'test-a')).rejects.toThrow(
       'integrity verification failed',
+    );
+  });
+
+  it('rejects empty scope identifiers and a missing persisted reload', async () => {
+    const repository: DiagnosticResultSnapshotRepository = {
+      async append<Result>(
+        _tenantId: string,
+        _testId: string,
+        snapshot: DiagnosticResultSnapshotEnvelope<Result>,
+      ) {
+        return stored(snapshot);
+      },
+      async get() {
+        return null;
+      },
+    };
+    const service = createDiagnosticResultService(repository);
+
+    await expect(service.load(' ', 'test-a')).rejects.toThrow('Tenant ID is required');
+    await expect(service.load('tenant-a', ' ')).rejects.toThrow('Test ID is required');
+    await expect(service.persist('tenant-a', 'test-a', { value: 1 })).rejects.toThrow(
+      'could not be reloaded',
     );
   });
 

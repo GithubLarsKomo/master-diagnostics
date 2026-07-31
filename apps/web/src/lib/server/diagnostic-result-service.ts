@@ -34,6 +34,12 @@ export interface VerifiedStoredDiagnosticResult<Result> {
   readonly createdAt: string;
 }
 
+function requireIdentifier(value: string, label: string): string {
+  const normalized = value.trim();
+  if (!normalized) throw new TypeError(`${label} is required`);
+  return normalized;
+}
+
 function verifiedStoredResult<Result>(
   stored: StoredDiagnosticResultSnapshot<unknown>,
   result: DeepReadonly<Result>,
@@ -56,10 +62,20 @@ export function createDiagnosticResultService(repository: DiagnosticResultSnapsh
       testId: string,
       result: Result,
     ): Promise<VerifiedStoredDiagnosticResult<Result>> {
+      const scopedTenantId = requireIdentifier(tenantId, 'Tenant ID');
+      const scopedTestId = requireIdentifier(testId, 'Test ID');
       const snapshot = await createDiagnosticResultSnapshot(result);
-      const stored = await repository.append(tenantId, testId, snapshot);
-      const verified = await verifyDiagnosticResultSnapshot<Result>(stored);
-      return verifiedStoredResult<Result>(stored, verified);
+      const stored = await repository.append(scopedTenantId, scopedTestId, snapshot);
+      const reloaded = await repository.get<Result>(
+        scopedTenantId,
+        scopedTestId,
+        stored.versionNumber,
+      );
+      if (!reloaded) {
+        throw new Error('Persisted diagnostic result snapshot could not be reloaded');
+      }
+      const verified = await verifyDiagnosticResultSnapshot<Result>(reloaded);
+      return verifiedStoredResult<Result>(reloaded, verified);
     },
 
     async load<Result>(
@@ -67,7 +83,11 @@ export function createDiagnosticResultService(repository: DiagnosticResultSnapsh
       testId: string,
       versionNumber?: number,
     ): Promise<VerifiedStoredDiagnosticResult<Result> | null> {
-      const stored = await repository.get<Result>(tenantId, testId, versionNumber);
+      const stored = await repository.get<Result>(
+        requireIdentifier(tenantId, 'Tenant ID'),
+        requireIdentifier(testId, 'Test ID'),
+        versionNumber,
+      );
       if (!stored) return null;
       const verified = await verifyDiagnosticResultSnapshot<Result>(stored);
       return verifiedStoredResult<Result>(stored, verified);
