@@ -2,20 +2,28 @@ export const DIAGNOSTIC_RESULT_CANONICALIZATION = 'diagnostic-json-v1' as const;
 
 export type DiagnosticResultHash = `sha256:${string}`;
 
+function stringifyScalar(value: string | boolean | number): string {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new TypeError('Diagnostic result value cannot be serialized.');
+  }
+  return serialized;
+}
+
 function canonicalize(value: unknown, ancestors: WeakSet<object>): string {
   if (value === null) {
     return 'null';
   }
 
   if (typeof value === 'string' || typeof value === 'boolean') {
-    return JSON.stringify(value);
+    return stringifyScalar(value);
   }
 
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) {
       throw new TypeError('Diagnostic result hashes require finite numbers.');
     }
-    return Object.is(value, -0) ? '0' : JSON.stringify(value);
+    return Object.is(value, -0) ? '0' : stringifyScalar(value);
   }
 
   if (Array.isArray(value)) {
@@ -43,7 +51,7 @@ function canonicalize(value: unknown, ancestors: WeakSet<object>): string {
     try {
       const entries = Object.keys(value)
         .sort()
-        .map((key) => `${JSON.stringify(key)}:${canonicalize((value as Record<string, unknown>)[key], ancestors)}`);
+        .map((key) => `${stringifyScalar(key)}:${canonicalize((value as Record<string, unknown>)[key], ancestors)}`);
       return `{${entries.join(',')}}`;
     } finally {
       ancestors.delete(value);
