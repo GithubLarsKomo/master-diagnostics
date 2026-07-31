@@ -25,7 +25,11 @@ describe('diagnostic result application service', () => {
   it('creates, persists and verifies a result before returning it', async () => {
     let appended: DiagnosticResultSnapshotEnvelope<unknown> | null = null;
     const repository: DiagnosticResultSnapshotRepository = {
-      async append<Result>(_tenantId, _testId, snapshot) {
+      async append<Result>(
+        _tenantId: string,
+        _testId: string,
+        snapshot: DiagnosticResultSnapshotEnvelope<Result>,
+      ) {
         appended = snapshot as DiagnosticResultSnapshotEnvelope<unknown>;
         return stored(snapshot);
       },
@@ -53,7 +57,11 @@ describe('diagnostic result application service', () => {
 
   it('rejects a manipulated persisted snapshot when loading', async () => {
     const repository: DiagnosticResultSnapshotRepository = {
-      async append<Result>(_tenantId, _testId, snapshot) {
+      async append<Result>(
+        _tenantId: string,
+        _testId: string,
+        snapshot: DiagnosticResultSnapshotEnvelope<Result>,
+      ) {
         return stored(snapshot);
       },
       async get<Result>() {
@@ -79,7 +87,11 @@ describe('diagnostic result application service', () => {
 
   it('returns null when no persisted version exists', async () => {
     const repository: DiagnosticResultSnapshotRepository = {
-      async append<Result>(_tenantId, _testId, snapshot) {
+      async append<Result>(
+        _tenantId: string,
+        _testId: string,
+        snapshot: DiagnosticResultSnapshotEnvelope<Result>,
+      ) {
         return stored(snapshot);
       },
       async get() {
