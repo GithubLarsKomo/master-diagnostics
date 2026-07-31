@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "1.0.0",
+  "id": "asymmetric-noisy-cubic-dmax-v1",
+  "description": "Asymmetric mildly noisy lactate curve for independent cubic regression and Dmax verification.",
+  "points": [
+    { "watts": 120, "lactate": 1.05, "included": true },
+    { "watts": 150, "lactate": 1.18, "included": true },
+    { "watts": 180, "lactate": 1.42, "included": true },
+    { "watts": 210, "lactate": 1.85, "included": true },
+    { "watts": 240, "lactate": 2.55, "included": true },
+    { "watts": 270, "lactate": 3.75, "included": true },
+    { "watts": 300, "lactate": 5.6, "included": true }
+  ],
+  "expected": {
+    "wattCenter": 210,
+    "wattScale": 90,
+    "coefficients": [
+      1.821904761904763,
+      1.6384523809523812,
+      1.4935714285714268,
+      0.6375000000000001
+    ],
+    "rSquared": 0.9998843026676623,
+    "rmse": 0.016567733578204506,
+    "dmaxWatts": 227.09876957273556,
+    "dmaxLactate": 2.191470152543108,
+    "maximumDistance": 1.5652487544399591,
+    "searchIntervalWatts": [120, 300]
+  },
+  "tolerance": 1e-8
+}
