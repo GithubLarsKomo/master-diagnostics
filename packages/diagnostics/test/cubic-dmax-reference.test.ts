@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import datasetJson from '../reference/cubic-dmax-reference-v1.json';
 import { calculateDmaxThreshold } from '../src/dmax-threshold';
 import {
   fitCubicLactateRegression,
@@ -22,9 +22,7 @@ interface ReferenceDataset {
   tolerance: number;
 }
 
-const dataset = JSON.parse(
-  readFileSync(new URL('../reference/cubic-dmax-reference-v1.json', import.meta.url), 'utf8'),
-) as ReferenceDataset;
+const dataset = datasetJson as ReferenceDataset;
 
 function precisionFromTolerance(tolerance: number): number {
   return Math.max(0, Math.floor(-Math.log10(tolerance)));
