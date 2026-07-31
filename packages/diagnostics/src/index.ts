@@ -5,4 +5,5 @@ export * from './fixed-lactate-thresholds';
 export * from './linear-interpolation';
 export * from './protocol-planning';
 export * from './result-hash';
+export * from './result-snapshot';
 export * from './types';
