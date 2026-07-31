@@ -222,9 +222,9 @@ def main() -> None:
                 "name": "descending-lt2-crossing",
                 "algorithm": "fixed",
                 "points": [
-                    {"watts": 180.0, "lactate": 2.0, "included": True},
-                    {"watts": 220.0, "lactate": 5.0, "included": True},
-                    {"watts": 260.0, "lactate": 3.0, "included": True},
+                    {"watts": 180.0, "lactate": 5.0, "included": True},
+                    {"watts": 220.0, "lactate": 3.0, "included": True},
+                    {"watts": 260.0, "lactate": 2.0, "included": True},
                     {"watts": 300.0, "lactate": 2.5, "included": True},
                 ],
                 "expectedError": "The only interval crossing 4 mmol/L is descending",
