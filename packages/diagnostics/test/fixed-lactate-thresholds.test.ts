@@ -71,7 +71,7 @@ describe('fixed 2/4 mmol thresholds', () => {
     expect(() => calculateFixedLactateThresholds([
       { watts: 180, lactate: 5, included: true },
       { watts: 220, lactate: 3, included: true },
-      { watts: 260, lactate: 1, included: true },
+      { watts: 260, lactate: 2, included: true },
     ])).toThrow('The only interval crossing 4 mmol/L is descending');
 
     expect(() => calculateFixedLactateThresholds([
