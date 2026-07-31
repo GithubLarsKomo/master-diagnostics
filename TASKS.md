@@ -91,10 +91,13 @@
 - [ ] modifiziertes Dmax nach geschlossenem ADR
 - [x] Modellgüte und Warnungen
 - [ ] deterministische Ergebnis-Hashes
-- [ ] Python-Gegenrechnung und Referenzdatensätze
+  - [x] versionierte kanonische JSON-Serialisierung und SHA-256-Vertrag ergänzen
+  - [ ] Hash in unveränderliche Ergebnis-Snapshots integrieren und beim Lesen verifizieren
+- [x] Python-Gegenrechnung und Referenzdatensätze
   - [x] ersten versionierten Referenzdatensatz für fixe Schwellen, Basis +1, Regression und Dmax ergänzen
   - [x] unabhängigen Python-Generator ohne Drittbibliotheken ergänzen
-  - [ ] weitere klinisch realistische und problematische Referenzdatensätze ergänzen
+  - [x] weitere klinisch realistische und problematische Referenzdatensätze ergänzen
+  - [x] bytegenaue Reproduzierbarkeit des Generators in CI erzwingen
 - [ ] Trainerentscheidung und Begründungslogik
 
 ## Epic 7 — Trainingszonen
@@ -162,7 +165,7 @@
 Ein MVP-Release ist nur zulässig, wenn:
 
 - [x] aktuelle Tenant-Isolations- und Rollen-Policy-Tests bestehen
-- [ ] alle Algorithmus-Referenztests bestehen
+- [x] alle Algorithmus-Referenztests bestehen
 - [ ] Offline-Wiederaufnahme und Sync-Retry keinen Datenverlust erzeugen
 - [ ] WCAG-2.2-AA-Kernprüfungen bestehen
 - [ ] Export-/Import-Roundtrip vollständig ist
