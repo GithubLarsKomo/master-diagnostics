@@ -23,6 +23,20 @@ export const thresholdResults = sqliteTable('threshold_results', {
   wattsX100: integer('watts_x100'), lactateX100: integer('lactate_x100'), heartRateX100: integer('heart_rate_x100'), valid: integer('valid', { mode: 'boolean' }).notNull(), resultJson: text('result_json').notNull(), ...timestamps,
 });
 
+export const diagnosticResultSnapshots = sqliteTable('diagnostic_result_snapshots', {
+  id: id(),
+  tenantId: tenantId(),
+  testId: text('test_id').notNull().references(() => tests.id),
+  versionNumber: integer('version_number').notNull(),
+  schemaVersion: text('schema_version').notNull(),
+  canonicalization: text('canonicalization').notNull(),
+  resultHash: text('result_hash').notNull(),
+  resultJson: text('result_json').notNull(),
+  ...timestamps,
+}, (t) => [
+  uniqueIndex('diagnostic_result_snapshot_test_version_uq').on(t.tenantId, t.testId, t.versionNumber),
+]);
+
 export const interpretations = sqliteTable('interpretations', {
   id: id(), tenantId: tenantId(), testId: text('test_id').notNull().references(() => tests.id), versionNumber: integer('version_number').notNull(),
   lt1Json: text('lt1_json').notNull(), lt2Json: text('lt2_json').notNull(), rationale: text('rationale'), status: text('status', { enum: ['DRAFT','RELEASED'] }).notNull(),
