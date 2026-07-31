@@ -87,11 +87,14 @@
 - [x] fixe 2-/4-mmol-Methode
 - [x] Basis +1 mmol/l
 - [x] kubische Regression
-- [ ] Dmax
+- [x] Dmax
 - [ ] modifiziertes Dmax nach geschlossenem ADR
 - [x] Modellgüte und Warnungen
 - [ ] deterministische Ergebnis-Hashes
 - [ ] Python-Gegenrechnung und Referenzdatensätze
+  - [x] ersten versionierten Referenzdatensatz für fixe Schwellen, Basis +1, Regression und Dmax ergänzen
+  - [x] unabhängigen Python-Generator ohne Drittbibliotheken ergänzen
+  - [ ] weitere klinisch realistische und problematische Referenzdatensätze ergänzen
 - [ ] Trainerentscheidung und Begründungslogik
 
 ## Epic 7 — Trainingszonen
