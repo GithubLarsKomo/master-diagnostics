@@ -84,12 +84,13 @@
 ## Epic 6 — Diagnostischer Fachkern
 
 - [x] lineare Interpolation implementieren
-- [ ] fixe 2-/4-mmol-Methode
-- [ ] Basis +1 mmol/l
-- [ ] kubische Regression
+- [x] fixe 2-/4-mmol-Methode
+- [x] Basis +1 mmol/l
+- [x] kubische Regression
 - [ ] Dmax
 - [ ] modifiziertes Dmax nach geschlossenem ADR
 - [ ] Modellgüte und Warnungen
+  - [x] R², RMSE und initiale Warnung `LOW_MODEL_FIT` für kubische Regression
 - [ ] deterministische Ergebnis-Hashes
 - [ ] Python-Gegenrechnung und Referenzdatensätze
 - [ ] Trainerentscheidung und Begründungslogik
