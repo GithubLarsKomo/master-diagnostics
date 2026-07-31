@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
-    "@masters/diagnostics": "workspace:*",
     "@masters/domain": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },
