@@ -13,13 +13,13 @@ describe('fixed 2/4 mmol thresholds', () => {
     const result = calculateFixedLactateThresholds(points);
 
     expect(result.lt1).toMatchObject({
-      watts: 186.66666666666666,
       lactate: 2,
       heartRate: 140,
       algorithm: 'fixed-lactate-2-4-mmol',
       version: '1.0.0',
       warnings: [],
     });
+    expect(result.lt1.watts).toBeCloseTo(186.6666666667, 9);
     expect(result.lt2.watts).toBe(250);
     expect(result.lt2.heartRate).toBeCloseTo(163.5, 12);
   });
