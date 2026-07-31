@@ -90,9 +90,10 @@
 - [x] Dmax
 - [ ] modifiziertes Dmax nach geschlossenem ADR
 - [x] Modellgüte und Warnungen
-- [ ] deterministische Ergebnis-Hashes
+- [x] deterministische Ergebnis-Hashes
   - [x] versionierte kanonische JSON-Serialisierung und SHA-256-Vertrag ergänzen
-  - [ ] Hash in unveränderliche Ergebnis-Snapshots integrieren und beim Lesen verifizieren
+  - [x] Hash in unveränderliche Ergebnis-Snapshots integrieren und beim Lesen verifizieren
+  - [x] append-only Repository-Vertrag für verifizierte Ergebnis-Snapshots ergänzen
 - [x] Python-Gegenrechnung und Referenzdatensätze
   - [x] ersten versionierten Referenzdatensatz für fixe Schwellen, Basis +1, Regression und Dmax ergänzen
   - [x] unabhängigen Python-Generator ohne Drittbibliotheken ergänzen
