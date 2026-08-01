@@ -106,9 +106,9 @@
 - [x] physiologisches Drei-Zonen-Modell
 - [x] versionierte Fünf-Zonen-Regel
 - [x] Standardgrenzen 85 % LT1 / LT1 / 95 % LT2 / 102 % LT2
-- [ ] schwellenbasierte HF-Zonen
-- [ ] offene Z5-Grenze bei fehlender HFmax
-- [ ] Trainerkorrektur und Versionierung
+- [x] schwellenbasierte HF-Zonen
+- [x] offene Z5-Grenze bei fehlender HFmax
+- [x] Trainerkorrektur und Versionierung
 
 ## Epic 8 — Dashboards und Bericht
 
