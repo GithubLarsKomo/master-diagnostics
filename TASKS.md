@@ -115,7 +115,7 @@
 
 ## Epic 8 — Dashboards und Bericht
 
-- [ ] aufgabenorientiertes Trainer-Dashboard
+- [x] aufgabenorientiertes Trainer-Dashboard
 - [ ] vollständiges Athleten-Dashboard
 - [ ] barrierearme Kurvendiagramme
 - [ ] Vergleich bis fünf Tests
