@@ -36,7 +36,7 @@ export default async function AthleteLactateCurvePage({ params }: { params: Prom
     <main>
       <header className="app-header">
         <div><p className="eyebrow">Athleten-Dashboard</p><h1>Laktatkurve</h1><p>{athlete.firstName} {athlete.lastName}</p></div>
-        <Link href={`/athletes/${athlete.id}`}>Zurück zum Athleten</Link>
+        <div><Link href={`/athletes/${athlete.id}/comparison`}>Bis zu fünf Tests vergleichen</Link> · <Link href={`/athletes/${athlete.id}`}>Zurück zum Athleten</Link></div>
       </header>
 
       <section className="card" aria-labelledby="lactate-curve-heading">
