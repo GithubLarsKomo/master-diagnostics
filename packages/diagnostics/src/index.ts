@@ -1,6 +1,7 @@
 export * from './baseline-plus-one-threshold';
 export * from './cubic-lactate-regression';
 export * from './dmax-threshold';
+export * from './five-zone-model';
 export * from './fixed-lactate-thresholds';
 export * from './linear-interpolation';
 export * from './modified-dmax-threshold';
