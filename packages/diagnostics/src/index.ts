@@ -8,5 +8,6 @@ export * from './protocol-planning';
 export * from './result-hash';
 export * from './result-repository';
 export * from './result-snapshot';
+export * from './three-zone-model';
 export * from './trainer-decision';
 export * from './types';
