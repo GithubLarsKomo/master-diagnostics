@@ -3,6 +3,7 @@ export * from './cubic-lactate-regression';
 export * from './dmax-threshold';
 export * from './five-zone-model';
 export * from './fixed-lactate-thresholds';
+export * from './heart-rate-zones';
 export * from './linear-interpolation';
 export * from './modified-dmax-threshold';
 export * from './protocol-planning';
