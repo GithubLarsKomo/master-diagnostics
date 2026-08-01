@@ -103,7 +103,7 @@
 
 ## Epic 7 — Trainingszonen
 
-- [ ] physiologisches Drei-Zonen-Modell
+- [x] physiologisches Drei-Zonen-Modell
 - [ ] versionierte Fünf-Zonen-Regel
 - [ ] Standardgrenzen 85 % LT1 / LT1 / 95 % LT2 / 102 % LT2
 - [ ] schwellenbasierte HF-Zonen
