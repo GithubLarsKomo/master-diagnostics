@@ -2,7 +2,7 @@
   "name": "modified-dmax-realistic-stage-curve",
   "version": "1.0.0",
   "source": "independent-python-standard-library",
-  "tolerance": 1e-9,
+  "tolerance": 1e-09,
   "points": [
     {
       "watts": 120.0,
