@@ -51,7 +51,7 @@ export default async function AthleteLactateCurvePage({ params }: { params: Prom
               <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="currentColor" />
               <line x1={padding} y1={padding} x2={padding} y2={height - padding} stroke="currentColor" />
               <polyline points={polyline} fill="none" stroke="currentColor" strokeWidth="3" />
-              {coordinates.map((point) => <circle key={point.stageNumber} cx={point.x} cy={point.y} r="5"><title>Stufe {point.stageNumber}: {point.watts} Watt, {(point.lactateValueX100 / 100).toFixed(2)} mmol/l</title></circle>)}
+              {coordinates.map((point) => <circle key={point.stageNumber} cx={point.x} cy={point.y} r="5"><title>{`Stufe ${point.stageNumber}: ${point.watts} Watt, ${(point.lactateValueX100 / 100).toFixed(2)} mmol/l`}</title></circle>)}
               <text x={width / 2} y={height - 8} textAnchor="middle">Leistung (W)</text>
               <text x="16" y={height / 2} textAnchor="middle" transform={`rotate(-90 16 ${height / 2})`}>Laktat (mmol/l)</text>
             </svg>
