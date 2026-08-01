@@ -50,8 +50,7 @@ function validateBoundaries(
   if (values.length === 0) throw new TypeError('Boundaries must not be empty');
   const copy = [...values];
   let previous: number | null = null;
-  for (let index = 0; index < copy.length; index += 1) {
-    const value = copy[index];
+  for (const [index, value] of copy.entries()) {
     const isAllowedOpenUpper =
       modelKind === 'THRESHOLD_HEART_RATE_ZONES' && index === copy.length - 1 && value === null;
     if (isAllowedOpenUpper) continue;
