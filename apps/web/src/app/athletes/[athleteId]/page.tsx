@@ -1,4 +1,4 @@
-import { authorize } from '@masters/domain';
+import { authorize, deriveAthleteDashboardSummary } from '@masters/domain';
 import {
   athleteIsMinor,
   getAthlete,
@@ -8,6 +8,7 @@ import {
   listConsents,
   listDeletionRequests,
   listGuardians,
+  listTestsForExecution,
   previewAthleteDeletion,
 } from '@masters/db';
 import Link from 'next/link';
@@ -29,7 +30,7 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
   const athlete = await getAthlete(db, context.tenantId, athleteId);
   if (!athlete) notFound();
 
-  const [trainers, assignments, snapshots, consentRows, guardians, deletionRequests, deletionPreview] = await Promise.all([
+  const [trainers, assignments, snapshots, consentRows, guardians, deletionRequests, deletionPreview, tenantTests] = await Promise.all([
     listActiveTrainers(db, context.tenantId),
     listCoachAssignments(db, context.tenantId, athlete.id),
     listAthleteSnapshots(db, context.tenantId, athlete.id),
@@ -37,7 +38,20 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
     listGuardians(db, context.tenantId, athlete.id),
     listDeletionRequests(db, context.tenantId, athlete.id),
     previewAthleteDeletion(db, context.tenantId, athlete.id),
+    listTestsForExecution(db, context.tenantId),
   ]);
+  const athleteTests = tenantTests
+    .filter(({ athlete: testAthlete }) => testAthlete.id === athlete.id)
+    .map(({ test, plan }) => ({
+      testId: test.id,
+      status: test.status,
+      createdAt: test.createdAt,
+      expectedLt2Watts: plan.expectedLt2Watts,
+      startWatts: plan.startWatts,
+      incrementWatts: plan.incrementWatts,
+      maximumStages: plan.maximumStages,
+    }));
+  const dashboardSummary = deriveAthleteDashboardSummary(athleteTests);
   const editAction = editAthlete.bind(null, athlete.id);
   const assignmentAction = addCoachAssignment.bind(null, athlete.id);
   const snapshotAction = captureAthleteSnapshot.bind(null, athlete.id);
@@ -58,6 +72,29 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
 
       {blocked && <section className="card" role="alert"><h2>Nutzung gesperrt</h2><p>Für diesen Athleten besteht eine Einwilligungs- oder Löschsperre. Neue Tests dürfen nicht gestartet werden.</p></section>}
       {minor && !activeGuardian && <section className="card" role="alert"><h2>Guardian erforderlich</h2><p>Für diesen minderjährigen Athleten ist noch keine aktive gesetzliche Vertretung dokumentiert. Ein Teststart muss blockiert bleiben.</p></section>}
+
+      <section className="card" aria-labelledby="athlete-dashboard-heading">
+        <p className="eyebrow">Athleten-Dashboard</p>
+        <h2 id="athlete-dashboard-heading">Sportdiagnostischer Verlauf</h2>
+        <dl aria-label="Testübersicht">
+          <div><dt>Tests gesamt</dt><dd>{dashboardSummary.totalTests}</dd></div>
+          <div><dt>Aktiv</dt><dd>{dashboardSummary.activeTests}</dd></div>
+          <div><dt>Datenprüfung</dt><dd>{dashboardSummary.reviewTests}</dd></div>
+          <div><dt>Freigegeben</dt><dd>{dashboardSummary.completedTests}</dd></div>
+        </dl>
+        {dashboardSummary.latestTestAt && <p>Letzter Test: {new Date(dashboardSummary.latestTestAt).toLocaleString('de-DE')}</p>}
+        {athleteTests.length === 0 ? (
+          <p>Noch keine Tests für diesen Athleten vorhanden.</p>
+        ) : (
+          <ol>
+            {athleteTests.map((test) => (
+              <li key={test.testId}>
+                <strong>{test.status}</strong> · LT2-Plan {test.expectedLt2Watts} W · Start {test.startWatts} W · +{test.incrementWatts} W · max. {test.maximumStages} Stufen · <Link href={`/tests/${test.testId}`}>Test öffnen</Link>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
 
       <section className="card">
         <h2>Stammdaten</h2>
