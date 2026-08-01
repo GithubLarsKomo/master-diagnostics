@@ -23,6 +23,13 @@ export interface LiveTestMeasurementsState {
   updatedAtMs: number;
 }
 
+export interface LiveTestMeasurementCaptureProgress {
+  requiredCount: number;
+  capturedCount: number;
+  complete: boolean;
+  missingTargets: LiveTestMeasurementTarget[];
+}
+
 function requireTimestamp(value: number, field: string): void {
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(`${field} must be a non-negative finite timestamp`);
@@ -42,6 +49,20 @@ function requireIdentity(testId: string, startedAt: string, stageCount: number):
 export function liveTestMeasurementKey(target: LiveTestMeasurementTarget): string {
   if (target.kind !== 'STAGE') return target.kind;
   return `STAGE:${target.stageNumber}`;
+}
+
+function measurementTargets(stageCount: number): LiveTestMeasurementTarget[] {
+  return [
+    { kind: 'REST', stageNumber: null },
+    ...Array.from(
+      { length: stageCount },
+      (_, index): LiveTestMeasurementTarget => ({
+        kind: 'STAGE',
+        stageNumber: index + 1,
+      }),
+    ),
+    { kind: 'RECOVERY', stageNumber: null },
+  ];
 }
 
 function isValidTarget(
@@ -185,5 +206,22 @@ export function upsertLiveTestMeasurement(
       [liveTestMeasurementKey(measurement.target)]: measurement,
     },
     updatedAtMs: measurement.updatedAtMs,
+  };
+}
+
+export function getLiveTestMeasurementCaptureProgress(
+  state: LiveTestMeasurementsState,
+): LiveTestMeasurementCaptureProgress {
+  const requiredTargets = measurementTargets(state.stageCount);
+  const missingTargets = requiredTargets.filter(
+    (target) => state.measurements[liveTestMeasurementKey(target)] === undefined,
+  );
+  const requiredCount = requiredTargets.length;
+  const capturedCount = requiredCount - missingTargets.length;
+  return {
+    requiredCount,
+    capturedCount,
+    complete: missingTargets.length === 0,
+    missingTargets,
   };
 }
