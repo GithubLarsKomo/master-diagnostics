@@ -48,10 +48,10 @@
 
 ## Epic 4 — Testdurchführung und Offline
 
-- [ ] Testzustandsmaschine implementieren
+- [x] Testzustandsmaschine implementieren
   - [x] Startübergang `PLANNED → IN_PROGRESS` mit Readiness-Gate
   - [x] Abschlussübergang `IN_PROGRESS → DATA_REVIEW` mit strukturiertem Grund
-- [ ] timergeführten Ablauf bauen
+- [x] timergeführten Ablauf bauen
   - [x] deterministischen, snapshotbasierten Timer-Fachkern implementieren
   - [x] ersten Browserpfad für Planung, Sicherheitscheck, Live-Timer und Abbruch implementieren
 - [x] akustische und visuelle Warnungen
@@ -59,19 +59,21 @@
   - [x] lokalen Entwurf für Laktat, Qualifier, Herzfrequenz und Messzeit erfassen
   - [x] genau einen Ruhe-/Erholungswert und höchstens einen Wert je Stufe lokal halten
   - [x] Vollständigkeit über Ruhewert, alle Stufen und 5-Minuten-Erholung deterministisch prüfen und sichtbar machen
-- [ ] IndexedDB-Speicher mit Dexie
+- [x] IndexedDB-Speicher mit Dexie
   - [x] Timer- und Pausenzustand innerhalb von 500 ms lokal persistieren
   - [x] Messwertentwurf testgebunden in Dexie speichern
-- [ ] Wiederaufnahme nach Browser-Neustart
+- [x] Wiederaufnahme nach Browser-Neustart
   - [x] laufenden oder pausierten Timer aus dem lokalen Zustand wiederherstellen
   - [x] Messwertentwurf nach Neustart validiert wiederherstellen
-- [ ] idempotente Sync-API
+- [x] idempotente Sync-API
   - [x] Messwertoperationen mit globaler `operation_id` höchstens einmal anwenden
   - [x] Ruhe-, Stufen- und Erholungswerte mit optimistischer Version synchronisieren
   - [x] ausstehende Messwertoperationen nach Verbindungsfehler erneut senden
   - [x] Serverkonflikte ohne automatisches Überschreiben lokal sichtbar halten
 - [x] exklusive Bearbeitungssperre und Übernahme
 - [x] nachträgliche Tabellenbearbeitung
+
+**Akzeptanz:** Der Browser-E2E-Smoke-Test deckt Start und Abschluss der Zustandsmaschine, timergeführten Ablauf, lokale Dexie-Persistenz, Wiederaufnahme eines pausierten Tests sowie Messwert-Retry nach simuliertem Verbindungsfehler und Browser-Neustart ohne Datenverlust ab.
 
 ## Epic 5 — Qualitätsmodell
 
@@ -168,7 +170,7 @@ Ein MVP-Release ist nur zulässig, wenn:
 
 - [x] aktuelle Tenant-Isolations- und Rollen-Policy-Tests bestehen
 - [x] alle Algorithmus-Referenztests bestehen
-- [ ] Offline-Wiederaufnahme und Sync-Retry keinen Datenverlust erzeugen
+- [x] Offline-Wiederaufnahme und Sync-Retry keinen Datenverlust erzeugen
 - [ ] WCAG-2.2-AA-Kernprüfungen bestehen
 - [ ] Export-/Import-Roundtrip vollständig ist
 - [ ] Backup und Restore praktisch getestet wurden
