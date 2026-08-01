@@ -3,6 +3,7 @@ import {
   athleteIsMinor,
   getAthlete,
   listActiveTrainers,
+  listAthleteDiagnosticResultHistory,
   listAthleteSnapshots,
   listCoachAssignments,
   listConsents,
@@ -30,7 +31,7 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
   const athlete = await getAthlete(db, context.tenantId, athleteId);
   if (!athlete) notFound();
 
-  const [trainers, assignments, snapshots, consentRows, guardians, deletionRequests, deletionPreview, tenantTests] = await Promise.all([
+  const [trainers, assignments, snapshots, consentRows, guardians, deletionRequests, deletionPreview, tenantTests, resultHistory] = await Promise.all([
     listActiveTrainers(db, context.tenantId),
     listCoachAssignments(db, context.tenantId, athlete.id),
     listAthleteSnapshots(db, context.tenantId, athlete.id),
@@ -39,6 +40,7 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
     listDeletionRequests(db, context.tenantId, athlete.id),
     previewAthleteDeletion(db, context.tenantId, athlete.id),
     listTestsForExecution(db, context.tenantId),
+    listAthleteDiagnosticResultHistory(db, context.tenantId, athlete.id),
   ]);
   const athleteTests = tenantTests
     .filter(({ athlete: testAthlete }) => testAthlete.id === athlete.id)
@@ -90,6 +92,22 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
             {athleteTests.map((test) => (
               <li key={test.testId}>
                 <strong>{test.status}</strong> · LT2-Plan {test.expectedLt2Watts} W · Start {test.startWatts} W · +{test.incrementWatts} W · max. {test.maximumStages} Stufen · <Link href={`/tests/${test.testId}`}>Test öffnen</Link>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
+      <section className="card" aria-labelledby="diagnostic-result-history-heading">
+        <h2 id="diagnostic-result-history-heading">Diagnostische Ergebnisversionen</h2>
+        <p>Unveränderliche, versionierte Ergebnis-Snapshots mit kryptografischem Referenz-Hash.</p>
+        {resultHistory.length === 0 ? (
+          <p>Noch keine diagnostische Ergebnisversion vorhanden.</p>
+        ) : (
+          <ol>
+            {resultHistory.map((result) => (
+              <li key={result.id}>
+                <strong>Version {result.versionNumber}</strong> · {new Date(result.createdAt).toLocaleString('de-DE')} · Teststatus {result.testStatus} · Schema {result.schemaVersion} · <code>{result.resultHash}</code> · <Link href={`/tests/${result.testId}`}>Test öffnen</Link>
               </li>
             ))}
           </ol>
