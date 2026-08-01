@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "modified-dmax-reference-v1",
+  "caseId": "clinical-plausible",
+  "description": "Monotonically increasing lactate profile with the first qualifying rise between 150 W and 200 W.",
+  "points": [
+    { "watts": 100, "lactate": 1.0, "included": true },
+    { "watts": 150, "lactate": 1.2, "included": true },
+    { "watts": 200, "lactate": 1.7, "included": true },
+    { "watts": 250, "lactate": 2.5, "included": true },
+    { "watts": 300, "lactate": 4.2, "included": true },
+    { "watts": 350, "lactate": 7.1, "included": true }
+  ],
+  "expected": {
+    "algorithm": "modified-dmax-v1",
+    "version": "1.0.0",
+    "startPoint": { "watts": 150, "lactate": 1.2 },
+    "searchIntervalWatts": [150, 350],
+    "thresholdWatts": 264.1024374926594,
+    "thresholdLactate": 2.8947328747315866,
+    "maximumDistance": 1.6705622859653317,
+    "absoluteTolerance": 1e-9
+  }
+}
