@@ -22,5 +22,5 @@ test('shows the actionable trainer workload after the live workflow', async ({ p
 
   await expect(page.getByText('Max Test')).toBeVisible();
   await expect(page.getByText('Testdaten prüfen und auswerten')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Öffnen' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Öffnen', exact: true })).toBeVisible();
 });
