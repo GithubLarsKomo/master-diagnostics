@@ -12,4 +12,5 @@ export * from './result-repository';
 export * from './result-snapshot';
 export * from './three-zone-model';
 export * from './trainer-decision';
+export * from './training-zone-correction';
 export * from './types';
