@@ -62,16 +62,14 @@ export function createThresholdFiveZoneModel(
     zone4Upper: lt2 * 1.02,
   });
 
-  const ordered = [
-    boundaries.zone1Upper,
-    boundaries.zone2Upper,
-    boundaries.zone3Upper,
-    boundaries.zone4Upper,
-  ];
-  for (let index = 1; index < ordered.length; index += 1) {
-    if (!(ordered[index - 1] < ordered[index])) {
-      throw new TypeError('Derived five-zone boundaries must be strictly increasing');
-    }
+  if (
+    !(
+      boundaries.zone1Upper < boundaries.zone2Upper &&
+      boundaries.zone2Upper < boundaries.zone3Upper &&
+      boundaries.zone3Upper < boundaries.zone4Upper
+    )
+  ) {
+    throw new TypeError('Derived five-zone boundaries must be strictly increasing');
   }
 
   const classify = (intensity: number): ThresholdTrainingZone => {
