@@ -117,7 +117,7 @@
 
 - [x] aufgabenorientiertes Trainer-Dashboard
 - [ ] vollständiges Athleten-Dashboard
-- [ ] barrierearme Kurvendiagramme
+- [x] barrierearme Kurvendiagramme
 - [ ] Vergleich bis fünf Tests
 - [ ] Vergleichbarkeitsklassifikation
 - [ ] unveränderliche Berichtsversionen
