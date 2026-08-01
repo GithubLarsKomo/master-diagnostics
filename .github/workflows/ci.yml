@@ -35,7 +35,7 @@ jobs:
             packages/diagnostics/reference/algorithm-reference-v2.json \
             packages/diagnostics/reference/modified-dmax-reference-v1.json
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.15.0
 
