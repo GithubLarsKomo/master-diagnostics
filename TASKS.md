@@ -88,7 +88,7 @@
 - [x] Basis +1 mmol/l
 - [x] kubische Regression
 - [x] Dmax
-- [ ] modifiziertes Dmax nach geschlossenem ADR
+- [x] modifiziertes Dmax nach geschlossenem ADR
 - [x] Modellgüte und Warnungen
 - [x] deterministische Ergebnis-Hashes
   - [x] versionierte kanonische JSON-Serialisierung und SHA-256-Vertrag ergänzen
@@ -99,7 +99,7 @@
   - [x] unabhängigen Python-Generator ohne Drittbibliotheken ergänzen
   - [x] weitere klinisch realistische und problematische Referenzdatensätze ergänzen
   - [x] bytegenaue Reproduzierbarkeit des Generators in CI erzwingen
-- [ ] Trainerentscheidung und Begründungslogik
+- [x] Trainerentscheidung und Begründungslogik
 
 ## Epic 7 — Trainingszonen
 
