@@ -3,6 +3,7 @@ export * from './cubic-lactate-regression';
 export * from './dmax-threshold';
 export * from './fixed-lactate-thresholds';
 export * from './linear-interpolation';
+export * from './modified-dmax-threshold';
 export * from './protocol-planning';
 export * from './result-hash';
 export * from './result-repository';
