@@ -1,7 +1,10 @@
+import { deriveTrainerDashboardTasks } from '@masters/domain';
 import { planFromExpectedLt2 } from '@masters/diagnostics';
+import { listTestsForTrainerDashboard } from '@masters/db';
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { auth } from '@/lib/auth';
+import { db } from '@/lib/db';
 import { getTenantContext } from '@/lib/tenant-context';
 import { signOut } from './sign-in/actions';
 
@@ -11,12 +14,42 @@ export default async function HomePage() {
   const session = await auth.api.getSession({ headers: await headers() });
   const tenantContext = await getTenantContext();
   const example = planFromExpectedLt2(350, 8);
+  const dashboardRows = tenantContext.role === 'TRAINER' || tenantContext.role === 'TENANT_ADMIN'
+    ? await listTestsForTrainerDashboard(db, tenantContext.tenantId, {
+        userId: tenantContext.userId,
+        role: tenantContext.role,
+      })
+    : [];
+  const dashboardTasks = deriveTrainerDashboardTasks(dashboardRows.map(({ test, athlete }) => ({
+    testId: test.id,
+    athleteName: `${athlete.firstName} ${athlete.lastName}`,
+    status: test.status,
+  })));
+
   return (
     <main>
       <header className="app-header">
         <div><h1>Masters Diagnostics</h1><p>{session?.user.name} · {tenantContext.role}</p></div>
         <form action={signOut}><button type="submit">Abmelden</button></form>
       </header>
+
+      {(tenantContext.role === 'TRAINER' || tenantContext.role === 'TENANT_ADMIN') && (
+        <section className="card" aria-labelledby="trainer-tasks-heading">
+          <h2 id="trainer-tasks-heading">Meine nächsten Aufgaben</h2>
+          {dashboardTasks.length === 0 ? (
+            <p>Aktuell gibt es keine offenen Testaufgaben.</p>
+          ) : (
+            <ol>
+              {dashboardTasks.map((task) => (
+                <li key={task.testId}>
+                  <strong>{task.athleteName}</strong> · {task.label} · <Link href={task.href}>Öffnen</Link>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      )}
+
       <section className="grid" aria-label="Arbeitsbereiche">
         <article className="card"><h2>Athleten</h2><p>Tenant-gebundene Stammdaten anlegen und verwalten.</p><Link href="/athletes">Athleten öffnen</Link></article>
         <article className="card"><h2>Tests</h2><p>Stufentests planen, vorbereiten und live durchführen.</p><Link href="/tests">Tests öffnen</Link></article>
