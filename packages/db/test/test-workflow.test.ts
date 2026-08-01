@@ -38,7 +38,7 @@ const test = (id: string, tenantId: string, athleteId: string, status: 'PLANNED'
 
 const snapshot = (id: string, tenantId: string, testId: string) => ({
   id, tenantId, testId, protocolVersionId: `protocol-${tenantId}`,
-  athleteSnapshotId: `snapshot-${tenantId}`, expectedLt2Watts: 350,
+  athleteSnapshotId: `snapshot-${id}`, expectedLt2Watts: 350,
   startWatts: 210, incrementWatts: 35, maximumStages: 7,
   snapshotJson: '{}', createdAt: now, updatedAt: now,
 });
@@ -84,6 +84,12 @@ describe('test workflow queries', () => {
       test('test-expired', 'tenant-a', 'expired'),
       test('test-foreign', 'tenant-b', 'foreign'),
     ]);
+    await db.insert(schema.testPlanSnapshots).values([
+      snapshot('plan-assigned', 'tenant-a', 'test-assigned'),
+      snapshot('plan-unassigned', 'tenant-a', 'test-unassigned'),
+      snapshot('plan-expired', 'tenant-a', 'test-expired'),
+      snapshot('plan-foreign', 'tenant-b', 'test-foreign'),
+    ]);
     await db.insert(schema.coachAthleteAssignments).values([
       { id: 'assignment-active', tenantId: 'tenant-a', athleteId: 'assigned', coachUserId: 'trainer-a', isPrimary: true, validFrom: now, createdAt: now, updatedAt: now },
       { id: 'assignment-expired', tenantId: 'tenant-a', athleteId: 'expired', coachUserId: 'trainer-a', isPrimary: false, validFrom: now, validUntil: '2026-07-31T00:00:00.000Z', createdAt: now, updatedAt: now },
@@ -105,6 +111,11 @@ describe('test workflow queries', () => {
       test('test-a1', 'tenant-a', 'athlete-a1'),
       test('test-a2', 'tenant-a', 'athlete-a2', 'IN_PROGRESS'),
       test('test-b', 'tenant-b', 'athlete-b'),
+    ]);
+    await db.insert(schema.testPlanSnapshots).values([
+      snapshot('plan-a1', 'tenant-a', 'test-a1'),
+      snapshot('plan-a2', 'tenant-a', 'test-a2'),
+      snapshot('plan-b', 'tenant-b', 'test-b'),
     ]);
 
     const rows = await listTestsForTrainerDashboard(db, 'tenant-a', { userId: 'admin-a', role: 'TENANT_ADMIN' });
