@@ -1,6 +1,7 @@
 import { deriveTrainerDashboardTasks } from '@masters/domain';
 import { planFromExpectedLt2 } from '@masters/diagnostics';
 import { listTestsForTrainerDashboard } from '@masters/db';
+import type { Route } from 'next';
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { auth } from '@/lib/auth';
@@ -42,7 +43,7 @@ export default async function HomePage() {
             <ol>
               {dashboardTasks.map((task) => (
                 <li key={task.testId}>
-                  <strong>{task.athleteName}</strong> · {task.label} · <Link href={task.href}>Öffnen</Link>
+                  <strong>{task.athleteName}</strong> · {task.label} · <Link href={task.href as Route}>Öffnen</Link>
                 </li>
               ))}
             </ol>
