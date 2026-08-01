@@ -15,6 +15,10 @@ import {
   loadLiveTestTimerState,
   saveLiveTestTimerState,
 } from '@/lib/live-test-timer-storage';
+import {
+  getStageWarningThreshold,
+  playTimerWarningTone,
+} from '@/lib/timer-warning';
 
 const phaseLabels = {
   WARMUP: 'Warm-up',
@@ -43,11 +47,14 @@ export function LiveTestTimer({
 }) {
   const [now, setNow] = useState(0);
   const [timerState, setTimerState] = useState<LiveTestTimerState | null>(null);
+  const [audioEnabled, setAudioEnabled] = useState(false);
   const [persistenceStatus, setPersistenceStatus] = useState<
     'LOADING' | 'SAVING' | 'SAVED' | 'ERROR'
   >('LOADING');
   const writeQueue = useRef<Promise<unknown>>(Promise.resolve());
   const writeRevision = useRef(0);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const announcedWarningRef = useRef<string | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -79,6 +86,12 @@ export function LiveTestTimer({
     return () => window.clearInterval(interval);
   }, [timerState]);
 
+  useEffect(() => () => {
+    const context = audioContextRef.current;
+    audioContextRef.current = null;
+    if (context) void context.close();
+  }, []);
+
   const activeElapsedSeconds = useMemo(() => {
     if (now === 0 || !timerState) return 0;
     const effectiveNow = timerState.pausedAtMs ?? now;
@@ -101,6 +114,20 @@ export function LiveTestTimer({
   );
   const isPaused = timerState?.pausedAtMs != null;
 
+  useEffect(() => {
+    const phase = position.phase;
+    if (!audioEnabled || isPaused || phase?.kind !== 'STAGE') return;
+    const threshold = getStageWarningThreshold(position.phaseRemainingSeconds);
+    if (threshold === null) return;
+    const warningKey = `${phase.stageNumber ?? 0}:${threshold}`;
+    if (announcedWarningRef.current === warningKey) return;
+
+    const context = audioContextRef.current;
+    if (!context || context.state !== 'running') return;
+    announcedWarningRef.current = warningKey;
+    playTimerWarningTone(context);
+  }, [audioEnabled, isPaused, position.phase, position.phaseRemainingSeconds]);
+
   function persist(state: LiveTestTimerState) {
     const revision = ++writeRevision.current;
     setPersistenceStatus('SAVING');
@@ -115,6 +142,14 @@ export function LiveTestTimer({
         if (revision === writeRevision.current) setPersistenceStatus('ERROR');
       },
     );
+  }
+
+  async function enableAudioWarnings() {
+    const context = audioContextRef.current ?? new AudioContext();
+    audioContextRef.current = context;
+    if (context.state === 'suspended') await context.resume();
+    setAudioEnabled(context.state === 'running');
+    if (context.state === 'running') playTimerWarningTone(context);
   }
 
   function pause() {
@@ -155,13 +190,18 @@ export function LiveTestTimer({
           </p>
           <h2>{phaseLabels[phase.kind]}{phase.stageNumber ? ` ${phase.stageNumber}` : ''}</h2>
         </div>
-        <button
-          type="button"
-          disabled={!timerState}
-          onClick={isPaused ? resume : pause}
-        >
-          {isPaused ? 'Fortsetzen' : 'Pause'}
-        </button>
+        <div>
+          <button type="button" onClick={() => void enableAudioWarnings()}>
+            {audioEnabled ? 'Warnton aktiv' : 'Warnton aktivieren'}
+          </button>{' '}
+          <button
+            type="button"
+            disabled={!timerState}
+            onClick={isPaused ? resume : pause}
+          >
+            {isPaused ? 'Fortsetzen' : 'Pause'}
+          </button>
+        </div>
       </div>
 
       <div className="timer-display" aria-label="Countdown">
@@ -186,7 +226,7 @@ export function LiveTestTimer({
         </p>
       )}
       <p className="connection-state">
-        Verbindung: Online · Lokaler Timer: {
+        Warnton: {audioEnabled ? 'aktiv' : 'aus'} · Verbindung: Online · Lokaler Timer: {
           persistenceStatus === 'LOADING'
             ? 'Wird geladen'
             : persistenceStatus === 'SAVING'
