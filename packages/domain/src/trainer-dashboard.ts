@@ -17,6 +17,13 @@ export interface TrainerDashboardTask {
   readonly href: string;
 }
 
+export interface TrainerDashboardSummary {
+  readonly total: number;
+  readonly continueTests: number;
+  readonly reviewData: number;
+  readonly prepareTests: number;
+}
+
 const taskByStatus: Partial<Record<TestStatus, Omit<TrainerDashboardTask, 'testId' | 'athleteName' | 'href'>>> = {
   IN_PROGRESS: {
     kind: 'CONTINUE_TEST',
@@ -58,4 +65,16 @@ export function deriveTrainerDashboardTasks(
   });
 
   return Object.freeze(tasks.map((task) => Object.freeze(task)));
+}
+
+export function deriveTrainerDashboardSummary(
+  tasks: readonly TrainerDashboardTask[],
+): TrainerDashboardSummary {
+  const summary: TrainerDashboardSummary = {
+    total: tasks.length,
+    continueTests: tasks.filter((task) => task.kind === 'CONTINUE_TEST').length,
+    reviewData: tasks.filter((task) => task.kind === 'REVIEW_DATA').length,
+    prepareTests: tasks.filter((task) => task.kind === 'PREPARE_TEST').length,
+  };
+  return Object.freeze(summary);
 }
