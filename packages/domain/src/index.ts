@@ -7,5 +7,6 @@ export * from './test-termination';
 export * from './stage-quality';
 export * from './measurement-plausibility';
 export * from './test-timer';
+export * from './trainer-dashboard';
 
 export * from './authorization';
