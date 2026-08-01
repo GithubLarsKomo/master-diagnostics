@@ -35,7 +35,7 @@ test('renders the lactate curve with an equivalent data table', async ({ page })
   await page.goto(`${athleteUrl.pathname}/curve`);
   await expect(page.getByRole('heading', { name: 'Laktatkurve' })).toBeVisible();
   await expect(page.getByRole('img', { name: 'Laktat-Leistungs-Kurve des aktuellsten Tests' })).toBeVisible();
-  await expect(page.getByText('Die exakten Werte stehen zusätzlich in der Tabelle unterhalb der Grafik.')).toBeVisible();
+  await expect(page.locator('desc#curve-desc')).toHaveText('Laktatwerte in Millimol pro Liter über der Leistung in Watt. Die exakten Werte stehen zusätzlich in der Tabelle unterhalb der Grafik.');
 
   const table = page.getByRole('table', { name: 'Messwerte der Laktatkurve' });
   await expect(table).toBeVisible();
