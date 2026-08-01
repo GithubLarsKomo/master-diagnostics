@@ -18,6 +18,17 @@ export interface StoredDiagnosticResultSnapshot<Result = unknown>
   createdAt: string;
 }
 
+export interface AthleteDiagnosticResultHistoryItem {
+  id: string;
+  testId: string;
+  testCreatedAt: string;
+  testStatus: string;
+  versionNumber: number;
+  schemaVersion: string;
+  resultHash: string;
+  createdAt: string;
+}
+
 function validateEnvelope<Result>(
   snapshot: DiagnosticResultSnapshotEnvelope<Result>,
 ): string {
@@ -133,4 +144,33 @@ export async function getDiagnosticResultSnapshot<Result>(
     .orderBy(desc(diagnosticResultSnapshots.versionNumber))
     .limit(1);
   return row ? storedSnapshot<Result>(row) : null;
+}
+
+/** Lists immutable diagnostic result versions for one athlete inside the tenant boundary. */
+export async function listAthleteDiagnosticResultHistory(
+  db: Database,
+  tenantId: string,
+  athleteId: string,
+): Promise<readonly AthleteDiagnosticResultHistoryItem[]> {
+  const rows = await db
+    .select({
+      id: diagnosticResultSnapshots.id,
+      testId: diagnosticResultSnapshots.testId,
+      testCreatedAt: tests.createdAt,
+      testStatus: tests.status,
+      versionNumber: diagnosticResultSnapshots.versionNumber,
+      schemaVersion: diagnosticResultSnapshots.schemaVersion,
+      resultHash: diagnosticResultSnapshots.resultHash,
+      createdAt: diagnosticResultSnapshots.createdAt,
+    })
+    .from(diagnosticResultSnapshots)
+    .innerJoin(tests, and(
+      eq(tests.id, diagnosticResultSnapshots.testId),
+      eq(tests.tenantId, tenantId),
+      eq(tests.athleteId, athleteId),
+    ))
+    .where(eq(diagnosticResultSnapshots.tenantId, tenantId))
+    .orderBy(desc(diagnosticResultSnapshots.createdAt), desc(diagnosticResultSnapshots.versionNumber));
+
+  return Object.freeze(rows.map((row) => Object.freeze(row)));
 }
