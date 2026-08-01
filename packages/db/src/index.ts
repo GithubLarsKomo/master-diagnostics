@@ -18,3 +18,4 @@ export * from './services/test-measurement-sync';
 export * from './services/test-locks';
 export * from './services/test-review';
 export * from './services/diagnostic-result-snapshots';
+export * from './services/athlete-curves';
