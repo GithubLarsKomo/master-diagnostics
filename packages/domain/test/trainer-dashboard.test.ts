@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { deriveTrainerDashboardTasks } from '../src/trainer-dashboard';
+import {
+  deriveTrainerDashboardSummary,
+  deriveTrainerDashboardTasks,
+} from '../src/trainer-dashboard';
 
 describe('deriveTrainerDashboardTasks', () => {
   it('keeps only actionable trainer tasks and orders them by urgency', () => {
@@ -33,5 +36,34 @@ describe('deriveTrainerDashboardTasks', () => {
 
     expect(Object.isFrozen(tasks)).toBe(true);
     expect(Object.isFrozen(tasks[0])).toBe(true);
+  });
+});
+
+describe('deriveTrainerDashboardSummary', () => {
+  it('counts actionable tasks by workflow kind', () => {
+    const tasks = deriveTrainerDashboardTasks([
+      { testId: 'running', athleteName: 'Ingo Imtest', status: 'IN_PROGRESS' },
+      { testId: 'review', athleteName: 'Dora Daten', status: 'DATA_REVIEW' },
+      { testId: 'planned-a', athleteName: 'Anna Anfang', status: 'PLANNED' },
+      { testId: 'planned-b', athleteName: 'Berta Beispiel', status: 'PLANNED' },
+    ]);
+
+    expect(deriveTrainerDashboardSummary(tasks)).toEqual({
+      total: 4,
+      continueTests: 1,
+      reviewData: 1,
+      prepareTests: 2,
+    });
+  });
+
+  it('returns an immutable empty summary', () => {
+    const summary = deriveTrainerDashboardSummary([]);
+    expect(summary).toEqual({
+      total: 0,
+      continueTests: 0,
+      reviewData: 0,
+      prepareTests: 0,
+    });
+    expect(Object.isFrozen(summary)).toBe(true);
   });
 });

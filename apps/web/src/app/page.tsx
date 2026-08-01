@@ -1,4 +1,7 @@
-import { deriveTrainerDashboardTasks } from '@masters/domain';
+import {
+  deriveTrainerDashboardSummary,
+  deriveTrainerDashboardTasks,
+} from '@masters/domain';
 import { planFromExpectedLt2 } from '@masters/diagnostics';
 import { listTestsForTrainerDashboard } from '@masters/db';
 import type { Route } from 'next';
@@ -26,6 +29,7 @@ export default async function HomePage() {
     athleteName: `${athlete.firstName} ${athlete.lastName}`,
     status: test.status,
   })));
+  const dashboardSummary = deriveTrainerDashboardSummary(dashboardTasks);
 
   return (
     <main>
@@ -36,7 +40,14 @@ export default async function HomePage() {
 
       {(tenantContext.role === 'TRAINER' || tenantContext.role === 'TENANT_ADMIN') && (
         <section className="card" aria-labelledby="trainer-tasks-heading">
+          <p className="eyebrow">Trainer-Dashboard</p>
           <h2 id="trainer-tasks-heading">Meine nächsten Aufgaben</h2>
+          <dl aria-label="Aufgabenübersicht">
+            <div><dt>Offen gesamt</dt><dd>{dashboardSummary.total}</dd></div>
+            <div><dt>Laufende Tests</dt><dd>{dashboardSummary.continueTests}</dd></div>
+            <div><dt>Datenprüfung</dt><dd>{dashboardSummary.reviewData}</dd></div>
+            <div><dt>Vorbereitung</dt><dd>{dashboardSummary.prepareTests}</dd></div>
+          </dl>
           {dashboardTasks.length === 0 ? (
             <p>Aktuell gibt es keine offenen Testaufgaben.</p>
           ) : (
