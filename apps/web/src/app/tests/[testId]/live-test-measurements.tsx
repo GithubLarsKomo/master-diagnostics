@@ -2,6 +2,7 @@
 
 import {
   createLiveTestMeasurementsState,
+  getLiveTestMeasurementCaptureProgress,
   liveTestMeasurementKey,
   upsertLiveTestMeasurement,
   type LactateQualifier,
@@ -109,11 +110,7 @@ export function LiveTestMeasurements({
     async function hydrate() {
       const timestamp = Date.now();
       try {
-        const restored = await loadLiveTestMeasurementsState(
-          testId,
-          startedAt,
-          stageCount,
-        );
+        const restored = await loadLiveTestMeasurementsState(testId, startedAt, stageCount);
         const next = restored ?? createLiveTestMeasurementsState(
           testId,
           startedAt,
@@ -130,12 +127,7 @@ export function LiveTestMeasurements({
         setConflict(syncResult.status === 'CONFLICT' ? syncResult : null);
       } catch {
         if (disposed) return;
-        setState(createLiveTestMeasurementsState(
-          testId,
-          startedAt,
-          stageCount,
-          timestamp,
-        ));
+        setState(createLiveTestMeasurementsState(testId, startedAt, stageCount, timestamp));
         setStatus('ERROR');
         setSyncStatus('PENDING');
         setError('Der lokale Messwertspeicher ist nicht verfügbar.');
@@ -157,9 +149,7 @@ export function LiveTestMeasurements({
     );
     setQualifier(measurement?.lactateQualifier ?? 'EXACT');
     setHeartRate(measurement?.heartRate?.toString() ?? '');
-    setMeasuredAt(
-      toLocalDateTime(measurement?.measuredAt ?? new Date()),
-    );
+    setMeasuredAt(toLocalDateTime(measurement?.measuredAt ?? new Date()));
     setError(null);
   }, [selectedKey, state]);
 
@@ -214,6 +204,7 @@ export function LiveTestMeasurements({
       .map((target) => state.measurements[liveTestMeasurementKey(target)])
       .filter((measurement) => measurement !== undefined)
     : [];
+  const captureProgress = state ? getLiveTestMeasurementCaptureProgress(state) : null;
 
   return (
     <section className="card live-measurements" aria-labelledby="measurement-heading">
@@ -223,6 +214,20 @@ export function LiveTestMeasurements({
         Ruhewert, Stufenwerte und die 5-Minuten-Erholung werden sofort lokal
         gespeichert und nach einem Browser-Neustart wiederhergestellt.
       </p>
+      {captureProgress && (
+        <div className={captureProgress.complete ? 'sample-window' : 'connection-state'} role="status">
+          <strong>
+            Erfassung {captureProgress.capturedCount}/{captureProgress.requiredCount}
+            {captureProgress.complete ? ' vollständig' : ''}
+          </strong>
+          {!captureProgress.complete && (
+            <span>
+              {' · Fehlend: '}
+              {captureProgress.missingTargets.map(targetLabel).join(', ')}
+            </span>
+          )}
+        </div>
+      )}
 
       <form className="measurement-form" onSubmit={saveMeasurement}>
         <label>Messpunkt
@@ -233,7 +238,8 @@ export function LiveTestMeasurements({
           >
             {targets.map((target) => {
               const key = liveTestMeasurementKey(target);
-              return <option key={key} value={key}>{targetLabel(target)}</option>;
+              const captured = state?.measurements[key] !== undefined;
+              return <option key={key} value={key}>{captured ? '✓ ' : ''}{targetLabel(target)}</option>;
             })}
           </select>
         </label>
@@ -250,12 +256,7 @@ export function LiveTestMeasurements({
           <select
             value={qualifier}
             onChange={(event) => setQualifier(event.target.value as LactateQualifier)}
-            disabled={
-              !state
-              || status === 'SAVING'
-              || syncStatus === 'SYNCING'
-              || !lactate.trim()
-            }
+            disabled={!state || status === 'SAVING' || syncStatus === 'SYNCING' || !lactate.trim()}
           >
             {Object.entries(qualifierLabels).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
@@ -282,40 +283,17 @@ export function LiveTestMeasurements({
         </label>
         <button
           type="submit"
-          disabled={
-            !state
-            || status === 'SAVING'
-            || syncStatus === 'SYNCING'
-            || syncStatus === 'CONFLICT'
-          }
+          disabled={!state || status === 'SAVING' || syncStatus === 'SYNCING' || syncStatus === 'CONFLICT'}
         >
           Messwert lokal speichern
         </button>
       </form>
 
       <p className="connection-state" role="status">
-        Lokale Messwerte: {
-          status === 'LOADING'
-            ? 'Werden geladen'
-            : status === 'SAVING'
-              ? 'Werden gespeichert'
-              : status === 'SAVED'
-                ? 'Gespeichert'
-                : 'Fehler'
-        }
+        Lokale Messwerte: {status === 'LOADING' ? 'Werden geladen' : status === 'SAVING' ? 'Werden gespeichert' : status === 'SAVED' ? 'Gespeichert' : 'Fehler'}
       </p>
       <p className="connection-state" role="status">
-        Server-Sync: {
-          syncStatus === 'LOADING'
-            ? 'Wird geprüft'
-            : syncStatus === 'SYNCING'
-              ? 'Wird synchronisiert'
-              : syncStatus === 'SYNCED'
-                ? 'Synchronisiert'
-                : syncStatus === 'PENDING'
-                  ? 'Ausstehend'
-                  : 'Konflikt'
-        }
+        Server-Sync: {syncStatus === 'LOADING' ? 'Wird geprüft' : syncStatus === 'SYNCING' ? 'Wird synchronisiert' : syncStatus === 'SYNCED' ? 'Synchronisiert' : syncStatus === 'PENDING' ? 'Ausstehend' : 'Konflikt'}
       </p>
       {error && <p className="timer-alert" role="alert">{error}</p>}
       {syncStatus === 'PENDING' && status !== 'ERROR' && (
@@ -326,8 +304,7 @@ export function LiveTestMeasurements({
       {conflict && (
         <div className="timer-alert" role="alert">
           <p>
-            Der lokale Wert wurde nicht überschrieben. Auf dem Server liegt Version
-            {' '}{conflict.serverVersion}.
+            Der lokale Wert wurde nicht überschrieben. Auf dem Server liegt Version {conflict.serverVersion}.
           </p>
           <details>
             <summary>Serverstand anzeigen</summary>
@@ -341,14 +318,8 @@ export function LiveTestMeasurements({
           {savedMeasurements.map((measurement) => (
             <li key={liveTestMeasurementKey(measurement.target)}>
               <strong>{targetLabel(measurement.target)}</strong>
-              {' · '}
-              Laktat {
-                measurement.lactateValueX100 === null
-                  ? '—'
-                  : `${measurement.lactateQualifier === 'LESS_THAN' ? '< ' : measurement.lactateQualifier === 'GREATER_THAN' ? '> ' : ''}${(measurement.lactateValueX100 / 100).toFixed(1).replace('.', ',')} mmol/L`
-              }
-              {' · '}
-              HF {measurement.heartRate ?? '—'}
+              {' · '}Laktat {measurement.lactateValueX100 === null ? '—' : `${measurement.lactateQualifier === 'LESS_THAN' ? '< ' : measurement.lactateQualifier === 'GREATER_THAN' ? '> ' : ''}${(measurement.lactateValueX100 / 100).toFixed(1).replace('.', ',')} mmol/L`}
+              {' · '}HF {measurement.heartRate ?? '—'}
             </li>
           ))}
         </ul>

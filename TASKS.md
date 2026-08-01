@@ -54,10 +54,11 @@
 - [ ] timergeführten Ablauf bauen
   - [x] deterministischen, snapshotbasierten Timer-Fachkern implementieren
   - [x] ersten Browserpfad für Planung, Sicherheitscheck, Live-Timer und Abbruch implementieren
-- [ ] akustische und visuelle Warnungen
-- [ ] Ruhe-, Stufen- und 5-Minuten-Erholungsmessung
+- [x] akustische und visuelle Warnungen
+- [x] Ruhe-, Stufen- und 5-Minuten-Erholungsmessung
   - [x] lokalen Entwurf für Laktat, Qualifier, Herzfrequenz und Messzeit erfassen
   - [x] genau einen Ruhe-/Erholungswert und höchstens einen Wert je Stufe lokal halten
+  - [x] Vollständigkeit über Ruhewert, alle Stufen und 5-Minuten-Erholung deterministisch prüfen und sichtbar machen
 - [ ] IndexedDB-Speicher mit Dexie
   - [x] Timer- und Pausenzustand innerhalb von 500 ms lokal persistieren
   - [x] Messwertentwurf testgebunden in Dexie speichern
