@@ -29,7 +29,11 @@ jobs:
       - name: Verify generated algorithm references
         run: |
           python3 tools/generate_algorithm_reference.py
-          git diff --exit-code -- packages/diagnostics/reference/algorithm-reference-v1.json packages/diagnostics/reference/algorithm-reference-v2.json
+          python3 tools/generate_modified_dmax_reference.py
+          git diff --exit-code -- \
+            packages/diagnostics/reference/algorithm-reference-v1.json \
+            packages/diagnostics/reference/algorithm-reference-v2.json \
+            packages/diagnostics/reference/modified-dmax-reference-v1.json
 
       - uses: pnpm/action-setup@v4
         with:
