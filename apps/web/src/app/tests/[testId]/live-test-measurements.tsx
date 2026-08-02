@@ -153,6 +153,26 @@ export function LiveTestMeasurements({
     setError(null);
   }, [selectedKey, state]);
 
+  async function retryPendingSync() {
+    setSyncStatus('SYNCING');
+    setError(null);
+    try {
+      const syncResult = await synchronizePendingLiveTestMeasurements(testId, lockToken);
+      setSyncStatus(syncResult.status);
+      setConflict(syncResult.status === 'CONFLICT' ? syncResult : null);
+      if (syncResult.status === 'PENDING') {
+        setError('Server-Sync weiterhin ausstehend. Bitte Verbindung prüfen und erneut versuchen.');
+      }
+    } catch (syncError) {
+      setSyncStatus('PENDING');
+      setError(
+        syncError instanceof Error
+          ? `Server-Sync weiterhin ausstehend: ${syncError.message}`
+          : 'Server-Sync weiterhin ausstehend.',
+      );
+    }
+  }
+
   async function saveMeasurement(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!state) return;
@@ -297,9 +317,12 @@ export function LiveTestMeasurements({
       </p>
       {error && <p className="timer-alert" role="alert">{error}</p>}
       {syncStatus === 'PENDING' && status !== 'ERROR' && (
-        <p className="sample-window">
-          Die lokalen Werte bleiben erhalten und werden beim nächsten Öffnen erneut gesendet.
-        </p>
+        <div className="sample-window">
+          <p>Die lokalen Werte bleiben erhalten und werden beim nächsten Öffnen erneut gesendet.</p>
+          <button type="button" onClick={() => void retryPendingSync()}>
+            Server-Sync erneut versuchen
+          </button>
+        </div>
       )}
       {conflict && (
         <div className="timer-alert" role="alert">
