@@ -12,6 +12,8 @@ export type LiveTestMeasurementSyncStatus =
   | { status: 'PENDING' }
   | { status: 'CONFLICT'; serverVersion: number; serverState: unknown };
 
+const MEASUREMENT_SYNC_TIMEOUT_MS = 3_000;
+
 async function latestOperation(
   testId: string,
   entityId: string,
@@ -108,6 +110,7 @@ export async function synchronizePendingLiveTestMeasurements(
             'x-test-lock-token': lockToken,
           },
           body: JSON.stringify(requestBody(operation)),
+          signal: AbortSignal.timeout(MEASUREMENT_SYNC_TIMEOUT_MS),
         },
       );
       if (!response.ok) return { status: 'PENDING' };
