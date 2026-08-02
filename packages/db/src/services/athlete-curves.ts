@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Database } from '../client';
-import { testStages, tests } from '../schema';
+import { testPlanSnapshots, testStages, tests } from '../schema';
 
 export interface AthleteLactateCurvePoint {
   testId: string;
@@ -13,6 +13,11 @@ export interface AthleteLactateCurvePoint {
 export interface AthleteLactateCurveSeries {
   testId: string;
   createdAt: string;
+  deviceType: string;
+  protocolVersionId: string;
+  startWatts: number;
+  incrementWatts: number;
+  maximumStages: number;
   points: ReadonlyArray<AthleteLactateCurvePoint>;
 }
 
@@ -43,8 +48,20 @@ export async function getRecentAthleteLactateCurves(
   limit = 5,
 ): Promise<ReadonlyArray<AthleteLactateCurveSeries>> {
   const recentTests = await db
-    .select({ id: tests.id, createdAt: tests.createdAt })
+    .select({
+      id: tests.id,
+      createdAt: tests.createdAt,
+      deviceType: tests.deviceType,
+      protocolVersionId: testPlanSnapshots.protocolVersionId,
+      startWatts: testPlanSnapshots.startWatts,
+      incrementWatts: testPlanSnapshots.incrementWatts,
+      maximumStages: testPlanSnapshots.maximumStages,
+    })
     .from(tests)
+    .innerJoin(testPlanSnapshots, and(
+      eq(testPlanSnapshots.tenantId, tenantId),
+      eq(testPlanSnapshots.testId, tests.id),
+    ))
     .where(and(eq(tests.tenantId, tenantId), eq(tests.athleteId, athleteId)))
     .orderBy(desc(tests.createdAt))
     .limit(Math.min(Math.max(limit, 1), 5));
@@ -69,6 +86,11 @@ export async function getRecentAthleteLactateCurves(
   return Object.freeze(recentTests.map((test) => Object.freeze({
     testId: test.id,
     createdAt: test.createdAt,
+    deviceType: test.deviceType,
+    protocolVersionId: test.protocolVersionId,
+    startWatts: test.startWatts,
+    incrementWatts: test.incrementWatts,
+    maximumStages: test.maximumStages,
     points: Object.freeze(rows
       .filter((row) => row.testId === test.id)
       .map(toCurvePoint)
