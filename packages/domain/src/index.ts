@@ -12,5 +12,6 @@ export * from './athlete-dashboard';
 export * from './test-comparability';
 export * from './report-document';
 export * from './report-pdf';
+export * from './test-export';
 
 export * from './authorization';
