@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { link, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 export interface ReportArtifactStorage {
@@ -26,7 +26,14 @@ export class FileSystemReportArtifactStorage implements ReportArtifactStorage {
   async put(reference: string, bytes: Uint8Array): Promise<void> {
     const target = this.path(reference);
     await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, bytes, { flag: 'wx' });
+    const temporary = `${target}.tmp-${crypto.randomUUID()}`;
+    try {
+      await writeFile(temporary, bytes, { flag: 'wx' });
+      // Hard-link creation is atomic and fails when the immutable target already exists.
+      await link(temporary, target);
+    } finally {
+      await rm(temporary, { force: true });
+    }
   }
 
   async get(reference: string): Promise<Uint8Array> {
