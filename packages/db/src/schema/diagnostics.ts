@@ -51,4 +51,6 @@ export const zoneProfiles = sqliteTable('zone_profiles', {
 export const reportVersions = sqliteTable('report_versions', {
   id: id(), tenantId: tenantId(), testId: text('test_id').notNull().references(() => tests.id), interpretationId: text('interpretation_id').notNull().references(() => interpretations.id),
   versionNumber: integer('version_number').notNull(), locale: text('locale', { enum: ['de','en'] }).notNull(), contentHash: text('content_hash').notNull(), storageReference: text('storage_reference').notNull(), ...timestamps,
-});
+}, (t) => [
+  uniqueIndex('report_version_test_locale_version_uq').on(t.tenantId, t.testId, t.locale, t.versionNumber),
+]);
