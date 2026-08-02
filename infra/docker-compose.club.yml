@@ -67,7 +67,8 @@ services:
         condition: service_healthy
     networks: [internal]
 
-networks: [internal]
+networks:
+  internal:
 volumes:
   libsql-data:
   report-data:
