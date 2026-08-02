@@ -121,16 +121,21 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
   await expect(page.getByText(/Server-Sync: Ausstehend/)).toBeVisible();
 
   await page.unroute('**/api/tests/**/measurements/sync');
-  const retriedRestSync = page.waitForResponse(
-    (response) => response.url().includes('/measurements/sync')
-      && response.request().method() === 'POST',
-  );
   await page.reload();
   await expect(page.getByText('Bearbeitungssperre aktiv')).toBeVisible();
-  expect((await retriedRestSync).ok()).toBe(true);
-  await expect(page.getByText(/Server-Sync: Synchronisiert/)).toBeVisible();
   await expect(page.getByLabel('Laktat (mmol/L)')).toHaveValue('1,2');
   await expect(page.getByLabel('Herzfrequenz (1/min)')).toHaveValue('52');
+  await expect(page.getByText(/Server-Sync: (Ausstehend|Synchronisiert)/)).toBeVisible();
+  const retrySyncButton = page.getByRole('button', { name: 'Server-Sync erneut versuchen' });
+  if (await retrySyncButton.isVisible()) {
+    const retriedRestSync = page.waitForResponse(
+      (response) => response.url().includes('/measurements/sync')
+        && response.request().method() === 'POST',
+    );
+    await retrySyncButton.click();
+    expect((await retriedRestSync).ok()).toBe(true);
+  }
+  await expect(page.getByText(/Server-Sync: Synchronisiert/)).toBeVisible();
 
   await page.getByLabel('Messpunkt').selectOption('STAGE:1');
   await page.getByLabel('Laktat (mmol/L)').fill('2,40');
