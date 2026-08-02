@@ -18,6 +18,7 @@ export interface AppendReportVersionInput {
   locale: ReportLocale;
   contentHash: string;
   storageReference: string;
+  expectedVersionNumber?: number;
 }
 
 export interface StoredReportVersion {
@@ -52,6 +53,10 @@ function validateInput(input: AppendReportVersionInput): void {
   }
   if (!input.storageReference.trim()) {
     throw new Error('Report storage reference is required');
+  }
+  if (input.expectedVersionNumber !== undefined
+    && (!Number.isInteger(input.expectedVersionNumber) || input.expectedVersionNumber < 1)) {
+    throw new Error('Expected report version number must be a positive integer');
   }
 }
 
@@ -128,7 +133,6 @@ export async function getReportGenerationSource(
       lt1Json: interpretations.lt1Json,
       lt2Json: interpretations.lt2Json,
       trainerComment: interpretations.rationale,
-      interpretationVersion: interpretations.versionNumber,
     })
     .from(interpretations)
     .innerJoin(tests, and(
@@ -184,7 +188,18 @@ export async function appendReportVersion(
   await requireReleasedInterpretation(db, tenantId, testId, input.interpretationId);
 
   return db.transaction(async (tx) => {
-    const versionNumber = await getNextReportVersionNumber(tx, tenantId, testId, input.locale);
+    const [latest] = await tx
+      .select({ versionNumber: max(reportVersions.versionNumber) })
+      .from(reportVersions)
+      .where(and(
+        eq(reportVersions.tenantId, tenantId),
+        eq(reportVersions.testId, testId),
+        eq(reportVersions.locale, input.locale),
+      ));
+    const versionNumber = (latest?.versionNumber ?? 0) + 1;
+    if (input.expectedVersionNumber !== undefined && input.expectedVersionNumber !== versionNumber) {
+      throw new Error('Report version changed during generation');
+    }
     const now = new Date().toISOString();
     const [created] = await tx.insert(reportVersions).values({
       id: crypto.randomUUID(),
