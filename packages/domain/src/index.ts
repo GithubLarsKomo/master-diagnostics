@@ -14,5 +14,6 @@ export * from './report-document';
 export * from './report-pdf';
 export * from './test-export';
 export * from './analysis-export';
+export * from './reidentification-risk';
 
 export * from './authorization';
