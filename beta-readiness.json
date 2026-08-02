@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "repository": {
+    "name": "GithubLarsKomo/master-diagnostics",
+    "headSha": "2d7b7a93842af4d0d8de121e78871908ff6301c9"
+  },
+  "betaDefinition": "Die erste Beta ist erreicht, wenn ein Trainer im lokalen Club-Modus einen Athleten verwalten, einen Laktattest planen und offline-sicher durchführen, Ergebnisse diagnostisch auswerten und vergleichen sowie einen freigegebenen deutsch- oder englischsprachigen Bericht mit dokumentiertem Setup und Recovery erzeugen kann, ohne dass ein explizites MVP-Release-Gate offen bleibt.",
+  "readinessPercent": 87,
+  "betaReached": false,
+  "dimensions": [
+    {
+      "name": "core-scope",
+      "max": 20,
+      "score": 20,
+      "evidence": [
+        "Athleten, Einwilligungen, Protokollplanung, Testdurchführung, Qualitätsmodell, Diagnostik und Trainingszonen sind in TASKS.md als abgeschlossen dokumentiert.",
+        "Trainer-Dashboard, Mehrtestvergleich und Vergleichbarkeitsklassifikation sind umgesetzt und browserseitig nachgewiesen."
+      ],
+      "gaps": []
+    },
+    {
+      "name": "end-to-end-path",
+      "max": 20,
+      "score": 18,
+      "evidence": [
+        "Browser-E2E deckt Setup, Live-Test, Dexie-Persistenz, Wiederaufnahme und Sync-Retry ohne Datenverlust ab.",
+        "PR #97 wurde mit grüner CI gemergt und liefert deterministische DE/EN-PDF-Bytes."
+      ],
+      "gaps": [
+        "Der PDF-Renderer ist noch nicht als vollständiger Download-/Persistenzpfad in den Benutzerfluss integriert."
+      ]
+    },
+    {
+      "name": "data-recovery",
+      "max": 15,
+      "score": 13,
+      "evidence": [
+        "Offline-Wiederaufnahme und Sync-Retry sind als Release-Gate erfüllt.",
+        "Berichtsversionen sind append-only und auf Datenbankebene gegen UPDATE/DELETE abgesichert."
+      ],
+      "gaps": [
+        "Backup und Restore wurden noch nicht praktisch als Betriebs-Recovery nachgewiesen."
+      ]
+    },
+    {
+      "name": "verification",
+      "max": 20,
+      "score": 20,
+      "evidence": [
+        "CI umfasst Lint, Typecheck, Unit, Build und Browser-E2E.",
+        "PR #97 CI Run #260 ist erfolgreich abgeschlossen.",
+        "Algorithmus-Referenztests sowie Tenant-/Rollen-Policy-Tests sind als Release-Gates erfüllt."
+      ],
+      "gaps": []
+    },
+    {
+      "name": "usability-deployment",
+      "max": 15,
+      "score": 10,
+      "evidence": [
+        "Lokaler Club-Bootstrap und Tenant-Admin-Setup sind browserseitig nachgewiesen.",
+        "Trainer-Dashboard und Kurven-/Vergleichsansichten sind vorhanden."
+      ],
+      "gaps": [
+        "Frische Docker-Installation ist noch kein eigener CI-Smoke-Test.",
+        "WCAG-2.2-AA-Kernprüfungen sind noch offen.",
+        "Berichtdownload ist noch nicht vollständig in die UI integriert."
+      ]
+    },
+    {
+      "name": "beta-operations",
+      "max": 10,
+      "score": 6,
+      "evidence": [
+        "Mehrere sicherheitsrelevante Release-Gates sind explizit dokumentiert und teilweise erfüllt.",
+        "Berichtsversionierung und deterministische Berichtserzeugung sind vorhanden."
+      ],
+      "gaps": [
+        "Export-/Import-Roundtrip ist offen.",
+        "Backup/Restore-Drill ist offen.",
+        "Deutsch- und englischsprachige Berichte sind als Release-Gate noch nicht freigegeben."
+      ]
+    }
+  ],
+  "hardBlockers": [
+    "WCAG-2.2-AA-Kernprüfungen bestehen noch nicht.",
+    "Export-/Import-Roundtrip ist noch nicht vollständig.",
+    "Backup und Restore wurden noch nicht praktisch getestet.",
+    "Deutsch- und englischsprachige Berichte sind noch nicht als Release-Gate freigegeben."
+  ],
+  "betaFollowUps": [
+    "Vollständiges Athleten-Dashboard kann nach der ersten Beta weiter ausgebaut werden.",
+    "Clerk-SaaS-Adapter ist post-beta für den lokalen Club-Modus.",
+    "Bluetooth-Adapter und RP3-Experiment gehören ausdrücklich in spätere Epics."
+  ],
+  "uiPrototype": {
+    "recommended": false,
+    "reason": "Die aktuell beta-blockierenden Unsicherheiten liegen überwiegend in Release-Gates, Datenportabilität und Betriebs-Recovery; ein zusätzlicher UI-Prototyp würde diese Blocker derzeit nicht entscheiden."
+  },
+  "nextActions": [
+    "Den gemergten DE/EN-PDF-Renderer als vollständigen, tenant-sicheren Report-Download-/Persistenzpfad integrieren und das Bericht-Release-Gate schließen.",
+    "Einen minimalen, atomaren Export-/Import-Roundtrip für den Beta-Scope implementieren und mit E2E-/DB-Nachweis schließen.",
+    "Den Betriebs-Release-Slice mit produktivem Docker-Smoke, praktischem Backup/Restore-Drill und WCAG-2.2-AA-Kernprüfung abschließen."
+  ]
+}
