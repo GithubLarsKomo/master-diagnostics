@@ -71,15 +71,14 @@ export function createReportDeliveryService(db: Database, storage: ReportArtifac
       const reference = storageReference(tenantId, testId, locale, nextVersion);
       await storage.put(reference, pdf);
       try {
+        const storedBytes = await storage.get(reference);
         const version = await appendReportVersion(db, tenantId, testId, {
           interpretationId: source.interpretationId,
           locale,
-          contentHash: hashPdf(pdf),
+          contentHash: hashPdf(storedBytes),
           storageReference: reference,
+          expectedVersionNumber: nextVersion,
         });
-        if (version.versionNumber !== nextVersion) {
-          throw new Error('Report version changed during generation');
-        }
         return Object.freeze({
           version,
           downloadPath: `/api/tests/${testId}/reports/${version.id}`,
