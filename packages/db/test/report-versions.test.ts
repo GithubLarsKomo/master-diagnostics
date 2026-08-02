@@ -69,11 +69,22 @@ describe('immutable report versions', () => {
     await expect(db.update(schema.reportVersions)
       .set({ storageReference: 'reports/test-a/de/changed.pdf' })
       .where(eq(schema.reportVersions.id, created.id)))
-      .rejects.toThrow('report versions are immutable');
+      .rejects.toThrow();
+
+    const [afterUpdate] = await db.select().from(schema.reportVersions)
+      .where(eq(schema.reportVersions.id, created.id))
+      .limit(1);
+    expect(afterUpdate?.storageReference).toBe(created.storageReference);
 
     await expect(db.delete(schema.reportVersions)
       .where(eq(schema.reportVersions.id, created.id)))
-      .rejects.toThrow('report versions are immutable');
+      .rejects.toThrow();
+
+    const [afterDelete] = await db.select().from(schema.reportVersions)
+      .where(eq(schema.reportVersions.id, created.id))
+      .limit(1);
+    expect(afterDelete?.id).toBe(created.id);
+    expect(afterDelete?.contentHash).toBe(created.contentHash);
   });
 
   it('rejects draft interpretations, foreign tenants and invalid hashes', async () => {
