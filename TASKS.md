@@ -118,8 +118,8 @@
 - [x] aufgabenorientiertes Trainer-Dashboard
 - [ ] vollständiges Athleten-Dashboard
 - [x] barrierearme Kurvendiagramme
-- [ ] Vergleich bis fünf Tests
-- [ ] Vergleichbarkeitsklassifikation
+- [x] Vergleich bis fünf Tests
+- [x] Vergleichbarkeitsklassifikation
 - [ ] unveränderliche Berichtsversionen
 - [ ] PDF Deutsch/Englisch
 
