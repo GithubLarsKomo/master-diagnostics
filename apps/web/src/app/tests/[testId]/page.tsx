@@ -151,6 +151,18 @@ export default async function TestPage({ params }: { params: Promise<{ testId: s
         </>
       )}
 
+      {(execution.test.status === 'DATA_REVIEW' || execution.test.status === 'RELEASED') && (
+        <section className="card" aria-labelledby="test-export-heading">
+          <h2 id="test-export-heading">Testexport</h2>
+          <p>Messwerte und Testmetadaten in einem portablen, versionierten Exportformat.</p>
+          <p>
+            <a href={`/api/tests/${testId}/export?format=csv`}>CSV herunterladen</a>
+            {' · '}<a href={`/api/tests/${testId}/export?format=json`}>JSON herunterladen</a>
+            {' · '}<a href={`/api/tests/${testId}/export?format=markdown`}>Markdown herunterladen</a>
+          </p>
+        </section>
+      )}
+
       {execution.test.status === 'RELEASED' && <ReportDeliveryControls testId={testId} />}
     </main>
   );
