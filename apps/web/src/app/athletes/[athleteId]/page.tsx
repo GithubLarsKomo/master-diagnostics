@@ -2,6 +2,7 @@ import { authorize, deriveAthleteDashboardSummary } from '@masters/domain';
 import {
   athleteIsMinor,
   getAthlete,
+  getRecentAthleteLactateCurves,
   listActiveTrainers,
   listAthleteDiagnosticResultHistory,
   listAthleteSnapshots,
@@ -9,6 +10,7 @@ import {
   listConsents,
   listDeletionRequests,
   listGuardians,
+  listReportVersions,
   listTestsForExecution,
   previewAthleteDeletion,
 } from '@masters/db';
@@ -31,7 +33,7 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
   const athlete = await getAthlete(db, context.tenantId, athleteId);
   if (!athlete) notFound();
 
-  const [trainers, assignments, snapshots, consentRows, guardians, deletionRequests, deletionPreview, tenantTests, resultHistory] = await Promise.all([
+  const [trainers, assignments, snapshots, consentRows, guardians, deletionRequests, deletionPreview, tenantTests, resultHistory, recentCurves] = await Promise.all([
     listActiveTrainers(db, context.tenantId),
     listCoachAssignments(db, context.tenantId, athlete.id),
     listAthleteSnapshots(db, context.tenantId, athlete.id),
@@ -41,6 +43,7 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
     previewAthleteDeletion(db, context.tenantId, athlete.id),
     listTestsForExecution(db, context.tenantId),
     listAthleteDiagnosticResultHistory(db, context.tenantId, athlete.id),
+    getRecentAthleteLactateCurves(db, context.tenantId, athlete.id, 5),
   ]);
   const athleteTests = tenantTests
     .filter(({ athlete: testAthlete }) => testAthlete.id === athlete.id)
@@ -53,6 +56,12 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
       incrementWatts: plan.incrementWatts,
       maximumStages: plan.maximumStages,
     }));
+  const recentTestIds = new Set(recentCurves.map((curve) => curve.testId));
+  const reportVersions = (await Promise.all(
+    athleteTests
+      .filter((test) => recentTestIds.has(test.testId))
+      .map((test) => listReportVersions(db, context.tenantId, test.testId)),
+  )).flat();
   const dashboardSummary = deriveAthleteDashboardSummary(athleteTests);
   const editAction = editAthlete.bind(null, athlete.id);
   const assignmentAction = addCoachAssignment.bind(null, athlete.id);
@@ -83,8 +92,17 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
           <div><dt>Aktiv</dt><dd>{dashboardSummary.activeTests}</dd></div>
           <div><dt>Datenprüfung</dt><dd>{dashboardSummary.reviewTests}</dd></div>
           <div><dt>Freigegeben</dt><dd>{dashboardSummary.completedTests}</dd></div>
+          <div><dt>Kurven verfügbar</dt><dd>{recentCurves.filter((curve) => curve.points.length >= 2).length}</dd></div>
+          <div><dt>Berichtsversionen</dt><dd>{reportVersions.length}</dd></div>
         </dl>
         {dashboardSummary.latestTestAt && <p>Letzter Test: {new Date(dashboardSummary.latestTestAt).toLocaleString('de-DE')}</p>}
+        {athleteTests.length > 0 && (
+          <p>
+            <Link href={`/athletes/${athlete.id}/curve`}>Aktuelle Laktatkurve öffnen</Link>
+            {' · '}
+            <Link href={`/athletes/${athlete.id}/comparison`}>Bis zu fünf Tests vergleichen</Link>
+          </p>
+        )}
         {athleteTests.length === 0 ? (
           <p>Noch keine Tests für diesen Athleten vorhanden.</p>
         ) : (
@@ -92,6 +110,22 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
             {athleteTests.map((test) => (
               <li key={test.testId}>
                 <strong>{test.status}</strong> · LT2-Plan {test.expectedLt2Watts} W · Start {test.startWatts} W · +{test.incrementWatts} W · max. {test.maximumStages} Stufen · <Link href={`/tests/${test.testId}`}>Test öffnen</Link>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
+      <section className="card" aria-labelledby="report-history-heading">
+        <h2 id="report-history-heading">Berichte</h2>
+        <p>Unveränderliche deutsch- und englischsprachige PDF-Berichtsversionen der jüngsten Tests.</p>
+        {reportVersions.length === 0 ? (
+          <p>Noch keine Berichtsversion vorhanden.</p>
+        ) : (
+          <ol>
+            {reportVersions.map((report) => (
+              <li key={report.id}>
+                <strong>{report.locale.toUpperCase()} · Version {report.versionNumber}</strong> · {new Date(report.createdAt).toLocaleString('de-DE')} · <Link href={`/api/tests/${report.testId}/reports/${report.id}`}>PDF herunterladen</Link> · <Link href={`/tests/${report.testId}`}>Test öffnen</Link>
               </li>
             ))}
           </ol>
