@@ -24,6 +24,9 @@ services:
       DATABASE_URL: http://libsql:8080
       NEXT_PUBLIC_APP_URL: https://${APP_HOST}
       BETTER_AUTH_URL: https://${APP_HOST}
+      REPORT_STORAGE_DIR: /var/lib/masters/reports
+    volumes:
+      - report-data:/var/lib/masters/reports
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -64,9 +67,9 @@ services:
         condition: service_healthy
     networks: [internal]
 
-networks:
-  internal:
+networks: [internal]
 volumes:
   libsql-data:
+  report-data:
   caddy-data:
   caddy-config:
