@@ -43,10 +43,12 @@ export default async function TestPage({ params }: { params: Promise<{ testId: s
   authorize(context, 'test.run');
   const { testId } = await params;
   const execution = await getTestForExecution(db, context.tenantId, testId);
+  const tenantAdminMayReviewOrReport = context.role === 'TENANT_ADMIN'
+    && (execution?.test.status === 'DATA_REVIEW' || execution?.test.status === 'RELEASED');
   if (!execution || (
     execution.test.status !== 'IN_PROGRESS'
     && execution.test.conductingTrainerUserId !== context.userId
-    && !(execution.test.status === 'DATA_REVIEW' && context.role === 'TENANT_ADMIN')
+    && !tenantAdminMayReviewOrReport
   )) notFound();
 
   const timer = await getTestTimerPlan(
