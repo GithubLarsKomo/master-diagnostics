@@ -47,6 +47,18 @@ describe('immutable report versions', () => {
     expect((await listReportVersions(db, 'tenant-a', 'test-a', 'de')).map((item) => item.versionNumber)).toEqual([2, 1]);
   });
 
+  it('rejects a stale expected version before creating another immutable row', async () => {
+    await appendReportVersion(db, 'tenant-a', 'test-a', {
+      interpretationId: 'interp-released', locale: 'de', contentHash: hashA,
+      storageReference: 'reports/test-a/de/v1.pdf', expectedVersionNumber: 1,
+    });
+    await expect(appendReportVersion(db, 'tenant-a', 'test-a', {
+      interpretationId: 'interp-released', locale: 'de', contentHash: hashB,
+      storageReference: 'reports/test-a/de/stale.pdf', expectedVersionNumber: 1,
+    })).rejects.toThrow('Report version changed during generation');
+    expect(await listReportVersions(db, 'tenant-a', 'test-a', 'de')).toHaveLength(1);
+  });
+
   it('reads a report version only inside its tenant and test boundary', async () => {
     const created = await appendReportVersion(db, 'tenant-a', 'test-a', { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'reports/test-a/de/v1.pdf' });
     expect((await getReportVersion(db, 'tenant-a', 'test-a', created.id))?.id).toBe(created.id);
