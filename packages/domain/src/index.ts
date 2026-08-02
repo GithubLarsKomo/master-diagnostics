@@ -9,5 +9,6 @@ export * from './measurement-plausibility';
 export * from './test-timer';
 export * from './trainer-dashboard';
 export * from './athlete-dashboard';
+export * from './test-comparability';
 
 export * from './authorization';
