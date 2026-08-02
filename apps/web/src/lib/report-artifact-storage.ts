@@ -1,9 +1,10 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 export interface ReportArtifactStorage {
   put(reference: string, bytes: Uint8Array): Promise<void>;
   get(reference: string): Promise<Uint8Array>;
+  remove(reference: string): Promise<void>;
 }
 
 function assertSafeReference(reference: string): void {
@@ -30,6 +31,10 @@ export class FileSystemReportArtifactStorage implements ReportArtifactStorage {
 
   async get(reference: string): Promise<Uint8Array> {
     return new Uint8Array(await readFile(this.path(reference)));
+  }
+
+  async remove(reference: string): Promise<void> {
+    await rm(this.path(reference), { force: true });
   }
 }
 

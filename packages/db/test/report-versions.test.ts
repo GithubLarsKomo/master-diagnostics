@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/libsql';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Database } from '../src/client';
 import * as schema from '../src/schema';
-import { appendReportVersion, listReportVersions } from '../src/services/report-versions';
+import { appendReportVersion, getReportVersion, listReportVersions } from '../src/services/report-versions';
 
 async function createTestDatabase(): Promise<Database> {
   const client = createClient({ url: `file:/tmp/masters-report-versions-${crypto.randomUUID()}.db` });
@@ -47,42 +47,28 @@ describe('immutable report versions', () => {
     expect((await listReportVersions(db, 'tenant-a', 'test-a', 'de')).map((item) => item.versionNumber)).toEqual([2, 1]);
   });
 
+  it('reads a report version only inside its tenant and test boundary', async () => {
+    const created = await appendReportVersion(db, 'tenant-a', 'test-a', { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'reports/test-a/de/v1.pdf' });
+    expect((await getReportVersion(db, 'tenant-a', 'test-a', created.id))?.id).toBe(created.id);
+    expect(await getReportVersion(db, 'tenant-b', 'test-a', created.id)).toBeNull();
+    expect(await getReportVersion(db, 'tenant-a', 'test-b', created.id)).toBeNull();
+    expect(await getReportVersion(db, 'tenant-a', 'test-a', crypto.randomUUID())).toBeNull();
+  });
+
   it('enforces one version number per test and locale at database level', async () => {
     const created = await appendReportVersion(db, 'tenant-a', 'test-a', { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'reports/test-a/de/v1.pdf' });
     await expect(db.insert(schema.reportVersions).values({
-      id: crypto.randomUUID(),
-      tenantId: created.tenantId,
-      testId: created.testId,
-      interpretationId: created.interpretationId,
-      versionNumber: created.versionNumber,
-      locale: created.locale,
-      contentHash: hashB,
-      storageReference: 'reports/test-a/de/duplicate.pdf',
-      createdAt: '2026-08-02T10:01:00.000Z',
-      updatedAt: '2026-08-02T10:01:00.000Z',
+      id: crypto.randomUUID(), tenantId: created.tenantId, testId: created.testId, interpretationId: created.interpretationId, versionNumber: created.versionNumber, locale: created.locale, contentHash: hashB, storageReference: 'reports/test-a/de/duplicate.pdf', createdAt: '2026-08-02T10:01:00.000Z', updatedAt: '2026-08-02T10:01:00.000Z',
     })).rejects.toThrow();
   });
 
   it('rejects direct updates and deletes at database level', async () => {
     const created = await appendReportVersion(db, 'tenant-a', 'test-a', { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'reports/test-a/de/v1.pdf' });
-
-    await expect(db.update(schema.reportVersions)
-      .set({ storageReference: 'reports/test-a/de/changed.pdf' })
-      .where(eq(schema.reportVersions.id, created.id)))
-      .rejects.toThrow();
-
-    const [afterUpdate] = await db.select().from(schema.reportVersions)
-      .where(eq(schema.reportVersions.id, created.id))
-      .limit(1);
+    await expect(db.update(schema.reportVersions).set({ storageReference: 'reports/test-a/de/changed.pdf' }).where(eq(schema.reportVersions.id, created.id))).rejects.toThrow();
+    const [afterUpdate] = await db.select().from(schema.reportVersions).where(eq(schema.reportVersions.id, created.id)).limit(1);
     expect(afterUpdate?.storageReference).toBe(created.storageReference);
-
-    await expect(db.delete(schema.reportVersions)
-      .where(eq(schema.reportVersions.id, created.id)))
-      .rejects.toThrow();
-
-    const [afterDelete] = await db.select().from(schema.reportVersions)
-      .where(eq(schema.reportVersions.id, created.id))
-      .limit(1);
+    await expect(db.delete(schema.reportVersions).where(eq(schema.reportVersions.id, created.id))).rejects.toThrow();
+    const [afterDelete] = await db.select().from(schema.reportVersions).where(eq(schema.reportVersions.id, created.id)).limit(1);
     expect(afterDelete?.id).toBe(created.id);
     expect(afterDelete?.contentHash).toBe(created.contentHash);
   });

@@ -23,6 +23,17 @@ describe('report artifact storage', () => {
     expect(Array.from(await storage.get(reference))).toEqual(Array.from(bytes));
   });
 
+  it('removes an orphaned artifact idempotently for DB compensation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'masters-report-storage-'));
+    roots.push(root);
+    const storage = new FileSystemReportArtifactStorage(root);
+    const reference = 'tenant-a/test-a/en/v1.pdf';
+    await storage.put(reference, new Uint8Array([1, 2, 3]));
+    await storage.remove(reference);
+    await expect(storage.get(reference)).rejects.toThrow();
+    await expect(storage.remove(reference)).resolves.toBeUndefined();
+  });
+
   it('rejects absolute and traversal references', async () => {
     const root = await mkdtemp(join(tmpdir(), 'masters-report-storage-'));
     roots.push(root);
@@ -30,5 +41,6 @@ describe('report artifact storage', () => {
     const bytes = new Uint8Array([1]);
     await expect(storage.put('../escape.pdf', bytes)).rejects.toThrow('Invalid report storage reference');
     await expect(storage.put('/absolute.pdf', bytes)).rejects.toThrow('Invalid report storage reference');
+    await expect(storage.remove('../escape.pdf')).rejects.toThrow('Invalid report storage reference');
   });
 });
