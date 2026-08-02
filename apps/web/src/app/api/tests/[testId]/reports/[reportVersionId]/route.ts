@@ -1,4 +1,4 @@
-import { authorize } from '@masters/domain';
+import { canReadReportForTest } from '@masters/db';
 import { db } from '@/lib/db';
 import { createDatabaseReportDeliveryService } from '@/lib/server/report-delivery-service';
 import { getTenantContext } from '@/lib/tenant-context';
@@ -8,8 +8,12 @@ export async function GET(
   { params }: { params: Promise<{ testId: string; reportVersionId: string }> },
 ) {
   const context = await getTenantContext();
-  authorize(context, 'test.run');
   const { testId, reportVersionId } = await params;
+
+  if (!(await canReadReportForTest(db, context, testId))) {
+    return new Response('Forbidden', { status: 403 });
+  }
+
   const report = await createDatabaseReportDeliveryService(db)
     .download(context.tenantId, testId, reportVersionId);
   if (!report) return new Response('Not found', { status: 404 });
@@ -22,6 +26,8 @@ export async function GET(
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${filename}"`,
       'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Report-Content-Hash': report.version.contentHash,
     },
   });
 }
