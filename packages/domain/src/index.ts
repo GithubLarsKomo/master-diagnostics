@@ -10,5 +10,6 @@ export * from './test-timer';
 export * from './trainer-dashboard';
 export * from './athlete-dashboard';
 export * from './test-comparability';
+export * from './report-document';
 
 export * from './authorization';
