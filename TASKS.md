@@ -120,7 +120,7 @@
 - [x] barrierearme Kurvendiagramme
 - [x] Vergleich bis fünf Tests
 - [x] Vergleichbarkeitsklassifikation
-- [ ] unveränderliche Berichtsversionen
+- [x] unveränderliche Berichtsversionen
 - [ ] PDF Deutsch/Englisch
 
 ## Epic 9 — Exporte und Portabilität
