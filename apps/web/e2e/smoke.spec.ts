@@ -125,7 +125,12 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
   await expect(page.getByText('Bearbeitungssperre aktiv')).toBeVisible();
   await expect(page.getByLabel('Laktat (mmol/L)')).toHaveValue('1,2');
   await expect(page.getByLabel('Herzfrequenz (1/min)')).toHaveValue('52');
-  await expect(page.getByText(/Server-Sync: (Ausstehend|Synchronisiert)/)).toBeVisible();
+  await expect(
+    page.getByText(/Server-Sync: (Wird geprüft|Ausstehend|Synchronisiert)/),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Server-Sync: (Ausstehend|Synchronisiert)/),
+  ).toBeVisible({ timeout: 6_000 });
   const retrySyncButton = page.getByRole('button', { name: 'Server-Sync erneut versuchen' });
   if (await retrySyncButton.isVisible()) {
     const retriedRestSync = page.waitForResponse(
