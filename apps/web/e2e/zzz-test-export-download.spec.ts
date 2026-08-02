@@ -61,7 +61,9 @@ test('downloads regular exports and keeps analysis export fail-closed without pr
     await expect(page.getByText(/Analyseexport deaktiviert: Es ist noch keine gültige Mindestgröße/)).toBeVisible();
     await expect(page.getByRole('link', { name: 'Anonymisierten Analyseexport herunterladen' })).toHaveCount(0);
 
-    const analysisResponse = await page.request.get(new URL('./analysis-export', page.url()).toString());
+    const analysisResponse = await page.request.get(
+      new URL(`/api/tests/${testId}/analysis-export`, page.url()).toString(),
+    );
     expect(analysisResponse.status()).toBe(503);
     expect(await analysisResponse.json()).toMatchObject({ error: 'ANALYSIS_EXPORT_POLICY_NOT_CONFIGURED' });
   } finally {
