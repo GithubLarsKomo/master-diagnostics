@@ -10,14 +10,8 @@ import {
   getTestExportSource,
 } from '@masters/db';
 import { db } from '@/lib/db';
+import { readAnalysisExportMinimumEquivalenceClassSize } from '@/lib/analysis-export-policy';
 import { getTenantContext } from '@/lib/tenant-context';
-
-function readMinimumEquivalenceClassSize(): number | null {
-  const raw = process.env.ANALYSIS_EXPORT_MIN_EQUIVALENCE_CLASS_SIZE;
-  if (!raw) return null;
-  const value = Number(raw);
-  return Number.isInteger(value) && value >= 2 ? value : null;
-}
 
 export async function GET(
   _request: Request,
@@ -29,7 +23,7 @@ export async function GET(
     return new Response('Forbidden', { status: 403 });
   }
 
-  const minimumEquivalenceClassSize = readMinimumEquivalenceClassSize();
+  const minimumEquivalenceClassSize = readAnalysisExportMinimumEquivalenceClassSize();
   if (minimumEquivalenceClassSize === null) {
     return Response.json({
       error: 'ANALYSIS_EXPORT_POLICY_NOT_CONFIGURED',
