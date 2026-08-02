@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 const adminEmail = 'admin@example.test';
 const adminPassword = 'Correct-Horse-Battery-42';
 
-test('downloads the released test in csv, json and markdown', async ({ page }) => {
+test('downloads regular exports and keeps analysis export fail-closed without privacy policy', async ({ page }) => {
   await page.goto('/sign-in');
   await page.getByLabel('E-Mail', { exact: true }).fill(adminEmail);
   await page.getByLabel('Passwort', { exact: true }).fill(adminPassword);
@@ -32,4 +32,12 @@ test('downloads the released test in csv, json and markdown', async ({ page }) =
     expect(response.headers()['x-content-type-options']).toBe('nosniff');
     expect(await response.text()).toContain(item.contains);
   }
+
+  await expect(page.getByRole('heading', { name: 'Anonymisierter Analyseexport' })).toBeVisible();
+  await expect(page.getByText(/Analyseexport deaktiviert: Es ist noch keine gültige Mindestgröße/)).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Anonymisierten Analyseexport herunterladen' })).toHaveCount(0);
+
+  const analysisResponse = await page.request.get(new URL('./analysis-export', page.url()).toString());
+  expect(analysisResponse.status()).toBe(503);
+  expect(await analysisResponse.json()).toMatchObject({ error: 'ANALYSIS_EXPORT_POLICY_NOT_CONFIGURED' });
 });
