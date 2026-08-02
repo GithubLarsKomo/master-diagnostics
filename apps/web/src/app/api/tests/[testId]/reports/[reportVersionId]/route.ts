@@ -15,7 +15,8 @@ export async function GET(
   if (!report) return new Response('Not found', { status: 404 });
 
   const filename = `report-${report.version.locale}-v${report.version.versionNumber}.pdf`;
-  return new Response(report.bytes, {
+  const body = Uint8Array.from(report.bytes).buffer;
+  return new Response(body, {
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
