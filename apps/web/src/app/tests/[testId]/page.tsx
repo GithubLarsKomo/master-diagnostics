@@ -18,6 +18,7 @@ import {
   startPlannedTest,
 } from '../actions';
 import { LiveTestSession } from './live-test-session';
+import { ReportDeliveryControls } from './report-delivery-controls';
 import { getReviewPlausibilityWarnings } from './review-plausibility';
 import { TestReviewTable } from './test-review-table';
 
@@ -147,6 +148,8 @@ export default async function TestPage({ params }: { params: Promise<{ testId: s
           {reviewRows && <TestReviewTable testId={testId} rows={reviewRows} />}
         </>
       )}
+
+      {execution.test.status === 'RELEASED' && <ReportDeliveryControls testId={testId} />}
     </main>
   );
 }
