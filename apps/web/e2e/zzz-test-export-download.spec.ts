@@ -5,17 +5,28 @@ const adminEmail = 'admin@example.test';
 const adminPassword = 'Correct-Horse-Battery-42';
 
 test('downloads regular exports and keeps analysis export fail-closed without privacy policy', async ({ page }) => {
+  const fixture = await db.$client.execute({
+    sql: `SELECT tests.id
+      FROM tests
+      INNER JOIN athletes ON athletes.id = tests.athlete_id
+      WHERE tests.status = 'DATA_REVIEW'
+        AND athletes.first_name = 'Max'
+        AND athletes.last_name = 'Test'
+      ORDER BY tests.updated_at DESC
+      LIMIT 1`,
+    args: [],
+  });
+  const testId = String(fixture.rows[0]?.id ?? '');
+  expect(testId).not.toBe('');
+
   const releasedAt = new Date().toISOString();
   const result = await db.$client.execute({
     sql: `UPDATE tests
       SET status = 'RELEASED', released_at = ?, updated_at = ?
-      WHERE status = 'DATA_REVIEW'
-        AND athlete_id IN (
-          SELECT id FROM athletes WHERE first_name = 'Max' AND last_name = 'Test'
-        )`,
-    args: [releasedAt, releasedAt],
+      WHERE id = ? AND status = 'DATA_REVIEW'`,
+    args: [releasedAt, releasedAt, testId],
   });
-  expect(result.rowsAffected).toBeGreaterThan(0);
+  expect(result.rowsAffected).toBe(1);
 
   try {
     await page.goto('/sign-in');
@@ -24,8 +35,7 @@ test('downloads regular exports and keeps analysis export fail-closed without pr
     await page.getByRole('button', { name: 'Anmelden' }).click();
 
     await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:3000\/$/);
-    const dashboardTask = page.getByRole('listitem').filter({ hasText: 'Max Test' });
-    await dashboardTask.getByRole('link', { name: 'Öffnen', exact: true }).click();
+    await page.goto(`/tests/${testId}`);
 
     const cases = [
       { name: 'CSV herunterladen', contentType: 'text/csv', contains: 'schemaVersion,masters-test-export-v1' },
@@ -59,11 +69,8 @@ test('downloads regular exports and keeps analysis export fail-closed without pr
     await db.$client.execute({
       sql: `UPDATE tests
         SET status = 'DATA_REVIEW', released_at = NULL, updated_at = ?
-        WHERE status = 'RELEASED'
-          AND athlete_id IN (
-            SELECT id FROM athletes WHERE first_name = 'Max' AND last_name = 'Test'
-          )`,
-      args: [now],
+        WHERE id = ? AND status = 'RELEASED'`,
+      args: [now, testId],
     });
   }
 });
