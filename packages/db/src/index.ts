@@ -21,3 +21,4 @@ export * from './services/diagnostic-result-snapshots';
 export * from './services/athlete-curves';
 export * from './services/report-versions';
 export * from './services/report-access';
+export * from './services/test-export';
