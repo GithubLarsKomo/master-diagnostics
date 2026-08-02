@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 export interface ReportArtifactStorage {
@@ -25,9 +25,7 @@ export class FileSystemReportArtifactStorage implements ReportArtifactStorage {
   async put(reference: string, bytes: Uint8Array): Promise<void> {
     const target = this.path(reference);
     await mkdir(dirname(target), { recursive: true });
-    const temporary = `${target}.${crypto.randomUUID()}.tmp`;
-    await writeFile(temporary, bytes, { flag: 'wx' });
-    await rename(temporary, target);
+    await writeFile(target, bytes, { flag: 'wx' });
   }
 
   async get(reference: string): Promise<Uint8Array> {
