@@ -7,7 +7,8 @@ function hex(bytes: ArrayBuffer): string {
 }
 
 async function hashBytes(bytes: Uint8Array): Promise<`sha256:${string}`> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const copy = Uint8Array.from(bytes);
+  const digest = await crypto.subtle.digest('SHA-256', copy.buffer);
   return `sha256:${hex(digest)}`;
 }
 
