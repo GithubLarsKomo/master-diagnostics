@@ -15,5 +15,9 @@ export default defineConfig({
     port: 3000,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    env: {
+      ...process.env,
+      REPORT_STORAGE_DIR: process.env.REPORT_STORAGE_DIR ?? '/tmp/masters-e2e-reports',
+    },
   },
 });
