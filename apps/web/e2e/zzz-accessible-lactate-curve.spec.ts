@@ -30,9 +30,15 @@ test('renders the lactate curve with an equivalent data table', async ({ page })
   const athleteCard = page.locator('article').filter({ hasText: 'Max Test' });
   await athleteCard.getByRole('link', { name: 'Bearbeiten' }).click();
   await expect(page.getByRole('heading', { name: 'Sportdiagnostischer Verlauf' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Aktuelle Laktatkurve öffnen' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Bis zu fünf Tests vergleichen' })).toBeVisible();
+  await expect(page.getByText('Kurven verfügbar')).toBeVisible();
+  await expect(page.getByText('Berichtsversionen')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Berichte' })).toBeVisible();
 
   const athleteUrl = new URL(page.url());
-  await page.goto(`${athleteUrl.pathname}/curve`);
+  await page.getByRole('link', { name: 'Aktuelle Laktatkurve öffnen' }).click();
+  await expect(page).toHaveURL(`${athleteUrl.origin}${athleteUrl.pathname}/curve`);
   await expect(page.getByRole('heading', { name: 'Laktatkurve' })).toBeVisible();
   await expect(page.getByRole('img', { name: 'Laktat-Leistungs-Kurve des aktuellsten Tests' })).toBeVisible();
   await expect(page.locator('desc#curve-desc')).toHaveText('Laktatwerte in Millimol pro Liter über der Leistung in Watt. Die exakten Werte stehen zusätzlich in der Tabelle unterhalb der Grafik.');
