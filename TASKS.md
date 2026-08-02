@@ -121,7 +121,7 @@
 - [x] Vergleich bis fünf Tests
 - [x] Vergleichbarkeitsklassifikation
 - [x] unveränderliche Berichtsversionen
-- [ ] PDF Deutsch/Englisch
+- [x] PDF Deutsch/Englisch
 
 ## Epic 9 — Exporte und Portabilität
 
@@ -174,4 +174,4 @@ Ein MVP-Release ist nur zulässig, wenn:
 - [ ] WCAG-2.2-AA-Kernprüfungen bestehen
 - [ ] Export-/Import-Roundtrip vollständig ist
 - [ ] Backup und Restore praktisch getestet wurden
-- [ ] deutsch- und englischsprachige Berichte freigegeben sind
+- [x] deutsch- und englischsprachige Berichte freigegeben sind

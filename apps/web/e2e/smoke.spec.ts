@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { db } from '../src/lib/db';
 
 const adminEmail = 'admin@example.test';
 const adminPassword = 'Correct-Horse-Battery-42';
@@ -92,6 +93,9 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
   await page.getByLabel('Erwartete LT2 (W)', { exact: true }).fill('350');
   await page.getByLabel('Stufenzahl', { exact: true }).fill('7');
   await page.getByRole('button', { name: 'Testplan erstellen' }).click();
+  await page.waitForURL((url) => /^\/tests\/[^/]+$/.test(url.pathname));
+  const testId = new URL(page.url()).pathname.split('/').filter(Boolean).at(-1);
+  expect(testId).toBeTruthy();
 
   await expect(page.getByRole('heading', { name: 'Sicherheitscheck vor dem Start' })).toBeVisible();
   const safetyItems = page.locator('.safety-checklist input[type="checkbox"]');
@@ -224,6 +228,60 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
     .fill('Übertragungsfehler im Ruhewert korrigiert');
   await page.getByRole('button', { name: 'Ruhewert speichern' }).click();
   await expect(page.getByText('Gespeichert · Version 2')).toBeVisible();
+
+  const releasedAt = new Date().toISOString();
+  const interpretationId = crypto.randomUUID();
+  await db.$client.execute({
+    sql: 'UPDATE tests SET status = ?, released_at = ?, updated_at = ? WHERE id = ?',
+    args: ['RELEASED', releasedAt, releasedAt, testId!],
+  });
+  await db.$client.execute({
+    sql: `INSERT INTO interpretations (
+      id, tenant_id, test_id, version_number, lt1_json, lt2_json, rationale,
+      status, released_at, released_by_user_id, created_at, updated_at
+    ) SELECT ?, tenant_id, id, 1, ?, ?, ?, 'RELEASED', ?, conducting_trainer_user_id, ?, ?
+      FROM tests WHERE id = ?`,
+    args: [
+      interpretationId,
+      JSON.stringify({ watts: 240 }),
+      JSON.stringify({ watts: 350 }),
+      'Freigegebene E2E-Interpretation',
+      releasedAt,
+      releasedAt,
+      releasedAt,
+      testId!,
+    ],
+  });
+
+  await page.goto(`/tests/${testId}`);
+  await expect(page.getByRole('heading', { name: 'Bericht' })).toBeVisible();
+  const deGeneration = page.waitForResponse(
+    (response) => response.url().endsWith(`/api/tests/${testId}/reports`)
+      && response.request().method() === 'POST',
+  );
+  await page.getByRole('button', { name: 'PDF-Bericht erzeugen' }).click();
+  const deResponse = await deGeneration;
+  expect(deResponse.status()).toBe(201);
+  const dePayload = await deResponse.json() as { downloadPath: string };
+  await expect(page.getByRole('link', { name: 'PDF herunterladen' })).toBeVisible();
+  const deDownload = await page.request.get(dePayload.downloadPath);
+  expect(deDownload.ok()).toBe(true);
+  expect(deDownload.headers()['content-type']).toContain('application/pdf');
+  expect((await deDownload.body()).toString('latin1')).toContain('Leistungsdiagnostischer Bericht');
+
+  await page.getByLabel('Sprache').selectOption('en');
+  const enGeneration = page.waitForResponse(
+    (response) => response.url().endsWith(`/api/tests/${testId}/reports`)
+      && response.request().method() === 'POST',
+  );
+  await page.getByRole('button', { name: 'PDF-Bericht erzeugen' }).click();
+  const enResponse = await enGeneration;
+  expect(enResponse.status()).toBe(201);
+  const enPayload = await enResponse.json() as { downloadPath: string };
+  const enDownload = await page.request.get(enPayload.downloadPath);
+  expect(enDownload.ok()).toBe(true);
+  expect(enDownload.headers()['content-type']).toContain('application/pdf');
+  expect((await enDownload.body()).toString('latin1')).toContain('Performance Diagnostic Report');
 
   await page.goto('/setup');
   await expectTenantAdminHome(page);
