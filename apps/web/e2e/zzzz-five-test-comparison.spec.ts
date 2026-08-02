@@ -8,6 +8,7 @@ test('shows the accessible athlete test comparison after the live workflow', asy
   await page.getByLabel('E-Mail', { exact: true }).fill(adminEmail);
   await page.getByLabel('Passwort', { exact: true }).fill(adminPassword);
   await page.getByRole('button', { name: 'Anmelden' }).click();
+  await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:3000\/$/);
 
   await page.goto('/athletes');
   const athleteCard = page.locator('article').filter({ hasText: 'Max Test' });
