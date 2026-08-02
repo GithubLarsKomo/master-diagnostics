@@ -14,9 +14,9 @@ test('downloads the released test in csv, json and markdown', async ({ page }) =
   await dashboardTask.getByRole('link', { name: 'Öffnen', exact: true }).click();
 
   const cases = [
-    { name: 'CSV exportieren', contentType: 'text/csv', contains: 'schemaVersion,masters-test-export-v1' },
-    { name: 'JSON exportieren', contentType: 'application/json', contains: '"schemaVersion": "masters-test-export-v1"' },
-    { name: 'Markdown exportieren', contentType: 'text/markdown', contains: '# Testexport' },
+    { name: 'CSV herunterladen', contentType: 'text/csv', contains: 'schemaVersion,masters-test-export-v1' },
+    { name: 'JSON herunterladen', contentType: 'application/json', contains: '"schemaVersion": "masters-test-export-v1"' },
+    { name: 'Markdown herunterladen', contentType: 'text/markdown', contains: '# Testexport' },
   ] as const;
 
   for (const item of cases) {
