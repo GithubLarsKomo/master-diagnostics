@@ -33,7 +33,7 @@ test('renders the lactate curve with an equivalent data table', async ({ page })
   await expect(page.getByRole('link', { name: 'Aktuelle Laktatkurve öffnen' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Bis zu fünf Tests vergleichen' })).toBeVisible();
   await expect(page.getByText('Kurven verfügbar')).toBeVisible();
-  await expect(page.getByText('Berichtsversionen')).toBeVisible();
+  await expect(page.getByText('Berichtsversionen', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Berichte' })).toBeVisible();
 
   const athleteUrl = new URL(page.url());
