@@ -64,6 +64,13 @@
       "when": 1785525300000,
       "tag": "0008_diagnostic_result_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1785680400000,
+      "tag": "0009_immutable_report_versions",
+      "breakpoints": true
     }
   ]
 }

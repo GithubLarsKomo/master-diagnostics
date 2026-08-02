@@ -1,4 +1,5 @@
 import { createClient } from '@libsql/client';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/libsql';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Database } from '../src/client';
@@ -12,6 +13,8 @@ async function createTestDatabase(): Promise<Database> {
     `CREATE TABLE interpretations (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, test_id TEXT NOT NULL, version_number INTEGER NOT NULL, lt1_json TEXT NOT NULL, lt2_json TEXT NOT NULL, rationale TEXT, status TEXT NOT NULL, released_at TEXT, released_by_user_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
     `CREATE TABLE report_versions (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, test_id TEXT NOT NULL, interpretation_id TEXT NOT NULL, version_number INTEGER NOT NULL, locale TEXT NOT NULL, content_hash TEXT NOT NULL, storage_reference TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
     `CREATE UNIQUE INDEX report_version_test_locale_version_uq ON report_versions (tenant_id, test_id, locale, version_number)`,
+    `CREATE TRIGGER report_versions_immutable_update BEFORE UPDATE ON report_versions BEGIN SELECT RAISE(ABORT, 'report versions are immutable'); END`,
+    `CREATE TRIGGER report_versions_immutable_delete BEFORE DELETE ON report_versions BEGIN SELECT RAISE(ABORT, 'report versions are immutable'); END`,
   ]);
   return drizzle(client, { schema }) as Database;
 }
@@ -58,6 +61,30 @@ describe('immutable report versions', () => {
       createdAt: '2026-08-02T10:01:00.000Z',
       updatedAt: '2026-08-02T10:01:00.000Z',
     })).rejects.toThrow();
+  });
+
+  it('rejects direct updates and deletes at database level', async () => {
+    const created = await appendReportVersion(db, 'tenant-a', 'test-a', { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'reports/test-a/de/v1.pdf' });
+
+    await expect(db.update(schema.reportVersions)
+      .set({ storageReference: 'reports/test-a/de/changed.pdf' })
+      .where(eq(schema.reportVersions.id, created.id)))
+      .rejects.toThrow();
+
+    const [afterUpdate] = await db.select().from(schema.reportVersions)
+      .where(eq(schema.reportVersions.id, created.id))
+      .limit(1);
+    expect(afterUpdate?.storageReference).toBe(created.storageReference);
+
+    await expect(db.delete(schema.reportVersions)
+      .where(eq(schema.reportVersions.id, created.id)))
+      .rejects.toThrow();
+
+    const [afterDelete] = await db.select().from(schema.reportVersions)
+      .where(eq(schema.reportVersions.id, created.id))
+      .limit(1);
+    expect(afterDelete?.id).toBe(created.id);
+    expect(afterDelete?.contentHash).toBe(created.contentHash);
   });
 
   it('rejects draft interpretations, foreign tenants and invalid hashes', async () => {
