@@ -104,6 +104,25 @@ export async function appendReportVersion(
   });
 }
 
+/** Reads one immutable report version inside the tenant/test boundary. */
+export async function getReportVersion(
+  db: Database,
+  tenantId: string,
+  testId: string,
+  reportVersionId: string,
+): Promise<StoredReportVersion | null> {
+  const [row] = await db
+    .select()
+    .from(reportVersions)
+    .where(and(
+      eq(reportVersions.id, reportVersionId),
+      eq(reportVersions.tenantId, tenantId),
+      eq(reportVersions.testId, testId),
+    ))
+    .limit(1);
+  return row ? stored(row) : null;
+}
+
 export async function listReportVersions(
   db: Database,
   tenantId: string,
