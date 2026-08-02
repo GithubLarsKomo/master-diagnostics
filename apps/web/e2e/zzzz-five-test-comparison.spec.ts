@@ -26,8 +26,10 @@ test('shows the accessible athlete test comparison after the live workflow', asy
   const overview = page.getByRole('table', { name: 'Übersicht der verglichenen Tests' });
   await expect(overview).toBeVisible();
   await expect(overview.getByRole('row')).toHaveCount(2);
-  await expect(overview.getByRole('row').nth(1)).toContainText('2');
-  await expect(overview.getByRole('row').nth(1)).toContainText('2.50–4.10 mmol/l');
+  const referenceRow = overview.getByRole('row').nth(1);
+  await expect(referenceRow).toContainText('Referenz');
+  await expect(referenceRow).toContainText('2');
+  await expect(referenceRow).toContainText('2.50–4.10 mmol/l');
 
   const values = page.getByRole('table', { name: 'Messwerte Test 1' });
   await expect(values).toBeVisible();
