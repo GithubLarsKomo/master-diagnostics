@@ -93,6 +93,7 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
   await page.getByLabel('Erwartete LT2 (W)', { exact: true }).fill('350');
   await page.getByLabel('Stufenzahl', { exact: true }).fill('7');
   await page.getByRole('button', { name: 'Testplan erstellen' }).click();
+  await page.waitForURL((url) => /^\/tests\/[^/]+$/.test(url.pathname));
   const testId = new URL(page.url()).pathname.split('/').filter(Boolean).at(-1);
   expect(testId).toBeTruthy();
 
