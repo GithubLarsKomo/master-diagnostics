@@ -13,9 +13,11 @@ test('shows the accessible athlete test comparison after the live workflow', asy
   await page.goto('/athletes');
   const athleteCard = page.locator('article').filter({ hasText: 'Max Test' });
   await athleteCard.getByRole('link', { name: 'Bearbeiten' }).click();
+  await expect(page.getByRole('heading', { name: 'Sportdiagnostischer Verlauf' })).toBeVisible();
   const athleteUrl = new URL(page.url());
 
   await page.goto(`${athleteUrl.pathname}/curve`);
+  await expect(page.getByRole('heading', { name: 'Laktatkurve' })).toBeVisible();
   await page.getByRole('link', { name: 'Bis zu fünf Tests vergleichen' }).click();
 
   await expect(page.getByRole('heading', { name: 'Testvergleich' })).toBeVisible();
