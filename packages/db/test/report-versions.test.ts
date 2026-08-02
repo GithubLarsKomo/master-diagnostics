@@ -11,6 +11,7 @@ async function createTestDatabase(): Promise<Database> {
     `CREATE TABLE tests (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, athlete_id TEXT NOT NULL, device_type TEXT NOT NULL, status TEXT NOT NULL, conducting_trainer_user_id TEXT NOT NULL, scheduled_at TEXT, started_at TEXT, ended_at TEXT, version INTEGER NOT NULL, released_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
     `CREATE TABLE interpretations (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, test_id TEXT NOT NULL, version_number INTEGER NOT NULL, lt1_json TEXT NOT NULL, lt2_json TEXT NOT NULL, rationale TEXT, status TEXT NOT NULL, released_at TEXT, released_by_user_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
     `CREATE TABLE report_versions (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, test_id TEXT NOT NULL, interpretation_id TEXT NOT NULL, version_number INTEGER NOT NULL, locale TEXT NOT NULL, content_hash TEXT NOT NULL, storage_reference TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE UNIQUE INDEX report_version_test_locale_version_uq ON report_versions (tenant_id, test_id, locale, version_number)`,
   ]);
   return drizzle(client, { schema }) as Database;
 }
@@ -41,6 +42,22 @@ describe('immutable report versions', () => {
     expect([de1.versionNumber, de2.versionNumber, en1.versionNumber]).toEqual([1, 2, 1]);
     expect(Object.isFrozen(de1)).toBe(true);
     expect((await listReportVersions(db, 'tenant-a', 'test-a', 'de')).map((item) => item.versionNumber)).toEqual([2, 1]);
+  });
+
+  it('enforces one version number per test and locale at database level', async () => {
+    const created = await appendReportVersion(db, 'tenant-a', 'test-a', { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'reports/test-a/de/v1.pdf' });
+    await expect(db.insert(schema.reportVersions).values({
+      id: crypto.randomUUID(),
+      tenantId: created.tenantId,
+      testId: created.testId,
+      interpretationId: created.interpretationId,
+      versionNumber: created.versionNumber,
+      locale: created.locale,
+      contentHash: hashB,
+      storageReference: 'reports/test-a/de/duplicate.pdf',
+      createdAt: '2026-08-02T10:01:00.000Z',
+      updatedAt: '2026-08-02T10:01:00.000Z',
+    })).rejects.toThrow();
   });
 
   it('rejects draft interpretations, foreign tenants and invalid hashes', async () => {
