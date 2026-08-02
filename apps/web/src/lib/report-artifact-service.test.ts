@@ -12,6 +12,7 @@ function storageFor(bytes: Uint8Array): ReportArtifactStorage {
   return {
     async put() {},
     async get() { return bytes; },
+    async remove() {},
   };
 }
 
