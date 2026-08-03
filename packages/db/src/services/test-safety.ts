@@ -7,11 +7,11 @@ import { and, eq } from 'drizzle-orm';
 import type { Database } from '../client';
 import {
   athletes,
-  auditEvents,
   testPlanSnapshots,
   testSafetyChecklistConfirmations,
   tests,
 } from '../schema';
+import { appendAuditEvent } from './audit';
 
 export interface TestSafetyActor {
   userId: string;
@@ -108,8 +108,7 @@ export async function confirmTestSafetyChecklist(
       updatedAt: now,
     };
     await tx.insert(testSafetyChecklistConfirmations).values(checklist);
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
       actorUserId: actor.userId,
@@ -118,14 +117,11 @@ export async function confirmTestSafetyChecklist(
       entityType: 'test_safety_checklist_confirmation',
       entityId: checklist.id,
       source: 'WEB',
-      correlationId: crypto.randomUUID(),
-      afterJson: JSON.stringify({
+      after: {
         testId,
         checklistVersion: TEST_START_SAFETY_CHECKLIST_VERSION,
         confirmedItems: Object.keys(confirmation),
-      }),
-      createdAt: now,
-      updatedAt: now,
+      },
     });
     return checklist;
   });
