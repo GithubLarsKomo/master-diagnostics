@@ -61,7 +61,8 @@ export async function GET(
     // The token is already consumed. Expiry cleanup will retry physical deletion.
   }
 
-  return new Response(bytes, {
+  const body = Uint8Array.from(bytes).buffer;
+  return new Response(body, {
     status: 200,
     headers: {
       'Content-Type': 'application/vnd.masters-diagnostics.encrypted+json',
