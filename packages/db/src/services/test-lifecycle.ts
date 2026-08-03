@@ -9,7 +9,6 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../client';
 import {
   athletes,
-  auditEvents,
   coachAthleteAssignments,
   testPlanSnapshots,
   testLocks,
@@ -18,6 +17,7 @@ import {
   testTerminationEvents,
   tests,
 } from '../schema';
+import { appendAuditEvent } from './audit';
 import { hashTestLockToken } from './test-locks';
 import { buildTimerFromSnapshot } from './test-timer';
 
@@ -163,8 +163,7 @@ export async function startTest(
       throw new Error('Test changed concurrently and was not started');
     }
 
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
       actorUserId: actor.userId,
@@ -173,20 +172,17 @@ export async function startTest(
       entityType: 'test',
       entityId: testId,
       source: 'WEB',
-      correlationId: crypto.randomUUID(),
-      beforeJson: JSON.stringify({
+      before: {
         status: context.test.status,
         version: context.test.currentVersion,
-      }),
-      afterJson: JSON.stringify({
+      },
+      after: {
         status: started.status,
         version: started.currentVersion,
         startedAt: started.startedAt,
         planSnapshotId: planSnapshot.id,
         safetyConfirmationId: safetyConfirmation.id,
-      }),
-      createdAt: now,
-      updatedAt: now,
+      },
     });
 
     return started;
@@ -354,8 +350,7 @@ export async function finishTest(
       eq(testLocks.tenantId, tenantId),
     ));
 
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
       actorUserId: actor.userId,
@@ -365,12 +360,11 @@ export async function finishTest(
       entityId: testId,
       source: 'WEB',
       reason: details.reason,
-      correlationId: crypto.randomUUID(),
-      beforeJson: JSON.stringify({
+      before: {
         status: runningTest.status,
         version: runningTest.currentVersion,
-      }),
-      afterJson: JSON.stringify({
+      },
+      after: {
         status: finished.status,
         version: finished.currentVersion,
         endedAt: finished.endedAt,
@@ -380,9 +374,7 @@ export async function finishTest(
         activeElapsedSeconds: normalizedActiveElapsedSeconds,
         partialInclusionPercent: thresholdPercent,
         stageClassifications,
-      }),
-      createdAt: now,
-      updatedAt: now,
+      },
     });
 
     return finished;
