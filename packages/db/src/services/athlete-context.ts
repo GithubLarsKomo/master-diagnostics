@@ -3,11 +3,11 @@ import type { Database } from '../client';
 import {
   athleteSnapshots,
   athletes,
-  auditEvents,
   coachAthleteAssignments,
   tenantMemberships,
   users,
 } from '../schema';
+import { appendAuditEvent } from './audit';
 
 export interface AthleteContextActor {
   userId: string;
@@ -64,13 +64,16 @@ export async function assignCoach(
       id: assignmentId, tenantId, athleteId, coachUserId, isPrimary,
       validFrom: now, validUntil: null, createdAt: now, updatedAt: now,
     });
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(), tenantId, occurredAt: now,
-      actorUserId: actor.userId, actorRole: actor.role,
-      action: 'athlete.coach_assigned', entityType: 'coach_athlete_assignment', entityId: assignmentId,
-      source: 'WEB', correlationId: crypto.randomUUID(),
-      afterJson: JSON.stringify({ athleteId, coachUserId, isPrimary }),
-      createdAt: now, updatedAt: now,
+    await appendAuditEvent(tx, {
+      tenantId,
+      occurredAt: now,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'athlete.coach_assigned',
+      entityType: 'coach_athlete_assignment',
+      entityId: assignmentId,
+      source: 'WEB',
+      after: { athleteId, coachUserId, isPrimary },
     });
   });
   return assignmentId;
@@ -118,13 +121,16 @@ export async function createAthleteSnapshot(
   };
   await db.transaction(async (tx) => {
     await tx.insert(athleteSnapshots).values(snapshot);
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(), tenantId, occurredAt: now,
-      actorUserId: actor.userId, actorRole: actor.role,
-      action: 'athlete.snapshot_created', entityType: 'athlete_snapshot', entityId: snapshot.id,
-      source: 'WEB', correlationId: crypto.randomUUID(),
-      afterJson: JSON.stringify({ athleteId, version: snapshot.version }),
-      createdAt: now, updatedAt: now,
+    await appendAuditEvent(tx, {
+      tenantId,
+      occurredAt: now,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'athlete.snapshot_created',
+      entityType: 'athlete_snapshot',
+      entityId: snapshot.id,
+      source: 'WEB',
+      after: { athleteId, version: snapshot.version },
     });
   });
   return snapshot;
