@@ -45,6 +45,23 @@ export async function createTenantExportPackage(
   });
 }
 
+export async function getAvailableTenantExportPackage(
+  db: Database,
+  tokenHash: string,
+  now = new Date().toISOString(),
+) {
+  const rows = await db
+    .select()
+    .from(tenantExportPackages)
+    .where(and(
+      eq(tenantExportPackages.tokenHash, tokenHash),
+      isNull(tenantExportPackages.downloadedAt),
+      gt(tenantExportPackages.expiresAt, now),
+    ))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function consumeTenantExportPackage(
   db: Database,
   tokenHash: string,
