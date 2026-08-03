@@ -1,6 +1,7 @@
 import { and, eq, gt, isNull, lte } from 'drizzle-orm';
 import type { Database } from '../client';
-import { auditEvents, tenantExportPackages } from '../schema';
+import { tenantExportPackages } from '../schema';
+import { appendAuditEvent } from './audit';
 
 export interface TenantExportPackageInput {
   id: string;
@@ -24,8 +25,7 @@ export async function createTenantExportPackage(
       createdAt: now,
       updatedAt: now,
     });
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId: input.tenantId,
       occurredAt: now,
       actorUserId: input.createdByUserId,
@@ -34,13 +34,10 @@ export async function createTenantExportPackage(
       entityType: 'tenant_export_package',
       entityId: input.id,
       source: 'WEB',
-      afterJson: JSON.stringify({
+      after: {
         packageSha256: input.packageSha256,
         expiresAt: input.expiresAt,
-      }),
-      correlationId: crypto.randomUUID(),
-      createdAt: now,
-      updatedAt: now,
+      },
     });
   });
 }
@@ -80,8 +77,7 @@ export async function consumeTenantExportPackage(
     const row = rows[0] ?? null;
     if (!row) return null;
 
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId: row.tenantId,
       occurredAt: now,
       actorUserId: row.createdByUserId,
@@ -90,9 +86,6 @@ export async function consumeTenantExportPackage(
       entityType: 'tenant_export_package',
       entityId: row.id,
       source: 'DOWNLOAD_LINK',
-      correlationId: crypto.randomUUID(),
-      createdAt: now,
-      updatedAt: now,
     });
     return row;
   });
