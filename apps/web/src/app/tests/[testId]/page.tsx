@@ -1,8 +1,10 @@
 import {
   TEST_START_SAFETY_CHECKLIST_ITEMS,
+  assessReidentificationRisk,
   authorize,
 } from '@masters/domain';
 import {
+  getAnalysisExportCohortEvidence,
   getTestForExecution,
   getTestReviewRows,
   getTestStartReadiness,
@@ -10,6 +12,7 @@ import {
 } from '@masters/db';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { readAnalysisExportMinimumEquivalenceClassSize } from '@/lib/analysis-export-policy';
 import { db } from '@/lib/db';
 import { getTenantContext } from '@/lib/tenant-context';
 import {
@@ -69,6 +72,18 @@ export default async function TestPage({ params }: { params: Promise<{ testId: s
     )
     : null;
   const warnings = reviewRows ? getReviewPlausibilityWarnings(reviewRows) : [];
+  const minimumEquivalenceClassSize = execution.test.status === 'RELEASED'
+    ? readAnalysisExportMinimumEquivalenceClassSize()
+    : null;
+  const analysisExportCohort = execution.test.status === 'RELEASED' && minimumEquivalenceClassSize !== null
+    ? await getAnalysisExportCohortEvidence(db, context.tenantId, testId)
+    : null;
+  const analysisExportAssessment = minimumEquivalenceClassSize !== null && analysisExportCohort
+    ? assessReidentificationRisk(
+      { equivalenceClassSize: analysisExportCohort.equivalenceClassSize },
+      { minimumEquivalenceClassSize },
+    )
+    : null;
   const safetyAction = confirmSafety.bind(null, testId);
   const startAction = startPlannedTest.bind(null, testId);
   const finishAction = finishRunningTest.bind(null, testId);
@@ -160,6 +175,30 @@ export default async function TestPage({ params }: { params: Promise<{ testId: s
             {' · '}<a href={`/api/tests/${testId}/export?format=json`}>JSON herunterladen</a>
             {' · '}<a href={`/api/tests/${testId}/export?format=markdown`}>Markdown herunterladen</a>
           </p>
+        </section>
+      )}
+
+      {execution.test.status === 'RELEASED' && (
+        <section className="card" aria-labelledby="analysis-export-heading">
+          <h2 id="analysis-export-heading">Anonymisierter Analyseexport</h2>
+          {minimumEquivalenceClassSize === null ? (
+            <p role="status">
+              Analyseexport deaktiviert: Es ist noch keine gültige Mindestgröße für die Vergleichsgruppe konfiguriert.
+            </p>
+          ) : !analysisExportCohort || !analysisExportAssessment ? (
+            <p role="status">Analyseexport nicht verfügbar: Die Vergleichsgruppe konnte nicht bestimmt werden.</p>
+          ) : analysisExportAssessment.exportAllowed ? (
+            <>
+              <p role="status">
+                Freigegeben: Vergleichsgruppe {analysisExportAssessment.equivalenceClassSize} · Mindestgröße {minimumEquivalenceClassSize}.
+              </p>
+              <p><a href={`/api/tests/${testId}/analysis-export`}>Anonymisierten Analyseexport herunterladen</a></p>
+            </>
+          ) : (
+            <p role="alert">
+              Reidentifikationswarnung: Vergleichsgruppe {analysisExportAssessment.equivalenceClassSize} liegt unter der Mindestgröße {minimumEquivalenceClassSize}. Der Export bleibt gesperrt.
+            </p>
+          )}
         </section>
       )}
 
