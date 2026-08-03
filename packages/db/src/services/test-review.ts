@@ -1,13 +1,13 @@
 import { and, eq } from 'drizzle-orm';
 import type { Database } from '../client';
 import {
-  auditEvents,
   recoveryMeasurements,
   restMeasurements,
   testPlanSnapshots,
   testStages,
   tests,
 } from '../schema';
+import { appendAuditEvent } from './audit';
 
 export type ReviewMeasurementKind = 'REST' | 'STAGE' | 'RECOVERY';
 export type ReviewQualityStatus =
@@ -482,8 +482,7 @@ export async function correctTestMeasurement(
       }
     }
 
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
       actorUserId: actor.userId,
@@ -493,11 +492,8 @@ export async function correctTestMeasurement(
       entityId: after.entityId,
       source: 'WEB',
       reason,
-      correlationId: crypto.randomUUID(),
-      beforeJson: JSON.stringify(before),
-      afterJson: JSON.stringify(after),
-      createdAt: now,
-      updatedAt: now,
+      before,
+      after,
     });
     return { status: 'APPLIED', row: after };
   });
