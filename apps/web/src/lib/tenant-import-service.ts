@@ -34,7 +34,7 @@ export async function prepareTenantImportReportArtifacts(
   document: TenantPortabilityExportDocument,
   storage: ReportArtifactStorage,
 ): Promise<PreparedReportArtifact[]> {
-  const sourceRows = new Map(document.data.report_versions.map((row) => [requireString(row.id, 'report_versions.id'), row]));
+  const sourceRows = new Map((document.data.report_versions ?? []).map((row) => [requireString(row.id, 'report_versions.id'), row]));
   const targetRows = new Map(plan.tables.report_versions.map((row) => [requireString(row.id, 'target report_versions.id'), row]));
   const prepared: PreparedReportArtifact[] = [];
 
