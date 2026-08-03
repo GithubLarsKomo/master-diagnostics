@@ -5,10 +5,10 @@ import {
   athleteGuardians,
   athleteSnapshots,
   athletes,
-  auditEvents,
   coachAthleteAssignments,
   consents,
 } from '../schema';
+import { appendAuditEvent } from './audit';
 
 export interface DeletionActor {
   userId: string;
@@ -81,11 +81,17 @@ export async function requestAthleteDeletion(
   await db.transaction(async (tx) => {
     await tx.insert(athleteDeletionRequests).values(request);
     await tx.update(athletes).set({ consentBlockedAt: now, updatedAt: now }).where(and(eq(athletes.id, athleteId), eq(athletes.tenantId, tenantId)));
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(), tenantId, occurredAt: now, actorUserId: actor.userId, actorRole: actor.role,
-      action: 'athlete.deletion_requested', entityType: 'athlete_deletion_request', entityId: request.id,
-      source: 'WEB', reason: normalizedReason, correlationId: crypto.randomUUID(), afterJson: JSON.stringify(request),
-      createdAt: now, updatedAt: now,
+    await appendAuditEvent(tx, {
+      tenantId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'athlete.deletion_requested',
+      entityType: 'athlete_deletion_request',
+      entityId: request.id,
+      source: 'WEB',
+      reason: normalizedReason,
+      after: request,
+      occurredAt: now,
     });
   });
   return request;
@@ -115,13 +121,18 @@ export async function decideAthleteDeletion(
     if (decision === 'REJECTED') {
       await tx.update(athletes).set({ consentBlockedAt: null, updatedAt: now }).where(and(eq(athletes.id, athleteId), eq(athletes.tenantId, tenantId)));
     }
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(), tenantId, occurredAt: now, actorUserId: actor.userId, actorRole: actor.role,
+    await appendAuditEvent(tx, {
+      tenantId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
       action: decision === 'APPROVED' ? 'athlete.deletion_approved' : 'athlete.deletion_rejected',
-      entityType: 'athlete_deletion_request', entityId: requestId, source: 'WEB', reason: normalizedReason,
-      correlationId: crypto.randomUUID(), beforeJson: JSON.stringify(request),
-      afterJson: JSON.stringify({ ...request, status: decision, decidedAt: now, decisionReason: normalizedReason }),
-      createdAt: now, updatedAt: now,
+      entityType: 'athlete_deletion_request',
+      entityId: requestId,
+      source: 'WEB',
+      reason: normalizedReason,
+      before: request,
+      after: { ...request, status: decision, decidedAt: now, decisionReason: normalizedReason },
+      occurredAt: now,
     });
   });
 }
@@ -148,11 +159,18 @@ export async function completeAthleteDeletion(
     await tx.update(athletes).set({ deletedAt: now, consentBlockedAt: now, updatedAt: now }).where(and(eq(athletes.id, athleteId), eq(athletes.tenantId, tenantId)));
     await tx.update(coachAthleteAssignments).set({ validUntil: now, updatedAt: now }).where(and(eq(coachAthleteAssignments.tenantId, tenantId), eq(coachAthleteAssignments.athleteId, athleteId), isNull(coachAthleteAssignments.validUntil)));
     await tx.update(athleteGuardians).set({ revokedAt: now, updatedAt: now }).where(and(eq(athleteGuardians.tenantId, tenantId), eq(athleteGuardians.athleteId, athleteId), isNull(athleteGuardians.revokedAt)));
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(), tenantId, occurredAt: now, actorUserId: actor.userId, actorRole: actor.role,
-      action: 'athlete.deletion_completed', entityType: 'athlete', entityId: athleteId, source: 'WEB',
-      reason: normalizedReason, correlationId: crypto.randomUUID(), beforeJson: JSON.stringify(athlete),
-      afterJson: JSON.stringify({ id: athleteId, deletedAt: now, retainedAudit: true }), createdAt: now, updatedAt: now,
+    await appendAuditEvent(tx, {
+      tenantId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'athlete.deletion_completed',
+      entityType: 'athlete',
+      entityId: athleteId,
+      source: 'WEB',
+      reason: normalizedReason,
+      before: athlete,
+      after: { id: athleteId, deletedAt: now, retainedAudit: true },
+      occurredAt: now,
     });
   });
 }

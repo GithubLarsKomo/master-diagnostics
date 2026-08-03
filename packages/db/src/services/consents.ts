@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../client';
-import { athletes, auditEvents, consents } from '../schema';
+import { athletes, consents } from '../schema';
+import { appendAuditEvent } from './audit';
 
 export interface ConsentActor {
   userId: string;
@@ -49,12 +50,16 @@ export async function grantConsent(
     await tx.update(athletes).set({ consentBlockedAt: null, updatedAt: now }).where(and(
       eq(athletes.id, athleteId), eq(athletes.tenantId, tenantId),
     ));
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(), tenantId, occurredAt: now,
-      actorUserId: actor.userId, actorRole: actor.role,
-      action: 'consent.granted', entityType: 'consent', entityId: consentId,
-      source: 'WEB', afterJson: JSON.stringify({ athleteId, consentType: type, documentVersion: version }),
-      correlationId: crypto.randomUUID(), createdAt: now, updatedAt: now,
+    await appendAuditEvent(tx, {
+      tenantId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'consent.granted',
+      entityType: 'consent',
+      entityId: consentId,
+      source: 'WEB',
+      after: { athleteId, consentType: type, documentVersion: version },
+      occurredAt: now,
     });
   });
   return consentId;
@@ -86,14 +91,18 @@ export async function withdrawConsent(
     await tx.update(athletes).set({ consentBlockedAt: now, updatedAt: now }).where(and(
       eq(athletes.id, athleteId), eq(athletes.tenantId, tenantId),
     ));
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(), tenantId, occurredAt: now,
-      actorUserId: actor.userId, actorRole: actor.role,
-      action: 'consent.withdrawn', entityType: 'consent', entityId: consentId,
-      source: 'WEB', reason: withdrawalReason,
-      beforeJson: JSON.stringify(consent),
-      afterJson: JSON.stringify({ ...consent, status: 'WITHDRAWN', withdrawnAt: now }),
-      correlationId: crypto.randomUUID(), createdAt: now, updatedAt: now,
+    await appendAuditEvent(tx, {
+      tenantId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'consent.withdrawn',
+      entityType: 'consent',
+      entityId: consentId,
+      source: 'WEB',
+      reason: withdrawalReason,
+      before: consent,
+      after: { ...consent, status: 'WITHDRAWN', withdrawnAt: now },
+      occurredAt: now,
     });
   });
 }
