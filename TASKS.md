@@ -116,7 +116,7 @@
 ## Epic 8 — Dashboards und Bericht
 
 - [x] aufgabenorientiertes Trainer-Dashboard
-- [ ] vollständiges Athleten-Dashboard
+- [x] vollständiges Athleten-Dashboard
 - [x] barrierearme Kurvendiagramme
 - [x] Vergleich bis fünf Tests
 - [x] Vergleichbarkeitsklassifikation
@@ -125,10 +125,10 @@
 
 ## Epic 9 — Exporte und Portabilität
 
-- [ ] CSV-, JSON- und Markdown-Testexport
-- [ ] anonymisierten Analyseexport
-- [ ] Seltenheits-/Reidentifikationswarnung
-- [ ] vollständigen Tenant-Export
+- [x] CSV-, JSON- und Markdown-Testexport
+- [x] anonymisierten Analyseexport
+- [x] Seltenheits-/Reidentifikationswarnung
+- [x] vollständigen Tenant-Export
 - [ ] verschlüsselte Exportpakete
 - [ ] Dry-Run-Import
 - [ ] atomaren Import/Rollback
