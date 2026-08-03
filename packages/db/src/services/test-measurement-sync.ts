@@ -1,7 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import type { Database } from '../client';
 import {
-  auditEvents,
   recoveryMeasurements,
   restMeasurements,
   syncOperations,
@@ -9,6 +8,7 @@ import {
   testStages,
   tests,
 } from '../schema';
+import { appendAuditEvent } from './audit';
 import { hashTestLockToken } from './test-locks';
 import { getTestTimerPlan } from './test-timer';
 
@@ -425,10 +425,10 @@ export async function syncTestMeasurement(
       createdAt: now,
       updatedAt: now,
     });
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId,
       occurredAt: operation.occurredAt,
+      recordedAt: now,
       actorUserId: actor.userId,
       actorRole: actor.role,
       action: 'test.measurement.synced',
@@ -436,10 +436,8 @@ export async function syncTestMeasurement(
       entityId: entityDatabaseId,
       source: 'OFFLINE_SYNC',
       correlationId: operation.operationId,
-      beforeJson: JSON.stringify(before),
-      afterJson: JSON.stringify(after),
-      createdAt: now,
-      updatedAt: now,
+      before,
+      after,
     });
     return result;
   });
