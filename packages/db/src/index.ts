@@ -25,3 +25,4 @@ export * from './services/test-export';
 export * from './services/analysis-export';
 export * from './services/tenant-export';
 export * from './services/tenant-export-packages';
+export * from './services/tenant-import';
