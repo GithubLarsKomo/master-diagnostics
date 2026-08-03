@@ -1,15 +1,23 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { headers } from 'next/headers';
 import {
   TENANT_EXPORT_SCHEMA_VERSION,
   type TenantExportReportArtifact,
   type TenantPortabilityExportDocument,
 } from '@masters/domain';
-import { getTenantPortabilityExportSource } from '@masters/db';
+import {
+  createTenantExportPackage,
+  getTenantPortabilityExportSource,
+} from '@masters/db';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { createReportArtifactStorage } from '@/lib/report-artifact-storage';
 import { getTenantContext } from '@/lib/tenant-context';
+import { encryptTenantExport, TENANT_EXPORT_ENCRYPTION_ALGORITHM } from '@/lib/tenant-export-encryption';
+import { cleanupExpiredTenantExportPackages } from '@/lib/tenant-export-package-lifecycle';
+import { createTenantExportPackageStorage } from '@/lib/tenant-export-package-storage';
+
+const EXPORT_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
 function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
@@ -58,12 +66,14 @@ export async function POST(request: Request) {
     return Response.json({ error: 'TENANT_EXPORT_REAUTHENTICATION_FAILED' }, { status: 401 });
   }
 
+  await cleanupExpiredTenantExportPackages();
+
   const source = await getTenantPortabilityExportSource(db, context.tenantId);
   if (!source) {
     return Response.json({ error: 'TENANT_EXPORT_TENANT_NOT_FOUND' }, { status: 404 });
   }
 
-  const storage = createReportArtifactStorage();
+  const reportStorage = createReportArtifactStorage();
   const reportArtifacts: TenantExportReportArtifact[] = [];
   try {
     for (const row of source.tables.report_versions) {
@@ -72,7 +82,7 @@ export async function POST(request: Request) {
       if (!reportVersionId || !storageReference) {
         return Response.json({ error: 'TENANT_EXPORT_INVALID_REPORT_REFERENCE' }, { status: 409 });
       }
-      const bytes = await storage.get(storageReference);
+      const bytes = await reportStorage.get(storageReference);
       reportArtifacts.push({
         reportVersionId,
         storageReference,
@@ -121,10 +131,42 @@ export async function POST(request: Request) {
     dataDictionary: source.dataDictionary,
   };
 
-  return Response.json(document, {
-    status: 200,
+  const plaintext = Buffer.from(`${JSON.stringify(document)}\n`, 'utf8');
+  const encrypted = encryptTenantExport(plaintext);
+  const encryptedBytes = Buffer.from(`${JSON.stringify(encrypted.package)}\n`, 'utf8');
+  const packageId = randomUUID();
+  const storageReference = `${packageId}.mde`;
+  const downloadToken = randomBytes(32).toString('base64url');
+  const expiresAt = new Date(Date.now() + EXPORT_LIFETIME_MS).toISOString();
+  const packageSha256 = sha256(encryptedBytes);
+  const packageStorage = createTenantExportPackageStorage();
+
+  try {
+    await packageStorage.put(storageReference, encryptedBytes);
+    await createTenantExportPackage(db, {
+      id: packageId,
+      tenantId: context.tenantId,
+      tokenHash: sha256(downloadToken),
+      storageReference,
+      packageSha256,
+      createdByUserId: context.userId,
+      expiresAt,
+    });
+  } catch {
+    await packageStorage.remove(storageReference);
+    return Response.json({ error: 'TENANT_EXPORT_PACKAGE_CREATION_FAILED' }, { status: 500 });
+  }
+
+  return Response.json({
+    packageId,
+    algorithm: TENANT_EXPORT_ENCRYPTION_ALGORITHM,
+    packageSha256,
+    expiresAt,
+    downloadUrl: new URL(`/api/tenant/export/download/${downloadToken}`, request.url).toString(),
+    decryptionKey: encrypted.decryptionKey,
+  }, {
+    status: 201,
     headers: {
-      'Content-Disposition': `attachment; filename="tenant-${context.tenantId}-export.json"`,
       'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
     },
