@@ -91,7 +91,7 @@ function insertStatement(tableName: string, row: PortableRow) {
 
 export function buildTenantImportPlan(
   document: TenantPortabilityExportDocument,
-  targetTenantId = crypto.randomUUID(),
+  targetTenantId: string = crypto.randomUUID(),
   idOverrides: Readonly<Record<string, string>> = {},
 ): TenantImportPlan {
   const sourceTenantId = requireId(document.tenant, '$.tenant');
@@ -135,7 +135,7 @@ export async function prepareTenantImportPlan(
   document: TenantPortabilityExportDocument,
   options: PrepareTenantImportOptions = {},
 ): Promise<TenantImportPlan> {
-  const targetTenantId = options.targetTenantId ?? crypto.randomUUID();
+  const targetTenantId: string = options.targetTenantId ?? crypto.randomUUID();
   const targetTenant = await db.$client.execute({
     sql: 'SELECT id FROM tenants WHERE id = ? LIMIT 1',
     args: [targetTenantId],
