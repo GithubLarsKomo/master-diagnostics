@@ -131,7 +131,7 @@
 - [x] vollständigen Tenant-Export
 - [x] verschlüsselte Exportpakete
 - [x] Dry-Run-Import
-- [ ] atomaren Import/Rollback
+- [x] atomaren Import/Rollback
 - [ ] Export-/Import-Roundtrip-Test
 
 ## Epic 10 — Datenschutz und Audit
