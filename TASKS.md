@@ -131,8 +131,8 @@
 - [x] vollständigen Tenant-Export
 - [x] verschlüsselte Exportpakete
 - [x] Dry-Run-Import
-- [ ] atomaren Import/Rollback
-- [ ] Export-/Import-Roundtrip-Test
+- [x] atomaren Import/Rollback
+- [x] Export-/Import-Roundtrip-Test
 
 ## Epic 10 — Datenschutz und Audit
 
@@ -172,6 +172,6 @@ Ein MVP-Release ist nur zulässig, wenn:
 - [x] alle Algorithmus-Referenztests bestehen
 - [x] Offline-Wiederaufnahme und Sync-Retry keinen Datenverlust erzeugen
 - [ ] WCAG-2.2-AA-Kernprüfungen bestehen
-- [ ] Export-/Import-Roundtrip vollständig ist
+- [x] Export-/Import-Roundtrip vollständig ist
 - [ ] Backup und Restore praktisch getestet wurden
 - [x] deutsch- und englischsprachige Berichte freigegeben sind
