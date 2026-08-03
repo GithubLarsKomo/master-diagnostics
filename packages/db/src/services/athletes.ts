@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../client';
-import { athletes, auditEvents } from '../schema';
+import { athletes } from '../schema';
+import { appendAuditEvent } from './audit';
 
 export interface AthleteInput {
   firstName: string;
@@ -89,8 +90,7 @@ export async function createAthlete(
       updatedAt: now,
     });
 
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
       actorUserId: actor.userId,
@@ -100,9 +100,7 @@ export async function createAthlete(
       entityId: athleteId,
       source: 'WEB',
       correlationId,
-      afterJson: JSON.stringify(values),
-      createdAt: now,
-      updatedAt: now,
+      after: values,
     });
   });
 
@@ -129,8 +127,7 @@ export async function updateAthlete(
       .set({ ...values, updatedAt: now })
       .where(and(eq(athletes.id, athleteId), eq(athletes.tenantId, tenantId), isNull(athletes.deletedAt)));
 
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
       actorUserId: actor.userId,
@@ -140,10 +137,8 @@ export async function updateAthlete(
       entityId: athleteId,
       source: 'WEB',
       correlationId,
-      beforeJson: JSON.stringify(before),
-      afterJson: JSON.stringify(values),
-      createdAt: now,
-      updatedAt: now,
+      before,
+      after: values,
     });
   });
 
