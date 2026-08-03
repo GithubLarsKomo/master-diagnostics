@@ -25,8 +25,10 @@ services:
       NEXT_PUBLIC_APP_URL: https://${APP_HOST}
       BETTER_AUTH_URL: https://${APP_HOST}
       REPORT_STORAGE_DIR: /var/lib/masters/reports
+      TENANT_EXPORT_STORAGE_DIR: /var/lib/masters/exports
     volumes:
       - report-data:/var/lib/masters/reports
+      - export-data:/var/lib/masters/exports
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -72,5 +74,6 @@ networks:
 volumes:
   libsql-data:
   report-data:
+  export-data:
   caddy-data:
   caddy-config:
