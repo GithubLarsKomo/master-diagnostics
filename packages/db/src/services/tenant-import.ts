@@ -28,6 +28,11 @@ export interface ExecuteTenantImportOptions extends PrepareTenantImportOptions {
   failAfterTable?: TenantPortabilityTable;
 }
 
+export interface ExecutePreparedTenantImportOptions {
+  /** Test-only fault injection used to prove transaction rollback. */
+  failAfterTable?: TenantPortabilityTable;
+}
+
 type SqlValue = string | number | bigint | boolean | Uint8Array | null;
 
 function requireId(row: PortableRow, path: string): string {
@@ -185,12 +190,11 @@ export async function prepareTenantImportPlan(
   };
 }
 
-export async function executeTenantImportDatabase(
+export async function executePreparedTenantImportPlan(
   db: Database,
-  document: TenantPortabilityExportDocument,
-  options: ExecuteTenantImportOptions = {},
+  plan: TenantImportPlan,
+  options: ExecutePreparedTenantImportOptions = {},
 ): Promise<TenantImportPlan> {
-  const plan = await prepareTenantImportPlan(db, document, options);
   const transaction = await db.$client.transaction('write');
 
   try {
@@ -239,4 +243,13 @@ export async function executeTenantImportDatabase(
     await transaction.rollback();
     throw error;
   }
+}
+
+export async function executeTenantImportDatabase(
+  db: Database,
+  document: TenantPortabilityExportDocument,
+  options: ExecuteTenantImportOptions = {},
+): Promise<TenantImportPlan> {
+  const plan = await prepareTenantImportPlan(db, document, options);
+  return executePreparedTenantImportPlan(db, plan, { failAfterTable: options.failAfterTable });
 }
