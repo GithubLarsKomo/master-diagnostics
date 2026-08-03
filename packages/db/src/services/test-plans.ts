@@ -4,13 +4,13 @@ import type { Database } from '../client';
 import {
   athleteSnapshots,
   athletes,
-  auditEvents,
   coachAthleteAssignments,
   protocolTemplates,
   protocolTemplateVersions,
   testPlanSnapshots,
   tests,
 } from '../schema';
+import { appendAuditEvent } from './audit';
 
 export interface TestPlanActor {
   userId: string;
@@ -181,8 +181,7 @@ export async function createTestPlanSnapshot(
     await tx.insert(athleteSnapshots).values(athleteSnapshot);
     await tx.insert(tests).values(test);
     await tx.insert(testPlanSnapshots).values(planSnapshot);
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
       actorUserId: actor.userId,
@@ -192,16 +191,14 @@ export async function createTestPlanSnapshot(
       entityId: planSnapshotId,
       source: 'WEB',
       correlationId,
-      afterJson: JSON.stringify({
+      after: {
         testId,
         athleteId: input.athleteId,
         athleteSnapshotId,
         protocolVersionId: input.protocolVersionId,
         algorithmVersion: plan.algorithmVersion,
         warningCodes: plan.warnings.map((warning) => warning.code),
-      }),
-      createdAt: now,
-      updatedAt: now,
+      },
     });
 
     return { test, athleteSnapshot, planSnapshot, plan };
