@@ -1,10 +1,10 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
 import type { Database } from '../client';
 import {
-  auditEvents,
   protocolTemplates,
   protocolTemplateVersions,
 } from '../schema';
+import { appendAuditEvent } from './audit';
 
 export type ProtocolTemplateDeviceType = 'BIKEERG' | 'ROWERG' | 'RP3';
 
@@ -220,8 +220,7 @@ export async function createTenantProtocolTemplate(
 
     await tx.insert(protocolTemplates).values(templateValues);
     await tx.insert(protocolTemplateVersions).values(versionValues);
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
       actorUserId: actor.userId,
@@ -231,9 +230,7 @@ export async function createTenantProtocolTemplate(
       entityId: templateId,
       source: 'WEB',
       correlationId,
-      afterJson: JSON.stringify({ template: templateValues, version: versionValues }),
-      createdAt: now,
-      updatedAt: now,
+      after: { template: templateValues, version: versionValues },
     });
   });
 
@@ -288,8 +285,7 @@ export async function createProtocolTemplateVersion(
       now,
     );
     await tx.insert(protocolTemplateVersions).values(versionValues);
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
       actorUserId: actor.userId,
@@ -299,9 +295,7 @@ export async function createProtocolTemplateVersion(
       entityId: versionValues.id,
       source: 'WEB',
       correlationId,
-      afterJson: JSON.stringify(versionValues),
-      createdAt: now,
-      updatedAt: now,
+      after: versionValues,
     });
 
     return versionValues;
