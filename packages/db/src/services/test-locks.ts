@@ -2,11 +2,11 @@ import { createHash } from 'node:crypto';
 import { and, eq, gt, isNull } from 'drizzle-orm';
 import type { Database } from '../client';
 import {
-  auditEvents,
   coachAthleteAssignments,
   testLocks,
   tests,
 } from '../schema';
+import { appendAuditEvent } from './audit';
 
 export const TEST_LOCK_TTL_MS = 60_000;
 
@@ -131,8 +131,7 @@ export async function acquireTestLock(
       });
     }
 
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId,
       occurredAt: lease.acquiredAt,
       actorUserId: actor.userId,
@@ -141,17 +140,14 @@ export async function acquireTestLock(
       entityType: 'test_lock',
       entityId: testId,
       source: 'WEB',
-      correlationId: crypto.randomUUID(),
-      beforeJson: existing ? JSON.stringify({
+      before: existing ? {
         ownerUserId: existing.ownerUserId,
         expiresAt: existing.expiresAt,
-      }) : null,
-      afterJson: JSON.stringify({
+      } : undefined,
+      after: {
         ownerUserId: actor.userId,
         expiresAt: lease.expiresAt,
-      }),
-      createdAt: lease.acquiredAt,
-      updatedAt: lease.acquiredAt,
+      },
     });
 
     return {
@@ -272,8 +268,7 @@ export async function takeOverTestLock(
     )).returning();
     if (!updatedTest) throw new Error('Test changed concurrently during takeover');
 
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId,
       occurredAt: lease.acquiredAt,
       actorUserId: actor.userId,
@@ -283,19 +278,16 @@ export async function takeOverTestLock(
       entityId: testId,
       source: 'WEB',
       reason: normalizedReason,
-      correlationId: crypto.randomUUID(),
-      beforeJson: JSON.stringify({
+      before: {
         conductingTrainerUserId: test.conductingTrainerUserId,
         lockOwnerUserId: existing?.ownerUserId ?? null,
         lockExpiresAt: existing?.expiresAt ?? null,
-      }),
-      afterJson: JSON.stringify({
+      },
+      after: {
         conductingTrainerUserId: actor.userId,
         lockOwnerUserId: actor.userId,
         lockExpiresAt: lease.expiresAt,
-      }),
-      createdAt: lease.acquiredAt,
-      updatedAt: lease.acquiredAt,
+      },
     });
 
     return {
@@ -325,8 +317,7 @@ export async function releaseTestLock(
     )).returning();
     if (!released) return;
     const now = new Date().toISOString();
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(),
+    await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
       actorUserId: actor.userId,
@@ -335,14 +326,10 @@ export async function releaseTestLock(
       entityType: 'test_lock',
       entityId: testId,
       source: 'WEB',
-      correlationId: crypto.randomUUID(),
-      beforeJson: JSON.stringify({
+      before: {
         ownerUserId: released.ownerUserId,
         expiresAt: released.expiresAt,
-      }),
-      afterJson: null,
-      createdAt: now,
-      updatedAt: now,
+      },
     });
   });
 }
