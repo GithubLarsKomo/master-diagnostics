@@ -24,3 +24,18 @@ export const backupRuns = sqliteTable('backup_runs', {
   id: id(), tenantId: tenantId(), status: text('status', { enum: ['RUNNING','SUCCEEDED','FAILED'] }).notNull(), targetType: text('target_type').notNull(),
   startedAt: text('started_at').notNull(), completedAt: text('completed_at'), checksum: text('checksum'), errorCode: text('error_code'), ...timestamps,
 });
+
+export const tenantExportPackages = sqliteTable('tenant_export_packages', {
+  id: id(),
+  tenantId: tenantId(),
+  tokenHash: text('token_hash').notNull(),
+  storageReference: text('storage_reference').notNull(),
+  packageSha256: text('package_sha256').notNull(),
+  createdByUserId: text('created_by_user_id').notNull(),
+  expiresAt: text('expires_at').notNull(),
+  downloadedAt: text('downloaded_at'),
+  ...timestamps,
+}, (t) => [
+  uniqueIndex('tenant_export_package_token_hash_uq').on(t.tokenHash),
+  uniqueIndex('tenant_export_package_storage_reference_uq').on(t.storageReference),
+]);

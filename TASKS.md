@@ -129,7 +129,7 @@
 - [x] anonymisierten Analyseexport
 - [x] Seltenheits-/Reidentifikationswarnung
 - [x] vollständigen Tenant-Export
-- [ ] verschlüsselte Exportpakete
+- [x] verschlüsselte Exportpakete
 - [ ] Dry-Run-Import
 - [ ] atomaren Import/Rollback
 - [ ] Export-/Import-Roundtrip-Test

@@ -71,6 +71,13 @@
       "when": 1785680400000,
       "tag": "0009_immutable_report_versions",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1785736800000,
+      "tag": "0010_tenant_export_packages",
+      "breakpoints": true
     }
   ]
 }
