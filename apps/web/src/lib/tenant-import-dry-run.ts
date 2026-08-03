@@ -41,7 +41,22 @@ function parseDocument(value: unknown, issues: TenantImportDryRunIssue[]): Tenan
   if (value.schemaVersion !== TENANT_EXPORT_SCHEMA_VERSION) {
     issues.push(issue('UNSUPPORTED_SCHEMA_VERSION', '$.schemaVersion', `Expected ${TENANT_EXPORT_SCHEMA_VERSION}.`));
   }
-  if (!isRecord(value.manifest)) issues.push(issue('INVALID_MANIFEST', '$.manifest', 'Manifest must be an object.'));
+  if (!isRecord(value.manifest)) {
+    issues.push(issue('INVALID_MANIFEST', '$.manifest', 'Manifest must be an object.'));
+  } else {
+    if (!isRecord(value.manifest.sections)) {
+      issues.push(issue('INVALID_MANIFEST_SECTIONS', '$.manifest.sections', 'Manifest sections must be an object.'));
+    }
+    if (!Array.isArray(value.manifest.reportArtifacts)) {
+      issues.push(issue('INVALID_MANIFEST_REPORT_ARTIFACTS', '$.manifest.reportArtifacts', 'Manifest report artifacts must be an array.'));
+    }
+    if (typeof value.manifest.tenantId !== 'string' || !value.manifest.tenantId) {
+      issues.push(issue('INVALID_MANIFEST_TENANT_ID', '$.manifest.tenantId', 'Manifest tenant ID is required.'));
+    }
+    if (typeof value.manifest.exportedAt !== 'string' || !value.manifest.exportedAt) {
+      issues.push(issue('INVALID_MANIFEST_EXPORTED_AT', '$.manifest.exportedAt', 'Manifest export timestamp is required.'));
+    }
+  }
   if (!isRecord(value.tenant)) issues.push(issue('INVALID_TENANT', '$.tenant', 'Tenant must be an object.'));
   if (!Array.isArray(value.users)) issues.push(issue('INVALID_USERS', '$.users', 'Users must be an array.'));
   if (!Array.isArray(value.memberships)) issues.push(issue('INVALID_MEMBERSHIPS', '$.memberships', 'Memberships must be an array.'));
@@ -56,13 +71,11 @@ function verifyReportArtifact(artifact: TenantExportReportArtifact, index: numbe
   if (artifact.mediaType !== 'application/pdf') {
     issues.push(issue('UNSUPPORTED_REPORT_MEDIA_TYPE', `${path}.mediaType`, 'Only PDF report artifacts are supported.'));
   }
-  let bytes: Buffer;
-  try {
-    bytes = Buffer.from(artifact.base64, 'base64');
-  } catch {
+  if (typeof artifact.base64 !== 'string' || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(artifact.base64)) {
     issues.push(issue('INVALID_REPORT_BASE64', `${path}.base64`, 'Report artifact is not valid base64.'));
     return;
   }
+  const bytes = Buffer.from(artifact.base64, 'base64');
   if (sha256(bytes) !== artifact.sha256) {
     issues.push(issue('REPORT_CHECKSUM_MISMATCH', `${path}.sha256`, 'Report artifact checksum does not match.'));
   }
@@ -93,6 +106,10 @@ export function validateTenantImportDryRun(value: unknown): TenantImportDryRunPr
   const sectionCounts: Record<string, number> = {};
   for (const [name, entry] of Object.entries(manifest.sections)) {
     const path = `$.manifest.sections.${name}`;
+    if (!entry || typeof entry.rowCount !== 'number' || typeof entry.sha256 !== 'string') {
+      issues.push(issue('INVALID_MANIFEST_SECTION', path, 'Manifest section entry is invalid.'));
+      continue;
+    }
     if (!(name in sectionValues)) {
       issues.push(issue('UNKNOWN_MANIFEST_SECTION', path, 'Manifest references a missing data section.'));
       continue;
