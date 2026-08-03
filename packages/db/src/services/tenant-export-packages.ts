@@ -1,4 +1,4 @@
-import { and, eq, isNull, lte } from 'drizzle-orm';
+import { and, eq, gt, isNull, lte } from 'drizzle-orm';
 import type { Database } from '../client';
 import { auditEvents, tenantExportPackages } from '../schema';
 
@@ -57,10 +57,11 @@ export async function consumeTenantExportPackage(
       .where(and(
         eq(tenantExportPackages.tokenHash, tokenHash),
         isNull(tenantExportPackages.downloadedAt),
+        gt(tenantExportPackages.expiresAt, now),
       ))
       .returning();
     const row = rows[0] ?? null;
-    if (!row || row.expiresAt <= now) return null;
+    if (!row) return null;
 
     await tx.insert(auditEvents).values({
       id: crypto.randomUUID(),
