@@ -130,7 +130,7 @@
 - [x] Seltenheits-/Reidentifikationswarnung
 - [x] vollständigen Tenant-Export
 - [x] verschlüsselte Exportpakete
-- [ ] Dry-Run-Import
+- [x] Dry-Run-Import
 - [ ] atomaren Import/Rollback
 - [ ] Export-/Import-Roundtrip-Test
 
