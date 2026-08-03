@@ -10,7 +10,8 @@
     "lint": "echo db-lint-pending",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "db:migrate": "tsx src/migrate.ts"
+    "db:migrate": "tsx src/migrate.ts",
+    "tenant-exports:cleanup": "tsx src/cleanup-tenant-exports.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
