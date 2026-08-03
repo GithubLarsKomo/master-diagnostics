@@ -16,6 +16,7 @@ export interface AppendAuditEventInput {
   after?: unknown;
   correlationId?: string;
   occurredAt?: string;
+  recordedAt?: string;
 }
 
 function jsonValue(value: unknown): string | null {
@@ -27,6 +28,7 @@ export async function appendAuditEvent(
   input: AppendAuditEventInput,
 ) {
   const occurredAt = input.occurredAt ?? new Date().toISOString();
+  const recordedAt = input.recordedAt ?? occurredAt;
   const row = {
     id: crypto.randomUUID(),
     tenantId: input.tenantId,
@@ -41,8 +43,8 @@ export async function appendAuditEvent(
     beforeJson: jsonValue(input.before),
     afterJson: jsonValue(input.after),
     correlationId: input.correlationId ?? crypto.randomUUID(),
-    createdAt: occurredAt,
-    updatedAt: occurredAt,
+    createdAt: recordedAt,
+    updatedAt: recordedAt,
   };
 
   await executor.insert(auditEvents).values(row);

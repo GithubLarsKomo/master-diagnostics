@@ -29,6 +29,7 @@ describe('append-only audit service', () => {
       after: { firstName: 'Maximilian' },
       correlationId: 'correlation-a',
       occurredAt: '2026-08-03T18:00:00.000Z',
+      recordedAt: '2026-08-03T18:00:02.000Z',
     });
     await appendAuditEvent(db, {
       tenantId: 'tenant-a',
@@ -40,12 +41,15 @@ describe('append-only audit service', () => {
 
     expect(Object.isFrozen(first)).toBe(true);
     const rows = await db.$client.execute({
-      sql: 'SELECT action, before_json, after_json, correlation_id FROM audit_events ORDER BY occurred_at, id',
+      sql: 'SELECT action, occurred_at, created_at, updated_at, before_json, after_json, correlation_id FROM audit_events ORDER BY occurred_at, id',
       args: [],
     });
     expect(rows.rows).toHaveLength(2);
     expect(rows.rows[0]).toMatchObject({
       action: 'athlete.updated',
+      occurred_at: '2026-08-03T18:00:00.000Z',
+      created_at: '2026-08-03T18:00:02.000Z',
+      updated_at: '2026-08-03T18:00:02.000Z',
       before_json: '{"firstName":"Max"}',
       after_json: '{"firstName":"Maximilian"}',
       correlation_id: 'correlation-a',
