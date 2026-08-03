@@ -77,4 +77,26 @@ describe('tenant import dry-run', () => {
     expect(preview.issues.map((entry) => entry.code)).toContain('TENANT_ID_MISMATCH');
     expect(preview.issues.map((entry) => entry.code)).toContain('REPORT_CHECKSUM_MISMATCH');
   });
+
+  it('fails closed on a structurally incomplete manifest instead of throwing', () => {
+    const document = fixture() as unknown as Record<string, unknown>;
+    document.manifest = { schemaVersion: 'masters-tenant-export-v1' };
+    const preview = validateTenantImportDryRun(document);
+    expect(preview.valid).toBe(false);
+    expect(preview.sourceTenantId).toBeNull();
+    expect(preview.issues.map((entry) => entry.code)).toEqual(expect.arrayContaining([
+      'INVALID_MANIFEST_SECTIONS',
+      'INVALID_MANIFEST_REPORT_ARTIFACTS',
+      'INVALID_MANIFEST_TENANT_ID',
+      'INVALID_MANIFEST_EXPORTED_AT',
+    ]));
+  });
+
+  it('rejects malformed report base64 without throwing', () => {
+    const document = fixture();
+    document.reportArtifacts[0]!.base64 = '***not-base64***';
+    const preview = validateTenantImportDryRun(document);
+    expect(preview.valid).toBe(false);
+    expect(preview.issues.map((entry) => entry.code)).toContain('INVALID_REPORT_BASE64');
+  });
 });
