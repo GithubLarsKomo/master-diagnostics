@@ -13,6 +13,24 @@ services:
         condition: service_healthy
     networks: [internal]
 
+  export-cleanup:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      DATABASE_URL: http://libsql:8080
+      TENANT_EXPORT_STORAGE_DIR: /var/lib/masters/exports
+    command: ["sh", "-c", "while true; do pnpm --filter @masters/db tenant-exports:cleanup; sleep 3600; done"]
+    volumes:
+      - export-data:/var/lib/masters/exports
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [internal]
+
   app:
     build:
       context: ..
