@@ -85,7 +85,7 @@ describe('atomic tenant portability import', () => {
       targetSlug: 'restored-club',
       targetDeploymentMode: 'CLUB',
       failAfterTable: 'athletes',
-    })).rejects.toThrow(/Injected tenant import failure/);
+    })).rejects.toThrow(/Tenant import interrupted/);
 
     for (const tableName of ['tenants', 'users', 'tenant_memberships', 'athletes']) {
       const result = await db.$client.execute(`SELECT COUNT(*) AS count FROM ${tableName}`);
