@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../client';
-import { athleteGuardians, athletes, auditEvents } from '../schema';
+import { athleteGuardians, athletes } from '../schema';
+import { appendAuditEvent } from './audit';
 
 export interface GuardianInput {
   fullName: string;
@@ -79,12 +80,16 @@ export async function registerGuardian(
   };
   await db.transaction(async (tx) => {
     await tx.insert(athleteGuardians).values(guardian);
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(), tenantId, occurredAt: now,
-      actorUserId: actor.userId, actorRole: actor.role,
-      action: 'guardian.registered', entityType: 'athlete_guardian', entityId: guardian.id,
-      source: 'WEB', correlationId: crypto.randomUUID(), afterJson: JSON.stringify(guardian),
-      createdAt: now, updatedAt: now,
+    await appendAuditEvent(tx, {
+      tenantId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'guardian.registered',
+      entityType: 'athlete_guardian',
+      entityId: guardian.id,
+      source: 'WEB',
+      after: guardian,
+      occurredAt: now,
     });
   });
   return guardian;
@@ -111,12 +116,17 @@ export async function revokeGuardian(
   const now = new Date().toISOString();
   await db.transaction(async (tx) => {
     await tx.update(athleteGuardians).set({ revokedAt: now, updatedAt: now }).where(eq(athleteGuardians.id, guardianId));
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(), tenantId, occurredAt: now,
-      actorUserId: actor.userId, actorRole: actor.role,
-      action: 'guardian.revoked', entityType: 'athlete_guardian', entityId: guardianId,
-      source: 'WEB', reason: normalizedReason, correlationId: crypto.randomUUID(), beforeJson: JSON.stringify(guardian),
-      createdAt: now, updatedAt: now,
+    await appendAuditEvent(tx, {
+      tenantId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'guardian.revoked',
+      entityType: 'athlete_guardian',
+      entityId: guardianId,
+      source: 'WEB',
+      reason: normalizedReason,
+      before: guardian,
+      occurredAt: now,
     });
   });
 }
