@@ -56,7 +56,7 @@ export async function POST(
     const result = await syncTestMeasurement(
       db,
       context.tenantId,
-      { userId: context.userId, role: context.role },
+      context,
       operation as TestMeasurementSyncOperation,
       lockToken,
     );
