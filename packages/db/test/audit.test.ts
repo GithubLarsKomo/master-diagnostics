@@ -30,6 +30,8 @@ describe('append-only audit service', () => {
       correlationId: 'correlation-a',
       occurredAt: '2026-08-03T18:00:00.000Z',
       recordedAt: '2026-08-03T18:00:02.000Z',
+      authProvider: 'BETTER_AUTH',
+      sessionId: 'session-a',
     });
     await appendAuditEvent(db, {
       tenantId: 'tenant-a',
@@ -41,7 +43,7 @@ describe('append-only audit service', () => {
 
     expect(Object.isFrozen(first)).toBe(true);
     const rows = await db.$client.execute({
-      sql: 'SELECT action, occurred_at, created_at, updated_at, before_json, after_json, correlation_id FROM audit_events ORDER BY occurred_at, id',
+      sql: 'SELECT action, occurred_at, created_at, updated_at, before_json, after_json, correlation_id, auth_provider, session_id FROM audit_events ORDER BY occurred_at, id',
       args: [],
     });
     expect(rows.rows).toHaveLength(2);
@@ -53,6 +55,8 @@ describe('append-only audit service', () => {
       before_json: '{"firstName":"Max"}',
       after_json: '{"firstName":"Maximilian"}',
       correlation_id: 'correlation-a',
+      auth_provider: 'BETTER_AUTH',
+      session_id: 'session-a',
     });
   });
 
@@ -72,5 +76,33 @@ describe('append-only audit service', () => {
 
     const result = await db.$client.execute('SELECT COUNT(*) AS count FROM audit_events');
     expect(Number(result.rows[0]?.count ?? -1)).toBe(0);
+  });
+
+  it('rejects direct updates and deletes at the database boundary', async () => {
+    const db = await createTestDatabase();
+    const event = await appendAuditEvent(db, {
+      tenantId: 'tenant-a',
+      actorUserId: 'user-a',
+      actorRole: 'TENANT_ADMIN',
+      action: 'test.append-only-probe',
+      entityType: 'test',
+      entityId: 'test-a',
+      source: 'TEST',
+    });
+
+    await expect(db.$client.execute({
+      sql: 'UPDATE audit_events SET action = ? WHERE id = ?',
+      args: ['tampered', event.id],
+    })).rejects.toThrow('audit events are immutable');
+    await expect(db.$client.execute({
+      sql: 'DELETE FROM audit_events WHERE id = ?',
+      args: [event.id],
+    })).rejects.toThrow('audit events are immutable');
+
+    const rows = await db.$client.execute({
+      sql: 'SELECT action FROM audit_events WHERE id = ?',
+      args: [event.id],
+    });
+    expect(rows.rows[0]).toMatchObject({ action: 'test.append-only-probe' });
   });
 });

@@ -78,6 +78,13 @@
       "when": 1785736800000,
       "tag": "0010_tenant_export_packages",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1785798000000,
+      "tag": "0011_audit_hardening",
+      "breakpoints": true
     }
   ]
 }

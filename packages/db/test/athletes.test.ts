@@ -58,6 +58,8 @@ async function createTestDatabase(): Promise<Database> {
       before_json TEXT,
       after_json TEXT,
       correlation_id TEXT NOT NULL,
+      auth_provider TEXT,
+      session_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`,

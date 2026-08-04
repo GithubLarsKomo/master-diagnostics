@@ -17,6 +17,8 @@ export interface AppendAuditEventInput {
   correlationId?: string;
   occurredAt?: string;
   recordedAt?: string;
+  authProvider?: string | null;
+  sessionId?: string | null;
 }
 
 function jsonValue(value: unknown): string | null {
@@ -43,6 +45,8 @@ export async function appendAuditEvent(
     beforeJson: jsonValue(input.before),
     afterJson: jsonValue(input.after),
     correlationId: input.correlationId ?? crypto.randomUUID(),
+    authProvider: input.authProvider ?? null,
+    sessionId: input.sessionId ?? null,
     createdAt: recordedAt,
     updatedAt: recordedAt,
   };

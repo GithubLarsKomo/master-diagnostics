@@ -12,7 +12,8 @@ export const syncOperations = sqliteTable('sync_operations', {
 export const auditEvents = sqliteTable('audit_events', {
   id: id(), tenantId: tenantId(), occurredAt: text('occurred_at').notNull(), actorUserId: text('actor_user_id'), actorRole: text('actor_role'),
   action: text('action').notNull(), entityType: text('entity_type').notNull(), entityId: text('entity_id'), source: text('source').notNull(),
-  reason: text('reason'), beforeJson: text('before_json'), afterJson: text('after_json'), correlationId: text('correlation_id').notNull(), ...timestamps,
+  reason: text('reason'), beforeJson: text('before_json'), afterJson: text('after_json'), correlationId: text('correlation_id').notNull(),
+  authProvider: text('auth_provider'), sessionId: text('session_id'), ...timestamps,
 });
 
 export const notifications = sqliteTable('notifications', {
