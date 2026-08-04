@@ -11,7 +11,7 @@ export async function addConsent(athleteId: string, formData: FormData) {
   authorize(context, 'athlete.manage');
   const consentType = String(formData.get('consentType') ?? '').trim();
   const documentVersion = String(formData.get('documentVersion') ?? '').trim();
-  await grantConsent(db, context.tenantId, athleteId, { userId: context.userId, role: context.role }, consentType, documentVersion);
+  await grantConsent(db, context.tenantId, athleteId, context, consentType, documentVersion);
   revalidatePath(`/athletes/${athleteId}`);
 }
 
@@ -20,6 +20,6 @@ export async function withdrawAthleteConsent(athleteId: string, formData: FormDa
   authorize(context, 'athlete.manage');
   const consentId = String(formData.get('consentId') ?? '');
   const reason = String(formData.get('reason') ?? '').trim();
-  await withdrawConsent(db, context.tenantId, athleteId, consentId, { userId: context.userId, role: context.role }, reason);
+  await withdrawConsent(db, context.tenantId, athleteId, consentId, context, reason);
   revalidatePath(`/athletes/${athleteId}`);
 }

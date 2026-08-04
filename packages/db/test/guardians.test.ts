@@ -26,6 +26,13 @@ async function seedAthlete(db: Database, tenantId: string, athleteId: string, bi
   });
 }
 
+const actor = {
+  userId: 'admin-a',
+  role: 'TENANT_ADMIN',
+  authProvider: 'BETTER_AUTH' as const,
+  sessionId: 'session-guardian-a',
+};
+
 describe('guardian workflow', () => {
   let db: Database;
   beforeEach(async () => { db = await createTestDatabase(); });
@@ -35,13 +42,13 @@ describe('guardian workflow', () => {
     await expect(assertGuardianRequirement(db, 'tenant-a', 'athlete-a', new Date('2026-07-29T00:00:00Z')))
       .rejects.toThrow('Active guardian required');
 
-    const guardian = await registerGuardian(db, 'tenant-a', 'athlete-a', { userId: 'admin-a', role: 'TENANT_ADMIN' }, {
+    const guardian = await registerGuardian(db, 'tenant-a', 'athlete-a', actor, {
       fullName: 'Erika Muster', relationship: 'Mutter', email: 'erika@example.test',
     });
     await expect(assertGuardianRequirement(db, 'tenant-a', 'athlete-a', new Date('2026-07-29T00:00:00Z'))).resolves.toBeUndefined();
     await expect(listGuardians(db, 'tenant-b', 'athlete-a')).rejects.toThrow('Athlete not found');
 
-    await revokeGuardian(db, 'tenant-a', 'athlete-a', guardian.id, { userId: 'admin-a', role: 'TENANT_ADMIN' }, 'Vertretung beendet');
+    await revokeGuardian(db, 'tenant-a', 'athlete-a', guardian.id, actor, 'Vertretung beendet');
     await expect(assertGuardianRequirement(db, 'tenant-a', 'athlete-a', new Date('2026-07-29T00:00:00Z')))
       .rejects.toThrow('Active guardian required');
   });
@@ -49,11 +56,13 @@ describe('guardian workflow', () => {
   it('does not require a guardian for an adult and audits lifecycle events', async () => {
     await seedAthlete(db, 'tenant-a', 'athlete-adult', '1990-05-01');
     await expect(assertGuardianRequirement(db, 'tenant-a', 'athlete-adult', new Date('2026-07-29T00:00:00Z'))).resolves.toBeUndefined();
-    const guardian = await registerGuardian(db, 'tenant-a', 'athlete-adult', { userId: 'admin-a', role: 'TENANT_ADMIN' }, {
+    const guardian = await registerGuardian(db, 'tenant-a', 'athlete-adult', actor, {
       fullName: 'Max Muster', relationship: 'Bevollmächtigter',
     });
-    await revokeGuardian(db, 'tenant-a', 'athlete-adult', guardian.id, { userId: 'admin-a', role: 'TENANT_ADMIN' }, 'Vollmacht beendet');
+    await revokeGuardian(db, 'tenant-a', 'athlete-adult', guardian.id, actor, 'Vollmacht beendet');
     const events = await db.select().from(schema.auditEvents);
     expect(events.map((event) => event.action)).toEqual(['guardian.registered', 'guardian.revoked']);
+    expect(events.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
+    expect(events.every((event) => event.sessionId === 'session-guardian-a')).toBe(true);
   });
 });

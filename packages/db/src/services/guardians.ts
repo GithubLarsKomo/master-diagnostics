@@ -1,7 +1,7 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../client';
 import { athleteGuardians, athletes } from '../schema';
-import { appendAuditEvent } from './audit';
+import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 
 export interface GuardianInput {
   fullName: string;
@@ -11,10 +11,7 @@ export interface GuardianInput {
   validUntil?: string;
 }
 
-export interface GuardianActor {
-  userId: string;
-  role: string;
-}
+export type GuardianActor = AuditActorContext;
 
 function normalize(input: GuardianInput): GuardianInput {
   const fullName = input.fullName.trim();
@@ -82,8 +79,7 @@ export async function registerGuardian(
     await tx.insert(athleteGuardians).values(guardian);
     await appendAuditEvent(tx, {
       tenantId,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'guardian.registered',
       entityType: 'athlete_guardian',
       entityId: guardian.id,
@@ -118,8 +114,7 @@ export async function revokeGuardian(
     await tx.update(athleteGuardians).set({ revokedAt: now, updatedAt: now }).where(eq(athleteGuardians.id, guardianId));
     await appendAuditEvent(tx, {
       tenantId,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'guardian.revoked',
       entityType: 'athlete_guardian',
       entityId: guardianId,

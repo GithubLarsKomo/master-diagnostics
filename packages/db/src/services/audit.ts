@@ -3,6 +3,22 @@ import { auditEvents } from '../schema';
 
 export type AuditExecutor = Pick<Database, 'insert'>;
 
+export interface AuditActorContext {
+  userId: string;
+  role: string;
+  authProvider?: 'BETTER_AUTH' | 'CLERK';
+  sessionId?: string;
+}
+
+export function auditActorFields(actor: AuditActorContext) {
+  return {
+    actorUserId: actor.userId,
+    actorRole: actor.role,
+    authProvider: actor.authProvider ?? null,
+    sessionId: actor.sessionId ?? null,
+  };
+}
+
 export interface AppendAuditEventInput {
   tenantId: string;
   actorUserId?: string | null;

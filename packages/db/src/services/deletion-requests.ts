@@ -8,12 +8,9 @@ import {
   coachAthleteAssignments,
   consents,
 } from '../schema';
-import { appendAuditEvent } from './audit';
+import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 
-export interface DeletionActor {
-  userId: string;
-  role: string;
-}
+export type DeletionActor = AuditActorContext;
 
 async function requireAthlete(db: Database, tenantId: string, athleteId: string) {
   const [athlete] = await db.select().from(athletes).where(and(
@@ -83,8 +80,7 @@ export async function requestAthleteDeletion(
     await tx.update(athletes).set({ consentBlockedAt: now, updatedAt: now }).where(and(eq(athletes.id, athleteId), eq(athletes.tenantId, tenantId)));
     await appendAuditEvent(tx, {
       tenantId,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'athlete.deletion_requested',
       entityType: 'athlete_deletion_request',
       entityId: request.id,
@@ -123,8 +119,7 @@ export async function decideAthleteDeletion(
     }
     await appendAuditEvent(tx, {
       tenantId,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: decision === 'APPROVED' ? 'athlete.deletion_approved' : 'athlete.deletion_rejected',
       entityType: 'athlete_deletion_request',
       entityId: requestId,
@@ -161,8 +156,7 @@ export async function completeAthleteDeletion(
     await tx.update(athleteGuardians).set({ revokedAt: now, updatedAt: now }).where(and(eq(athleteGuardians.tenantId, tenantId), eq(athleteGuardians.athleteId, athleteId), isNull(athleteGuardians.revokedAt)));
     await appendAuditEvent(tx, {
       tenantId,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'athlete.deletion_completed',
       entityType: 'athlete',
       entityId: athleteId,

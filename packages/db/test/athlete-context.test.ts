@@ -10,7 +10,12 @@ import {
   listCoachAssignments,
 } from '../src/services/athlete-context';
 
-const actor = { userId: 'admin-a', role: 'TENANT_ADMIN' };
+const actor = {
+  userId: 'admin-a',
+  role: 'TENANT_ADMIN',
+  authProvider: 'BETTER_AUTH' as const,
+  sessionId: 'session-athlete-context-a',
+};
 let databasePath = '';
 let db: Database;
 
@@ -57,6 +62,8 @@ describe('coach assignments and athlete snapshots', () => {
       'athlete.coach_assigned',
       'athlete.coach_assigned',
     ]);
+    expect(events.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
+    expect(events.every((event) => event.sessionId === 'session-athlete-context-a')).toBe(true);
   });
 
   it('rejects coach and athlete access from another tenant', async () => {
@@ -82,5 +89,7 @@ describe('coach assignments and athlete snapshots', () => {
 
     const events = await db.select().from(schema.auditEvents);
     expect(events.filter((event) => event.action === 'athlete.snapshot_created')).toHaveLength(2);
+    expect(events.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
+    expect(events.every((event) => event.sessionId === 'session-athlete-context-a')).toBe(true);
   });
 });

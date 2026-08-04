@@ -18,7 +18,12 @@ async function createDb(): Promise<Database> {
   return drizzle(client, { schema }) as Database;
 }
 
-const actor = { userId: 'admin-a', role: 'TENANT_ADMIN' };
+const actor = {
+  userId: 'admin-a',
+  role: 'TENANT_ADMIN',
+  authProvider: 'BETTER_AUTH' as const,
+  sessionId: 'session-consent-a',
+};
 
 describe('consent workflow', () => {
   it('grants, withdraws and re-grants while maintaining the athlete block', async () => {
@@ -38,6 +43,8 @@ describe('consent workflow', () => {
 
     const audit = await db.select().from(schema.auditEvents);
     expect(audit.map((row) => row.action)).toEqual(['consent.granted', 'consent.withdrawn', 'consent.granted']);
+    expect(audit.every((row) => row.authProvider === 'BETTER_AUTH')).toBe(true);
+    expect(audit.every((row) => row.sessionId === 'session-consent-a')).toBe(true);
   });
 
   it('does not expose or modify consent data across tenants', async () => {
