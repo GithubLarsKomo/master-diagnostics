@@ -11,12 +11,9 @@ import {
   testSafetyChecklistConfirmations,
   tests,
 } from '../schema';
-import { appendAuditEvent } from './audit';
+import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 
-export interface TestSafetyActor {
-  userId: string;
-  role: string;
-}
+export type TestSafetyActor = AuditActorContext;
 
 export type TestStartReadinessBlocker =
   | 'TEST_NOT_FOUND'
@@ -111,8 +108,7 @@ export async function confirmTestSafetyChecklist(
     await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'test.safety_checklist_confirmed',
       entityType: 'test_safety_checklist_confirmation',
       entityId: checklist.id,

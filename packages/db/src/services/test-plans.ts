@@ -10,12 +10,9 @@ import {
   testPlanSnapshots,
   tests,
 } from '../schema';
-import { appendAuditEvent } from './audit';
+import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 
-export interface TestPlanActor {
-  userId: string;
-  role: string;
-}
+export type TestPlanActor = AuditActorContext;
 
 export interface CreateTestPlanSnapshotInput {
   athleteId: string;
@@ -184,8 +181,7 @@ export async function createTestPlanSnapshot(
     await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'test.plan_snapshot_created',
       entityType: 'test_plan_snapshot',
       entityId: planSnapshotId,

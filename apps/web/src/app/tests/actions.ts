@@ -44,15 +44,11 @@ const finishSchema = z.object({
   activeElapsedSeconds: z.coerce.number().nonnegative(),
 });
 
-function actor(context: Awaited<ReturnType<typeof getTenantContext>>) {
-  return { userId: context.userId, role: context.role };
-}
-
 export async function planTest(formData: FormData) {
   const context = await getTenantContext();
   authorize(context, 'test.plan');
   const input = planSchema.parse(Object.fromEntries(formData));
-  const created = await createTestPlanSnapshot(db, context.tenantId, actor(context), {
+  const created = await createTestPlanSnapshot(db, context.tenantId, context, {
     athleteId: input.athleteId,
     protocolVersionId: input.protocolVersionId,
     expectedLt2Watts: input.expectedLt2Watts,
@@ -72,7 +68,7 @@ export async function confirmSafety(testId: string, formData: FormData) {
   await confirmTestSafetyChecklist(
     db,
     context.tenantId,
-    actor(context),
+    context,
     testId,
     confirmation,
   );
@@ -82,7 +78,7 @@ export async function confirmSafety(testId: string, formData: FormData) {
 export async function startPlannedTest(testId: string) {
   const context = await getTenantContext();
   authorize(context, 'test.run');
-  await startTest(db, context.tenantId, actor(context), testId);
+  await startTest(db, context.tenantId, context, testId);
   revalidatePath('/tests');
   revalidatePath(`/tests/${testId}`);
 }
@@ -91,7 +87,7 @@ export async function finishRunningTest(testId: string, formData: FormData) {
   const context = await getTenantContext();
   authorize(context, 'test.run');
   const input = finishSchema.parse(Object.fromEntries(formData));
-  await finishTest(db, context.tenantId, actor(context), testId, {
+  await finishTest(db, context.tenantId, context, testId, {
     reason: input.reason as TestTerminationReason,
     lockToken: input.lockToken,
     activeElapsedSeconds: input.activeElapsedSeconds,

@@ -17,14 +17,11 @@ import {
   testTerminationEvents,
   tests,
 } from '../schema';
-import { appendAuditEvent } from './audit';
+import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 import { hashTestLockToken } from './test-locks';
 import { buildTimerFromSnapshot } from './test-timer';
 
-export interface TestLifecycleActor {
-  userId: string;
-  role: string;
-}
+export type TestLifecycleActor = AuditActorContext;
 
 export interface FinishTestInput {
   reason: TestTerminationReason;
@@ -166,8 +163,7 @@ export async function startTest(
     await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'test.started',
       entityType: 'test',
       entityId: testId,
@@ -353,8 +349,7 @@ export async function finishTest(
     await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'test.finished',
       entityType: 'test',
       entityId: testId,
