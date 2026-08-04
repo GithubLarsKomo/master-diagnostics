@@ -14,7 +14,7 @@ export async function submitDeletionRequest(athleteId: string, formData: FormDat
   const context = await getTenantContext();
   authorize(context, 'athlete.manage');
   const reason = reasonSchema.parse(formData.get('reason'));
-  await requestAthleteDeletion(db, context.tenantId, athleteId, { userId: context.userId, role: context.role }, reason);
+  await requestAthleteDeletion(db, context.tenantId, athleteId, context, reason);
   revalidatePath(`/athletes/${athleteId}`);
 }
 
@@ -24,7 +24,7 @@ export async function decideDeletionRequest(athleteId: string, formData: FormDat
   const requestId = z.string().uuid().parse(formData.get('requestId'));
   const decision = z.enum(['APPROVED', 'REJECTED']).parse(formData.get('decision'));
   const reason = reasonSchema.parse(formData.get('reason'));
-  await decideAthleteDeletion(db, context.tenantId, athleteId, requestId, { userId: context.userId, role: context.role }, decision, reason);
+  await decideAthleteDeletion(db, context.tenantId, athleteId, requestId, context, decision, reason);
   revalidatePath(`/athletes/${athleteId}`);
 }
 
@@ -33,6 +33,6 @@ export async function completeDeletionRequest(athleteId: string, formData: FormD
   authorize(context, 'athlete.manage');
   const requestId = z.string().uuid().parse(formData.get('requestId'));
   const reason = reasonSchema.parse(formData.get('reason'));
-  await completeAthleteDeletion(db, context.tenantId, athleteId, requestId, { userId: context.userId, role: context.role }, reason);
+  await completeAthleteDeletion(db, context.tenantId, athleteId, requestId, context, reason);
   redirect('/athletes');
 }
