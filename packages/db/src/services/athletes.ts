@@ -102,8 +102,8 @@ export async function createAthlete(
       entityId: athleteId,
       source: 'WEB',
       correlationId,
-      authProvider: actor.authProvider,
-      sessionId: actor.sessionId,
+      authProvider: actor.authProvider ?? null,
+      sessionId: actor.sessionId ?? null,
       after: values,
     });
   });
@@ -141,8 +141,8 @@ export async function updateAthlete(
       entityId: athleteId,
       source: 'WEB',
       correlationId,
-      authProvider: actor.authProvider,
-      sessionId: actor.sessionId,
+      authProvider: actor.authProvider ?? null,
+      sessionId: actor.sessionId ?? null,
       before,
       after: values,
     });
