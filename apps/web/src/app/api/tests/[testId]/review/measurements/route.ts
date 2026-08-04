@@ -41,7 +41,7 @@ export async function POST(
     const result = await correctTestMeasurement(
       db,
       context.tenantId,
-      { userId: context.userId, role: context.role },
+      context,
       testId,
       input as CorrectTestMeasurementInput,
     );
