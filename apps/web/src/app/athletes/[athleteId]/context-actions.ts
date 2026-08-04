@@ -22,7 +22,7 @@ export async function addCoachAssignment(athleteId: string, formData: FormData) 
     athleteId,
     input.coachUserId,
     input.isPrimary === 'on',
-    { userId: context.userId, role: context.role },
+    context,
   );
   revalidatePath(`/athletes/${athleteId}`);
 }
@@ -34,7 +34,7 @@ export async function captureAthleteSnapshot(athleteId: string) {
     db,
     context.tenantId,
     athleteId,
-    { userId: context.userId, role: context.role },
+    context,
   );
   revalidatePath(`/athletes/${athleteId}`);
 }
