@@ -21,6 +21,8 @@ const CONTEXT_HEADERS = [
   'x-masters-tenant-id',
   'x-masters-user-id',
   'x-masters-role',
+  'x-masters-auth-provider',
+  'x-masters-session-id',
 ] as const;
 
 export async function proxy(request: NextRequest) {
@@ -48,7 +50,7 @@ export async function proxy(request: NextRequest) {
     headers: request.headers,
   });
 
-  if (!session?.user?.id) {
+  if (!session?.user?.id || !session.session?.id) {
     return NextResponse.redirect(
       new URL('/sign-in', request.url),
     );
@@ -70,6 +72,8 @@ export async function proxy(request: NextRequest) {
   requestHeaders.set('x-masters-tenant-id', membership.tenantId);
   requestHeaders.set('x-masters-user-id', membership.userId);
   requestHeaders.set('x-masters-role', membership.role);
+  requestHeaders.set('x-masters-auth-provider', 'BETTER_AUTH');
+  requestHeaders.set('x-masters-session-id', session.session.id);
 
   return NextResponse.next({
     request: { headers: requestHeaders },

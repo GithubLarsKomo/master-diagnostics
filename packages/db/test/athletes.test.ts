@@ -97,18 +97,24 @@ describe('athlete service tenant isolation', () => {
     ).rejects.toThrow('Athlete not found');
   });
 
-  it('updates inside the tenant and records audit events', async () => {
+  it('updates inside the tenant and records audit events with auth context', async () => {
+    const actor = {
+      userId: 'admin-a',
+      role: 'TENANT_ADMIN',
+      authProvider: 'BETTER_AUTH' as const,
+      sessionId: 'session-a',
+    };
     const created = await createAthlete(
       db,
       'tenant-a',
-      { userId: 'admin-a', role: 'TENANT_ADMIN' },
+      actor,
       input,
     );
     const updated = await updateAthlete(
       db,
       'tenant-a',
       created!.id,
-      { userId: 'admin-a', role: 'TENANT_ADMIN' },
+      actor,
       { ...input, currentWeightKgX100: 6925 },
     );
 
@@ -119,5 +125,7 @@ describe('athlete service tenant isolation', () => {
       'athlete.updated',
     ]);
     expect(auditRows.every((event) => event.tenantId === 'tenant-a')).toBe(true);
+    expect(auditRows.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
+    expect(auditRows.every((event) => event.sessionId === 'session-a')).toBe(true);
   });
 });

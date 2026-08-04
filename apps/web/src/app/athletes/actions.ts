@@ -42,7 +42,12 @@ export async function addAthlete(formData: FormData) {
   await createAthlete(
     db,
     context.tenantId,
-    { userId: context.userId, role: context.role },
+    {
+      userId: context.userId,
+      role: context.role,
+      authProvider: context.authProvider,
+      sessionId: context.sessionId,
+    },
     toAthleteInput(formData),
   );
 
@@ -58,7 +63,12 @@ export async function editAthlete(athleteId: string, formData: FormData) {
     db,
     context.tenantId,
     athleteId,
-    { userId: context.userId, role: context.role },
+    {
+      userId: context.userId,
+      role: context.role,
+      authProvider: context.authProvider,
+      sessionId: context.sessionId,
+    },
     toAthleteInput(formData),
   );
 

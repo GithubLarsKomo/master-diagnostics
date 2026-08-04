@@ -18,6 +18,8 @@ export interface AthleteInput {
 export interface AthleteActor {
   userId: string;
   role: string;
+  authProvider?: 'BETTER_AUTH' | 'CLERK';
+  sessionId?: string;
 }
 
 function normalizeInput(input: AthleteInput): AthleteInput {
@@ -100,6 +102,8 @@ export async function createAthlete(
       entityId: athleteId,
       source: 'WEB',
       correlationId,
+      authProvider: actor.authProvider ?? null,
+      sessionId: actor.sessionId ?? null,
       after: values,
     });
   });
@@ -137,6 +141,8 @@ export async function updateAthlete(
       entityId: athleteId,
       source: 'WEB',
       correlationId,
+      authProvider: actor.authProvider ?? null,
+      sessionId: actor.sessionId ?? null,
       before,
       after: values,
     });
