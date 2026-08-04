@@ -34,7 +34,12 @@ async function seedAthlete(db: Database, tenantId: string, athleteId: string) {
   });
 }
 
-const actor = { userId: 'admin-a', role: 'TENANT_ADMIN' };
+const actor = {
+  userId: 'admin-a',
+  role: 'TENANT_ADMIN',
+  authProvider: 'BETTER_AUTH' as const,
+  sessionId: 'session-deletion-a',
+};
 
 describe('athlete deletion requests', () => {
   let db: Database;
@@ -64,6 +69,8 @@ describe('athlete deletion requests', () => {
       'athlete.deletion_approved',
       'athlete.deletion_completed',
     ]);
+    expect(events.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
+    expect(events.every((event) => event.sessionId === 'session-deletion-a')).toBe(true);
   });
 
   it('unblocks the athlete after a rejected request', async () => {
@@ -72,5 +79,12 @@ describe('athlete deletion requests', () => {
     await decideAthleteDeletion(db, 'tenant-a', 'athlete-a', request.id, actor, 'REJECTED', 'Identität nicht bestätigt');
     const [athlete] = await db.select().from(schema.athletes);
     expect(athlete?.consentBlockedAt).toBeNull();
+    const events = await db.select().from(schema.auditEvents);
+    expect(events.map((event) => event.action)).toEqual([
+      'athlete.deletion_requested',
+      'athlete.deletion_rejected',
+    ]);
+    expect(events.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
+    expect(events.every((event) => event.sessionId === 'session-deletion-a')).toBe(true);
   });
 });
