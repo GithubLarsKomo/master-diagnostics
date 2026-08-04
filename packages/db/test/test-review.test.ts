@@ -28,7 +28,12 @@ async function createTestDatabase(): Promise<Database> {
 }
 
 const now = '2026-07-30T10:00:00.000Z';
-const trainer = { userId: 'trainer-a', role: 'TRAINER' };
+const trainer = {
+  userId: 'trainer-a',
+  role: 'TRAINER',
+  authProvider: 'BETTER_AUTH' as const,
+  sessionId: 'session-review-a',
+};
 
 function snapshotJson(): string {
   return JSON.stringify({
@@ -167,6 +172,8 @@ describe('post-test measurement review', () => {
       entityType: 'test_measurement.stage',
       reason: 'Übertragungsfehler aus Messgerät korrigiert',
       source: 'WEB',
+      authProvider: 'BETTER_AUTH',
+      sessionId: 'session-review-a',
     });
     expect(JSON.parse(audit!.beforeJson!)).toMatchObject({
       lactateValueX100: 180,
