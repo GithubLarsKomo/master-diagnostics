@@ -31,7 +31,7 @@ export async function addGuardian(athleteId: string, formData: FormData) {
     db,
     context.tenantId,
     athleteId,
-    { userId: context.userId, role: context.role },
+    context,
     input,
   );
   revalidatePath(`/athletes/${athleteId}`);
@@ -42,6 +42,6 @@ export async function removeGuardian(athleteId: string, formData: FormData) {
   authorize(context, 'athlete.manage');
   const guardianId = z.string().uuid().parse(formData.get('guardianId'));
   const reason = z.string().trim().min(3).max(500).parse(formData.get('reason'));
-  await revokeGuardian(db, context.tenantId, athleteId, guardianId, { userId: context.userId, role: context.role }, reason);
+  await revokeGuardian(db, context.tenantId, athleteId, guardianId, context, reason);
   revalidatePath(`/athletes/${athleteId}`);
 }
