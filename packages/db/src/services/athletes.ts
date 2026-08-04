@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../client';
 import { athletes } from '../schema';
-import { appendAuditEvent } from './audit';
+import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 
 export interface AthleteInput {
   firstName: string;
@@ -15,12 +15,7 @@ export interface AthleteInput {
   trainingStatus: string;
 }
 
-export interface AthleteActor {
-  userId: string;
-  role: string;
-  authProvider?: 'BETTER_AUTH' | 'CLERK';
-  sessionId?: string;
-}
+export type AthleteActor = AuditActorContext;
 
 function normalizeInput(input: AthleteInput): AthleteInput {
   const normalized = {
@@ -95,15 +90,12 @@ export async function createAthlete(
     await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'athlete.created',
       entityType: 'athlete',
       entityId: athleteId,
       source: 'WEB',
       correlationId,
-      authProvider: actor.authProvider ?? null,
-      sessionId: actor.sessionId ?? null,
       after: values,
     });
   });
@@ -134,15 +126,12 @@ export async function updateAthlete(
     await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'athlete.updated',
       entityType: 'athlete',
       entityId: athleteId,
       source: 'WEB',
       correlationId,
-      authProvider: actor.authProvider ?? null,
-      sessionId: actor.sessionId ?? null,
       before,
       after: values,
     });
