@@ -7,12 +7,9 @@ import {
   tenantMemberships,
   users,
 } from '../schema';
-import { appendAuditEvent } from './audit';
+import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 
-export interface AthleteContextActor {
-  userId: string;
-  role: string;
-}
+export type AthleteContextActor = AuditActorContext;
 
 export async function listActiveTrainers(db: Database, tenantId: string) {
   return db
@@ -67,8 +64,7 @@ export async function assignCoach(
     await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'athlete.coach_assigned',
       entityType: 'coach_athlete_assignment',
       entityId: assignmentId,
@@ -124,8 +120,7 @@ export async function createAthleteSnapshot(
     await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'athlete.snapshot_created',
       entityType: 'athlete_snapshot',
       entityId: snapshot.id,
