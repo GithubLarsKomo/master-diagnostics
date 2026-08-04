@@ -6,6 +6,7 @@ import type { Database } from '../src/client';
 import * as schema from '../src/schema';
 import {
   syncTestMeasurement as syncTestMeasurementWithLock,
+  type TestMeasurementSyncActor,
   type TestMeasurementSyncOperation,
 } from '../src/services/test-measurement-sync';
 import { hashTestLockToken } from '../src/services/test-locks';
@@ -114,12 +115,17 @@ function operation(
   };
 }
 
-const trainer = { userId: 'trainer-a', role: 'TRAINER' };
+const trainer: TestMeasurementSyncActor = {
+  userId: 'trainer-a',
+  role: 'TRAINER',
+  authProvider: 'BETTER_AUTH',
+  sessionId: 'session-sync-a',
+};
 
 function syncTestMeasurement(
   db: Database,
   tenantId: string,
-  actor: { userId: string; role: string },
+  actor: TestMeasurementSyncActor,
   input: TestMeasurementSyncOperation,
 ) {
   return syncTestMeasurementWithLock(db, tenantId, actor, input, lockToken);
@@ -163,6 +169,8 @@ describe('test measurement synchronization', () => {
       entityType: 'test_measurement.stage',
       source: 'OFFLINE_SYNC',
       correlationId: input.operationId,
+      authProvider: 'BETTER_AUTH',
+      sessionId: 'session-sync-a',
     });
   });
 
