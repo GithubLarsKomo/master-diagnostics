@@ -1,12 +1,9 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../client';
 import { athletes, consents } from '../schema';
-import { appendAuditEvent } from './audit';
+import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 
-export interface ConsentActor {
-  userId: string;
-  role: string;
-}
+export type ConsentActor = AuditActorContext;
 
 async function requireAthlete(db: Database, tenantId: string, athleteId: string) {
   const [athlete] = await db.select().from(athletes).where(and(
@@ -52,8 +49,7 @@ export async function grantConsent(
     ));
     await appendAuditEvent(tx, {
       tenantId,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'consent.granted',
       entityType: 'consent',
       entityId: consentId,
@@ -93,8 +89,7 @@ export async function withdrawConsent(
     ));
     await appendAuditEvent(tx, {
       tenantId,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'consent.withdrawn',
       entityType: 'consent',
       entityId: consentId,
