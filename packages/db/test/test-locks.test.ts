@@ -24,8 +24,18 @@ async function createTestDatabase(): Promise<Database> {
   return drizzle(client, { schema }) as Database;
 }
 
-const conductor = { userId: 'trainer-a', role: 'TRAINER' };
-const replacement = { userId: 'trainer-b', role: 'TRAINER' };
+const conductor = {
+  userId: 'trainer-a',
+  role: 'TRAINER',
+  authProvider: 'BETTER_AUTH' as const,
+  sessionId: 'session-trainer-a',
+};
+const replacement = {
+  userId: 'trainer-b',
+  role: 'TRAINER',
+  authProvider: 'BETTER_AUTH' as const,
+  sessionId: 'session-trainer-b',
+};
 const startedAt = '2026-07-30T10:00:00.000Z';
 
 async function seedContext(db: Database): Promise<void> {
@@ -101,8 +111,11 @@ describe('exclusive test locks', () => {
 
     await releaseTestLock(db, 'tenant-a', conductor, 'test-a', acquired.token);
     expect(await db.select().from(schema.testLocks)).toHaveLength(0);
-    expect((await db.select().from(schema.auditEvents)).map((event) => event.action))
+    const auditEvents = await db.select().from(schema.auditEvents);
+    expect(auditEvents.map((event) => event.action))
       .toEqual(['test.lock.acquired', 'test.lock.released']);
+    expect(auditEvents.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
+    expect(auditEvents.every((event) => event.sessionId === 'session-trainer-a')).toBe(true);
   });
 
   it('reacquires an expired lease without silently replacing an active lease', async () => {
@@ -174,6 +187,8 @@ describe('exclusive test locks', () => {
     expect(takeoverAudit).toMatchObject({
       actorUserId: replacement.userId,
       reason: 'Trainerwechsel wegen Geräteausfall',
+      authProvider: 'BETTER_AUTH',
+      sessionId: 'session-trainer-b',
     });
   });
 
