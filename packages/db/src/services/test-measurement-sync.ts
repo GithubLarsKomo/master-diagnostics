@@ -8,7 +8,7 @@ import {
   testStages,
   tests,
 } from '../schema';
-import { appendAuditEvent } from './audit';
+import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 import { hashTestLockToken } from './test-locks';
 import { getTestTimerPlan } from './test-timer';
 
@@ -43,10 +43,7 @@ export type TestMeasurementSyncResult =
   | { status: 'APPLIED'; newVersion: number }
   | { status: 'CONFLICT'; serverVersion: number; serverState: unknown };
 
-export interface TestMeasurementSyncActor {
-  userId: string;
-  role: string;
-}
+export type TestMeasurementSyncActor = AuditActorContext;
 
 function requireActor(actor: TestMeasurementSyncActor): void {
   if (actor.role !== 'TRAINER' && actor.role !== 'TENANT_ADMIN') {
@@ -429,8 +426,7 @@ export async function syncTestMeasurement(
       tenantId,
       occurredAt: operation.occurredAt,
       recordedAt: now,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'test.measurement.synced',
       entityType: `test_measurement.${operation.payload.target.kind.toLowerCase()}`,
       entityId: entityDatabaseId,
