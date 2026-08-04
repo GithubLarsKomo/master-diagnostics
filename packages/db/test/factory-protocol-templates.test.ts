@@ -22,7 +22,7 @@ async function createTestDatabase(): Promise<Database> {
     `CREATE UNIQUE INDEX protocol_template_tenant_device_name_uq ON protocol_templates (tenant_id, device_type, name)`,
     `CREATE TABLE protocol_template_versions (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, template_id TEXT NOT NULL, version_number INTEGER NOT NULL, warmup_seconds INTEGER NOT NULL, readiness_seconds INTEGER NOT NULL, stage_seconds INTEGER NOT NULL, pause_seconds INTEGER NOT NULL, sample_target_seconds INTEGER NOT NULL, recovery_seconds INTEGER NOT NULL, default_max_stages INTEGER NOT NULL, partial_inclusion_percent INTEGER NOT NULL, config_json TEXT NOT NULL, created_by_user_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
     `CREATE UNIQUE INDEX protocol_template_version_uq ON protocol_template_versions (tenant_id, template_id, version_number)`,
-    `CREATE TABLE audit_events (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, occurred_at TEXT NOT NULL, actor_user_id TEXT, actor_role TEXT, action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, source TEXT NOT NULL, reason TEXT, before_json TEXT, after_json TEXT, correlation_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE audit_events (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, occurred_at TEXT NOT NULL, actor_user_id TEXT, actor_role TEXT, action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, source TEXT NOT NULL, reason TEXT, before_json TEXT, after_json TEXT, correlation_id TEXT NOT NULL, auth_provider TEXT, session_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   ]);
 
   return drizzle(client, { schema }) as Database;
