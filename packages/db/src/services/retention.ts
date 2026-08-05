@@ -102,18 +102,12 @@ export interface TenantRetentionCandidate {
   assessment: Readonly<AthleteRetentionAssessment>;
 }
 
-/**
- * Builds a deterministic tenant-wide read-only worklist for a later retention
- * job. Active retention periods are omitted. Expired assessments are marked
- * ELIGIBLE, while ambiguous linked profiles remain MANUAL_REVIEW and therefore
- * cannot be processed irreversibly by an automated writer.
- */
-export async function listTenantRetentionCandidates(
+async function listTenantRetentionCandidatesWithYears(
   db: Database,
   tenantId: string,
-  assessedAt = new Date().toISOString(),
+  retentionYears: number,
+  assessedAt: string,
 ): Promise<ReadonlyArray<Readonly<TenantRetentionCandidate>>> {
-  const retentionYears = await requireTenantRetentionYears(db, tenantId);
   const tenantAthletes = await db
     .select({
       id: athletes.id,
@@ -165,5 +159,120 @@ export async function listTenantRetentionCandidates(
         : 'MANUAL_REVIEW' as const,
       assessment,
     })];
+  });
+}
+
+/**
+ * Builds a deterministic tenant-wide read-only worklist for a later retention
+ * job. Active retention periods are omitted. Expired assessments are marked
+ * ELIGIBLE, while ambiguous linked profiles remain MANUAL_REVIEW and therefore
+ * cannot be processed irreversibly by an automated writer.
+ */
+export async function listTenantRetentionCandidates(
+  db: Database,
+  tenantId: string,
+  assessedAt = new Date().toISOString(),
+): Promise<ReadonlyArray<Readonly<TenantRetentionCandidate>>> {
+  const retentionYears = await requireTenantRetentionYears(db, tenantId);
+  return listTenantRetentionCandidatesWithYears(
+    db,
+    tenantId,
+    retentionYears,
+    assessedAt,
+  );
+}
+
+export interface RetentionJobTenantPlan {
+  tenantId: string;
+  candidateCount: number;
+  eligibleCount: number;
+  manualReviewCount: number;
+  candidates: ReadonlyArray<Readonly<TenantRetentionCandidate>>;
+}
+
+export interface RetentionJobPlan {
+  mode: 'READ_ONLY';
+  assessedAt: string;
+  tenantCount: number;
+  candidateCount: number;
+  eligibleCount: number;
+  manualReviewCount: number;
+  tenants: ReadonlyArray<Readonly<RetentionJobTenantPlan>>;
+}
+
+export interface RetentionJobPlanOptions {
+  tenantId?: string;
+  assessedAt?: string;
+}
+
+/**
+ * Produces the schedulable retention-job plan without mutating any tenant or
+ * athlete data. Tenants are processed sequentially and remain isolated from one
+ * another. An optional tenant filter supports single-tenant club operation and
+ * targeted administrative runs.
+ */
+export async function buildRetentionJobPlan(
+  db: Database,
+  options: RetentionJobPlanOptions = {},
+): Promise<Readonly<RetentionJobPlan>> {
+  const assessedAt = options.assessedAt ?? new Date().toISOString();
+  const tenantRows = options.tenantId
+    ? await db
+      .select({ id: tenants.id, retentionYears: tenants.retentionYears })
+      .from(tenants)
+      .where(eq(tenants.id, options.tenantId))
+      .orderBy(asc(tenants.id))
+    : await db
+      .select({ id: tenants.id, retentionYears: tenants.retentionYears })
+      .from(tenants)
+      .orderBy(asc(tenants.id));
+
+  if (options.tenantId && tenantRows.length === 0) {
+    throw new Error('Tenant not found');
+  }
+
+  const tenantPlans: Array<Readonly<RetentionJobTenantPlan>> = [];
+  for (const tenant of tenantRows) {
+    const candidates = await listTenantRetentionCandidatesWithYears(
+      db,
+      tenant.id,
+      tenant.retentionYears,
+      assessedAt,
+    );
+    const eligibleCount = candidates.filter(
+      (candidate) => candidate.disposition === 'ELIGIBLE',
+    ).length;
+    const manualReviewCount = candidates.length - eligibleCount;
+
+    tenantPlans.push(Object.freeze({
+      tenantId: tenant.id,
+      candidateCount: candidates.length,
+      eligibleCount,
+      manualReviewCount,
+      candidates: Object.freeze([...candidates]),
+    }));
+  }
+
+  const candidateCount = tenantPlans.reduce(
+    (sum, tenant) => sum + tenant.candidateCount,
+    0,
+  );
+  const eligibleCount = tenantPlans.reduce(
+    (sum, tenant) => sum + tenant.eligibleCount,
+    0,
+  );
+  const manualReviewCount = tenantPlans.reduce(
+    (sum, tenant) => sum + tenant.manualReviewCount,
+    0,
+  );
+
+  return Object.freeze({
+    mode: 'READ_ONLY' as const,
+    assessedAt,
+    tenantCount: tenantPlans.length,
+    candidateCount,
+    eligibleCount,
+    manualReviewCount,
+    tenants: Object.freeze(tenantPlans),
   });
 }
