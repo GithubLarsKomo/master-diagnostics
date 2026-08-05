@@ -3,6 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FileSystemReportArtifactStorage } from './report-artifact-storage';
+import {
+  stageAnonymizationArtifacts,
+} from './server/anonymization-artifact-quarantine';
 import { FileSystemTenantExportPackageStorage } from './tenant-export-package-storage';
 
 const roots: string[] = [];
@@ -61,6 +64,25 @@ describe('anonymization artifact quarantine', () => {
 
     await storage.restoreStaged(handle);
     expect(Array.from(await storage.get(reference))).toEqual(Array.from(bytes));
+  });
+
+  it('restores already staged artifacts if a later staging operation fails', async () => {
+    const reportStorage = new FileSystemReportArtifactStorage(await tempRoot('masters-report-rollback-'));
+    const exportStorage = new FileSystemTenantExportPackageStorage(await tempRoot('masters-export-rollback-'));
+    const activeReference = 'tenant/test/de/a-report.pdf';
+    const missingReference = 'tenant/test/de/z-missing.pdf';
+    const bytes = new TextEncoder().encode('active-report');
+    await reportStorage.put(activeReference, bytes);
+
+    await expect(stageAnonymizationArtifacts(
+      'execution-rollback-1234',
+      [activeReference, missingReference],
+      [],
+      reportStorage,
+      exportStorage,
+    )).rejects.toThrow(/not found/i);
+
+    expect(Array.from(await reportStorage.get(activeReference))).toEqual(Array.from(bytes));
   });
 
   it('rejects unsafe execution identifiers before constructing quarantine paths', async () => {
