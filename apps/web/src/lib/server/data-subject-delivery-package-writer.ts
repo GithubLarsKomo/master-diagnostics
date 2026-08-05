@@ -79,6 +79,12 @@ function concat(chunks: readonly Uint8Array[]): Uint8Array {
   return result;
 }
 
+function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
 export function buildDeterministicDataSubjectTar(
   manifestJson: Uint8Array,
   files: readonly Readonly<{ path: string; bytes: Uint8Array }>[],
@@ -110,7 +116,7 @@ function toHex(buffer: ArrayBuffer): string {
 
 async function sha256(bytes: Uint8Array): Promise<string> {
   if (!globalThis.crypto?.subtle) throw new Error('SHA-256 hashing requires the Web Crypto API');
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', new Uint8Array(bytes));
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', arrayBuffer(bytes));
   return `sha256:${toHex(digest)}`;
 }
 
@@ -126,7 +132,7 @@ export async function hashDataSubjectDeliveryToken(token: string): Promise<strin
 async function deriveEncryptionKey(token: string): Promise<CryptoKey> {
   const material = await globalThis.crypto.subtle.digest(
     'SHA-256',
-    new TextEncoder().encode(`masters-data-subject-package-key-v1\u0000${token}`),
+    arrayBuffer(new TextEncoder().encode(`masters-data-subject-package-key-v1\u0000${token}`)),
   );
   return globalThis.crypto.subtle.importKey('raw', material, 'AES-GCM', false, ['encrypt', 'decrypt']);
 }
@@ -145,10 +151,15 @@ async function encryptArchive(
 ): Promise<Uint8Array> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await deriveEncryptionKey(token);
+  const additionalData = packageAdditionalData(packageId, manifestFingerprint);
   const ciphertext = new Uint8Array(await globalThis.crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv, additionalData: packageAdditionalData(packageId, manifestFingerprint) },
+    {
+      name: 'AES-GCM',
+      iv: arrayBuffer(iv),
+      additionalData: arrayBuffer(additionalData),
+    },
     key,
-    archive,
+    arrayBuffer(archive),
   ));
   return concat([new TextEncoder().encode('MDS1'), iv, ciphertext]);
 }
@@ -166,11 +177,16 @@ export async function decryptDataSubjectDeliveryArchive(
   const iv = encrypted.slice(4, 16);
   const ciphertext = encrypted.slice(16);
   const key = await deriveEncryptionKey(token);
+  const additionalData = packageAdditionalData(packageId, manifestFingerprint);
   try {
     return new Uint8Array(await globalThis.crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv, additionalData: packageAdditionalData(packageId, manifestFingerprint) },
+      {
+        name: 'AES-GCM',
+        iv: arrayBuffer(iv),
+        additionalData: arrayBuffer(additionalData),
+      },
       key,
-      ciphertext,
+      arrayBuffer(ciphertext),
     ));
   } catch {
     throw new Error('Data subject package authentication failed');
