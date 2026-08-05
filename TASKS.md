@@ -150,8 +150,12 @@
   - [x] Antrag, Entscheidung und sofortiger Soft-Delete/Nutzungsschutz
   - [x] read-only Aufbewahrungsprüfung für irreversible Verarbeitung
   - [x] Retention-Status in die Löschvorschau integriert
-  - [ ] irreversible Verarbeitung nur nach Ablauf und expliziter Freigabe
+  - [x] read-only Schutzprüfung für Retention, Nutzungssperre, Soft-Delete und abgeschlossenen Löschworkflow
+  - [ ] irreversible Verarbeitung nur nach versionierter Policy und expliziter Freigabe
 - [ ] Pseudonymisierung nach Löschung
+  - [x] Daten-Scope und Audit-Randbedingungen für irreversible Anonymisierung dokumentiert
+  - [ ] Audit-Payload-Minimierung und Strategie für identifierhaltigen Altbestand
+  - [ ] versionierte Regeln für Profil, Snapshots, Berichte/Artefakte und verbleibende Diagnostikdaten
 - [ ] Betroffenenexport
 - [ ] Löschung/Anonymisierung mit Vorschau
 
