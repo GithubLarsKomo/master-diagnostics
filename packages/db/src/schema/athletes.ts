@@ -135,5 +135,5 @@ export const athleteDataSubjectDeliveryApprovals = sqliteTable('athlete_data_sub
   ...timestamps,
 }, (t) => [
   uniqueIndex('athlete_data_subject_delivery_approval_scope_uq')
-    .on(t.tenantId, t.athleteId, t.sourceFingerprint, t.decisionsFingerprint),
+    .on(t.tenantId, t.athleteId, t.sourceFingerprint, t.decisionsFingerprint, t.approvedByUserId),
 ]);
