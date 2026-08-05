@@ -39,11 +39,15 @@ Die Preview klassifiziert Datenklassen mit einer erforderlichen Behandlung, ohne
 - `AUDIT_PRIVACY_REDACTION_REQUIRED`
 - `EPHEMERAL_EXPORT_CLEANUP_REQUIRED`
 
-Policy v1.2 löst das Diagnostik-Risiko konservativ durch spätere Löschung detaillierter individueller Diagnostik-/Verlaufsdaten und historischer Snapshots auf.
+Die Preview-Disposition bleibt absichtlich beschreibend und versionsneutral. Die aktuelle Policy v1.5 entscheidet daraus:
 
-Policy v1.3 löst zusätzlich die externen row-level Artefakte auf: Report-PDF und zugehörige Report-Datenbankzeile werden gemeinsam entfernt; aktive vollständige Tenant-Exportpakete werden vor der irreversiblen Verarbeitung tenantweit entfernt.
+- vollständige technische Minimierung des verbleibenden Athletenprofils statt bloßer Namensredaktion,
+- Löschung detaillierter Diagnostik-/Verlaufsdaten und historischer Snapshots,
+- gemeinsame Behandlung von Report-PDF und Report-Datenbankzeile,
+- tenantweite Entfernung aktiver vollständiger Exportpakete,
+- explizite Runtime-Verträge für Backup und Notifications.
 
-Policy v1.4 übersetzt die globalen Backup-/Notification-Hinweise in `BACKUP_PRIVACY_POLICY_V1` und `NOTIFICATION_PRIVACY_POLICY_V1`. Ob diese Verträge im konkreten Betrieb erfüllt sind, wird nicht aus der Preview geraten, sondern über `evaluateGlobalPrivacyCapabilities()` explizit attestiert. Fehlende Angaben bleiben blockierend.
+Die strengere Profilregel ist erforderlich, weil auch Geburtsdatum, Körpermaße, Sport, Disziplin und Trainingsstatus Quasi-Identifikatoren sein können. Alte Approvals werden durch die Policy-Versionsbindung automatisch ungültig.
 
 ## Sicherheitsgrenzen
 
@@ -56,6 +60,8 @@ Policy v1.4 übersetzt die globalen Backup-/Notification-Hinweise in `BACKUP_PRI
 - keine implizite Annahme, dass nicht deklarierte Backup-/Notification-Funktionen deaktiviert sind,
 - `passesIrreversiblePrecheck = true` ist weiterhin nur eine notwendige Vorbedingung.
 
-## Nächste Gates
+## Nachgelagerte Ausführung
 
-Mit Policy v1.4 sind alle derzeit bekannten row-level und globalen Datenschutzregeln versioniert definiert. Vor einer Ausführung müssen die benötigten globalen Capabilities zur Laufzeit erfolgreich attestiert werden. Danach bleibt als eigener nächster Fachslice die explizite administrative Ausführungsfreigabe; erst anschließend darf ein atomarer irreversibler Writer implementiert werden.
+Preview, Policy und Capability-Attestation werden inzwischen durch einen fingerprintgebundenen Admin-Approval-Vertrag sowie den durablen Execution-/Artifact-Manifest-Vertrag ergänzt. Der spätere Writer muss den Zustand unmittelbar vor dem ersten Artifact-Stage erneut validieren und darf nur gegen exakt die manifestierten Referenzen arbeiten.
+
+Die Preview selbst bleibt trotzdem vollständig read-only und kann weder Approval noch Execution noch irreversible Verarbeitung auslösen.

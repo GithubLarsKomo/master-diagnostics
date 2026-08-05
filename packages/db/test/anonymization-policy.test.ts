@@ -22,14 +22,18 @@ const globalRequirements = [
   'NOTIFICATION_PAYLOAD_REVIEW',
 ] as const;
 
-describe('anonymization disposition policy v1.4', () => {
-  it('translates known global requirements into versioned runtime capability attestations', () => {
+describe('anonymization disposition policy v1.5', () => {
+  it('minimizes the complete athlete profile instead of only direct identifiers', () => {
     const result = evaluateAnonymizationPolicy(scopes, globalRequirements);
 
-    expect(result.policyVersion).toBe('1.4.0');
+    expect(result.policyVersion).toBe('1.5.0');
+    expect(result.decisions).toContainEqual(expect.objectContaining({
+      scope: 'ATHLETE_PROFILE',
+      disposition: 'MINIMIZE_ATHLETE_TOMBSTONE',
+      gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
+    }));
     expect(result.executionAllowed).toBe(false);
     expect(result.unresolvedScopes).toEqual([]);
-    expect(result.unresolvedGlobalRequirements).toEqual([]);
     expect(result.requiredGlobalCapabilities).toEqual([
       'BACKUP_PRIVACY_POLICY_V1',
       'NOTIFICATION_PRIVACY_POLICY_V1',

@@ -10,10 +10,10 @@ import {
   type GlobalPrivacyCapabilityEvaluation,
 } from './global-privacy-policy';
 
-export const ANONYMIZATION_POLICY_VERSION = '1.4.0' as const;
+export const ANONYMIZATION_POLICY_VERSION = '1.5.0' as const;
 
 export type AnonymizationPolicyDisposition =
-  | 'REDACT_DIRECT_IDENTIFIERS'
+  | 'MINIMIZE_ATHLETE_TOMBSTONE'
   | 'REMOVE_ATHLETE_SNAPSHOTS'
   | 'REMOVE_TEST_PLAN_SNAPSHOTS'
   | 'REMOVE_COACH_RELATIONSHIPS'
@@ -67,7 +67,7 @@ const rules: Readonly<Record<string, Readonly<{
   gate: AnonymizationPolicyGate;
 }>>> = Object.freeze({
   ATHLETE_PROFILE: Object.freeze({
-    disposition: 'REDACT_DIRECT_IDENTIFIERS',
+    disposition: 'MINIMIZE_ATHLETE_TOMBSTONE',
     gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
   }),
   ATHLETE_SNAPSHOTS: Object.freeze({
@@ -124,13 +124,12 @@ const knownGlobalRequirements = new Set([
 
 /**
  * Evaluates the read-only preview against versioned disposition rules. Policy
- * v1.4 has a defined contract for every currently known row-level and global
- * privacy surface, but it still cannot authorize execution.
+ * v1.5 strengthens the athlete-profile rule from direct-identifier redaction to
+ * a minimal technical tombstone because birth date, body dimensions, sport,
+ * discipline and training status are also potential quasi-identifiers.
  *
- * Global backup/notification contracts are capability-based because their
- * runtime state cannot be proven from one athlete's database rows. Missing
- * capability attestation is therefore fail-closed rather than treated as
- * equivalent to a disabled feature.
+ * All earlier approvals are intentionally invalidated by the policy-version
+ * change and must be explicitly re-approved against this stronger contract.
  */
 export function evaluateAnonymizationPolicy(
   scopes: ReadonlyArray<Readonly<AnonymizationPreviewScope>>,
@@ -192,11 +191,6 @@ export function evaluateAnonymizationPolicy(
   });
 }
 
-/**
- * Single fail-closed entrypoint for the scope inventory, versioned policy and
- * explicit runtime capability attestation. It still cannot authorize or execute
- * irreversible processing; administrative approval remains a separate gate.
- */
 export async function getAthleteAnonymizationPolicyPreview(
   db: Database,
   tenantId: string,
