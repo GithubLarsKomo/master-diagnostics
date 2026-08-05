@@ -2,6 +2,7 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../client';
 import { athleteGuardians, athletes } from '../schema';
 import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
+import { projectGuardianForAudit } from './audit-projections';
 
 export interface GuardianInput {
   fullName: string;
@@ -84,7 +85,7 @@ export async function registerGuardian(
       entityType: 'athlete_guardian',
       entityId: guardian.id,
       source: 'WEB',
-      after: guardian,
+      after: projectGuardianForAudit(guardian),
       occurredAt: now,
     });
   });
@@ -120,7 +121,8 @@ export async function revokeGuardian(
       entityId: guardianId,
       source: 'WEB',
       reason: normalizedReason,
-      before: guardian,
+      before: projectGuardianForAudit(guardian),
+      after: projectGuardianForAudit({ ...guardian, revokedAt: now }),
       occurredAt: now,
     });
   });
