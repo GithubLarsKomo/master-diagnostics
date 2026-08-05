@@ -1,6 +1,3 @@
-import { createClient } from '@libsql/client';
-import { drizzle } from 'drizzle-orm/libsql';
-import { migrate } from 'drizzle-orm/libsql/migrator';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   abortAthleteAnonymizationExecution,
   approveAthleteAnonymization,
+  createDatabaseFromConfig,
+  migrateDatabase,
   prepareAthleteAnonymizationExecution,
   type Database,
   type GlobalPrivacyCapabilities,
@@ -23,9 +22,8 @@ afterEach(async () => {
 
 async function createTestDatabase(): Promise<Database> {
   const path = `/tmp/masters-export-cleanup-guard-${crypto.randomUUID()}.db`;
-  const client = createClient({ url: `file:${path}` });
-  const db = drizzle(client, { schema }) as Database;
-  await migrate(db, { migrationsFolder: '../../packages/db/migrations' });
+  const db = createDatabaseFromConfig({ url: `file:${path}` });
+  await migrateDatabase(db, '../../packages/db/migrations');
   return db;
 }
 
