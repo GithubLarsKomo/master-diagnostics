@@ -97,7 +97,7 @@ describe('athlete service tenant isolation', () => {
     ).rejects.toThrow('Athlete not found');
   });
 
-  it('updates inside the tenant and records audit events with auth context', async () => {
+  it('updates inside the tenant and records PII-minimized audit state with auth context', async () => {
     const actor = {
       userId: 'admin-a',
       role: 'TENANT_ADMIN',
@@ -115,9 +115,14 @@ describe('athlete service tenant isolation', () => {
       'tenant-a',
       created!.id,
       actor,
-      { ...input, currentWeightKgX100: 6925 },
+      {
+        ...input,
+        firstName: 'Petra-Maria',
+        currentWeightKgX100: 6925,
+      },
     );
 
+    expect(updated?.firstName).toBe('Petra-Maria');
     expect(updated?.currentWeightKgX100).toBe(6925);
     const auditRows = await db.select().from(schema.auditEvents);
     expect(auditRows.map((event) => event.action)).toEqual([
@@ -127,5 +132,32 @@ describe('athlete service tenant isolation', () => {
     expect(auditRows.every((event) => event.tenantId === 'tenant-a')).toBe(true);
     expect(auditRows.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
     expect(auditRows.every((event) => event.sessionId === 'session-a')).toBe(true);
+
+    const serializedPayloads = auditRows
+      .flatMap((event) => [event.beforeJson, event.afterJson])
+      .filter((value): value is string => value !== null)
+      .join('\n');
+    expect(serializedPayloads).not.toContain('Petra');
+    expect(serializedPayloads).not.toContain('Muster');
+    expect(serializedPayloads).not.toContain('1992-04-18');
+
+    const createdAfter = JSON.parse(auditRows[0]!.afterJson!);
+    expect(createdAfter).toMatchObject({
+      auditSchemaVersion: 2,
+      directIdentifiersRedacted: true,
+      firstName: '[REDACTED]',
+      lastName: '[REDACTED]',
+      birthDate: '[REDACTED]',
+      currentWeightKgX100: 6850,
+    });
+
+    const updateBefore = JSON.parse(auditRows[1]!.beforeJson!);
+    const updateAfter = JSON.parse(auditRows[1]!.afterJson!);
+    expect(updateBefore.changedFields).toEqual(['firstName', 'currentWeightKgX100']);
+    expect(updateAfter.changedFields).toEqual(['firstName', 'currentWeightKgX100']);
+    expect(updateBefore.currentWeightKgX100).toBe(6850);
+    expect(updateAfter.currentWeightKgX100).toBe(6925);
+    expect(updateBefore.firstName).toBe('[REDACTED]');
+    expect(updateAfter.firstName).toBe('[REDACTED]');
   });
 });
