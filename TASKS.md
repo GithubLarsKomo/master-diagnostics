@@ -162,6 +162,12 @@
   - [x] globale Backup-/Notification-Privacy-Verträge versioniert definiert
   - [ ] produktive Backup-/Notification-Capabilities gegen die Verträge attestieren
 - [ ] Betroffenenexport
+  - [x] versionierten JSON-Vertrag und feste fachliche Datenabschnitte definieren
+  - [x] tenant-isolierten read-only Athleten-Source über Profil, Beziehungen, Privacy-, Test-, Diagnostik- und Report-Metadaten implementieren
+  - [x] Report-PDFs als externe Artefaktreferenzen inventarisieren
+  - [ ] Drittpersonen-/Guardian-Daten für Auslieferung explizit reviewen/redigieren
+  - [ ] Report-PDFs in ein auslieferbares Paket integrieren
+  - [ ] administrative Erzeugung/Auslieferung mit Export-Audit implementieren
 - [ ] Löschung/Anonymisierung mit Vorschau
   - [x] vollständige read-only Scope-Preview über Profil, Snapshots, Beziehungsdaten, Diagnostik, Reports, Audit und aktive Exportartefakte
   - [x] versionierte fail-closed Dispositionsregeln für bekannte Scopes
@@ -171,7 +177,7 @@
   - [x] Backup-/Notification-Policy in Runtime-Capability-Verträge überführt
   - [ ] Runtime-Capability-Attestation im produktiven Betrieb bereitstellen
   - [x] explizite administrative Freigabe als immutable, fingerprintgebundener Vertrag
-  - [ ] atomare irreversible Ausführung
+  - [x] atomare irreversible Ausführung mit Dateisystem-Quarantäne und `DB_COMMITTED`-Recovery
 
 ## Epic 11 — Bluetooth-Beta
 

@@ -11,6 +11,7 @@ export * from './services/anonymization-execution';
 export * from './services/anonymization-db-commit';
 export * from './services/anonymization-tombstone';
 export * from './services/global-privacy-policy';
+export * from './services/data-subject-export';
 export * from './services/club-bootstrap';
 export * from './services/factory-protocol-templates';
 export * from './services/protocol-templates';
