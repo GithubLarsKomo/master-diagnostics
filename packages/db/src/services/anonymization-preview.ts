@@ -5,7 +5,10 @@ import { getAthleteIrreversibleProcessingPrecheck } from './irreversible-process
 export type AnonymizationPreviewDisposition =
   | 'DIRECT_IDENTIFIER_REDACTION_REQUIRED'
   | 'EMBEDDED_IDENTIFIER_REWRITE_REQUIRED'
-  | 'RELATIONSHIP_DATA_POLICY_REQUIRED'
+  | 'RELATIONSHIP_LINK_REMOVAL_REQUIRED'
+  | 'MINIMIZED_COMPLIANCE_RECORD_REQUIRED'
+  | 'THIRD_PARTY_RECORD_REMOVAL_REQUIRED'
+  | 'FREE_TEXT_REDACTION_REQUIRED'
   | 'REIDENTIFICATION_RISK_REVIEW_REQUIRED'
   | 'EXTERNAL_ARTIFACT_HANDLING_REQUIRED'
   | 'AUDIT_PRIVACY_REDACTION_REQUIRED'
@@ -164,7 +167,6 @@ export async function getAthleteAnonymizationPreview(
     ),
   ]);
 
-  const relationshipRows = coachAssignments + consents + guardians + deletionRequests;
   const diagnosticRows = tests
     + safetyConfirmations
     + terminationEvents
@@ -189,7 +191,10 @@ export async function getAthleteAnonymizationPreview(
     scope('ATHLETE_PROFILE', 'DIRECT_IDENTIFIER_REDACTION_REQUIRED', 1),
     scope('ATHLETE_SNAPSHOTS', 'EMBEDDED_IDENTIFIER_REWRITE_REQUIRED', athleteSnapshots),
     scope('TEST_PLAN_SNAPSHOTS', 'EMBEDDED_IDENTIFIER_REWRITE_REQUIRED', testPlanSnapshots),
-    scope('RELATIONSHIP_AND_PRIVACY_RECORDS', 'RELATIONSHIP_DATA_POLICY_REQUIRED', relationshipRows),
+    scope('COACH_ASSIGNMENTS', 'RELATIONSHIP_LINK_REMOVAL_REQUIRED', coachAssignments),
+    scope('CONSENT_RECORDS', 'MINIMIZED_COMPLIANCE_RECORD_REQUIRED', consents),
+    scope('GUARDIAN_RECORDS', 'THIRD_PARTY_RECORD_REMOVAL_REQUIRED', guardians),
+    scope('DELETION_REQUESTS', 'FREE_TEXT_REDACTION_REQUIRED', deletionRequests),
     scope('DIAGNOSTIC_AND_OPERATIONAL_RECORDS', 'REIDENTIFICATION_RISK_REVIEW_REQUIRED', diagnosticRows),
     scope('REPORT_DATABASE_RECORDS', 'EXTERNAL_ARTIFACT_HANDLING_REQUIRED', reportVersions, reportArtifactReferences),
     scope('AUDIT_PRIVACY_CANDIDATES', 'AUDIT_PRIVACY_REDACTION_REQUIRED', auditCandidateIds.length, auditCandidateIds),
