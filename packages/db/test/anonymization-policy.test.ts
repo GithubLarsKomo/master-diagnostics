@@ -14,6 +14,7 @@ const scopes = [
   { scope: 'AUDIT_PRIVACY_CANDIDATES', disposition: 'AUDIT_PRIVACY_REDACTION_REQUIRED', rowCount: 1, references: ['audit-a'] },
   { scope: 'PRIOR_AUDIT_REDACTION_PROOFS', disposition: 'AUDIT_PRIVACY_REDACTION_REQUIRED', rowCount: 1, references: [] },
   { scope: 'ACTIVE_TENANT_EXPORT_PACKAGES', disposition: 'EPHEMERAL_EXPORT_CLEANUP_REQUIRED', rowCount: 1, references: ['exports/current.zip'] },
+  { scope: 'DATA_SUBJECT_DELIVERY_PACKAGES', disposition: 'EPHEMERAL_EXPORT_CLEANUP_REQUIRED', rowCount: 1, references: ['exports/subject.mdse'] },
 ] as const;
 
 const globalRequirements = [
@@ -22,14 +23,19 @@ const globalRequirements = [
   'NOTIFICATION_PAYLOAD_REVIEW',
 ] as const;
 
-describe('anonymization disposition policy v1.5', () => {
-  it('minimizes the complete athlete profile instead of only direct identifiers', () => {
+describe('anonymization disposition policy v1.6', () => {
+  it('minimizes the complete athlete profile and removes subject delivery packages', () => {
     const result = evaluateAnonymizationPolicy(scopes, globalRequirements);
 
-    expect(result.policyVersion).toBe('1.5.0');
+    expect(result.policyVersion).toBe('1.6.0');
     expect(result.decisions).toContainEqual(expect.objectContaining({
       scope: 'ATHLETE_PROFILE',
       disposition: 'MINIMIZE_ATHLETE_TOMBSTONE',
+      gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
+    }));
+    expect(result.decisions).toContainEqual(expect.objectContaining({
+      scope: 'DATA_SUBJECT_DELIVERY_PACKAGES',
+      disposition: 'REMOVE_DATA_SUBJECT_DELIVERY_PACKAGES',
       gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
     }));
     expect(result.executionAllowed).toBe(false);

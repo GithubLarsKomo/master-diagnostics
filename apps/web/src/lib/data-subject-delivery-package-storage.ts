@@ -1,10 +1,24 @@
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
 export interface DataSubjectDeliveryPackageStorage {
   put(reference: string, bytes: Uint8Array): Promise<void>;
   get(reference: string): Promise<Uint8Array>;
   remove(reference: string): Promise<void>;
+}
+
+export interface StagedDataSubjectDeliveryPackage {
+  executionId: string;
+  reference: string;
+}
+
+export interface QuarantinableDataSubjectDeliveryPackageStorage extends DataSubjectDeliveryPackageStorage {
+  stageForDeletion(
+    executionId: string,
+    reference: string,
+  ): Promise<Readonly<StagedDataSubjectDeliveryPackage>>;
+  restoreStaged(handle: Readonly<StagedDataSubjectDeliveryPackage>): Promise<void>;
+  purgeStaged(handle: Readonly<StagedDataSubjectDeliveryPackage>): Promise<void>;
 }
 
 const SAFE_REFERENCE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.mdse$/i;
@@ -14,7 +28,24 @@ function safeReference(reference: string): string {
   return reference;
 }
 
-export class FileSystemDataSubjectDeliveryPackageStorage implements DataSubjectDeliveryPackageStorage {
+function safeExecutionId(executionId: string): string {
+  if (!/^[a-zA-Z0-9-]{8,80}$/.test(executionId)) {
+    throw new Error('Invalid anonymization execution id');
+  }
+  return executionId;
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export class FileSystemDataSubjectDeliveryPackageStorage
+implements QuarantinableDataSubjectDeliveryPackageStorage {
   private readonly root: string;
 
   constructor(root: string) {
@@ -23,6 +54,15 @@ export class FileSystemDataSubjectDeliveryPackageStorage implements DataSubjectD
 
   private path(reference: string): string {
     return join(this.root, safeReference(reference));
+  }
+
+  private quarantinePath(executionId: string, reference: string): string {
+    return join(
+      this.root,
+      '.anonymization-quarantine',
+      safeExecutionId(executionId),
+      safeReference(reference),
+    );
   }
 
   async put(reference: string, bytes: Uint8Array): Promise<void> {
@@ -45,9 +85,47 @@ export class FileSystemDataSubjectDeliveryPackageStorage implements DataSubjectD
   async remove(reference: string): Promise<void> {
     await rm(this.path(reference), { force: true });
   }
+
+  async stageForDeletion(
+    executionId: string,
+    reference: string,
+  ): Promise<Readonly<StagedDataSubjectDeliveryPackage>> {
+    const original = this.path(reference);
+    const staged = this.quarantinePath(executionId, reference);
+    const [originalExists, stagedExists] = await Promise.all([exists(original), exists(staged)]);
+
+    if (stagedExists) {
+      if (originalExists) throw new Error('Data subject package exists in both active and quarantine storage');
+      return Object.freeze({ executionId, reference });
+    }
+    if (!originalExists) throw new Error('Data subject delivery package not found for anonymization staging');
+
+    await mkdir(dirname(staged), { recursive: true, mode: 0o700 });
+    await rename(original, staged);
+    return Object.freeze({ executionId, reference });
+  }
+
+  async restoreStaged(handle: Readonly<StagedDataSubjectDeliveryPackage>): Promise<void> {
+    const original = this.path(handle.reference);
+    const staged = this.quarantinePath(handle.executionId, handle.reference);
+    const [originalExists, stagedExists] = await Promise.all([exists(original), exists(staged)]);
+
+    if (!stagedExists) {
+      if (originalExists) return;
+      throw new Error('Staged data subject delivery package is missing and cannot be restored');
+    }
+    if (originalExists) throw new Error('Cannot restore data subject delivery package over an active file');
+
+    await mkdir(this.root, { recursive: true, mode: 0o700 });
+    await rename(staged, original);
+  }
+
+  async purgeStaged(handle: Readonly<StagedDataSubjectDeliveryPackage>): Promise<void> {
+    await rm(this.quarantinePath(handle.executionId, handle.reference), { force: true });
+  }
 }
 
-export function createDataSubjectDeliveryPackageStorage(): DataSubjectDeliveryPackageStorage {
+export function createDataSubjectDeliveryPackageStorage(): QuarantinableDataSubjectDeliveryPackageStorage {
   return new FileSystemDataSubjectDeliveryPackageStorage(
     process.env.DATA_SUBJECT_DELIVERY_PACKAGE_ROOT ?? '.data/data-subject-delivery-packages',
   );

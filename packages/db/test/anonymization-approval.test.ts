@@ -88,7 +88,7 @@ describe('athlete anonymization admin approval', () => {
 
     expect(approval).toMatchObject({
       tenantId: 'tenant-a', athleteId: 'athlete-a', deletionRequestId: 'deletion-a',
-      approvalVersion: 1, policyVersion: '1.5.0', approvedByUserId: 'admin-a',
+      approvalVersion: 1, policyVersion: '1.6.0', approvedByUserId: 'admin-a',
     });
     expect(approval.scopeFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(approval.capabilityFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);

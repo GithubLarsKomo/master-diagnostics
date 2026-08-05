@@ -2,9 +2,9 @@
 
 ## Ziel
 
-Der Betroffenenexport ist ein eigener DSGVO-/Datenschutzpfad und **kein** vollständiger Tenant-Portabilitätsexport. Er sammelt ausschließlich die fachlichen Daten eines einzelnen Athleten innerhalb genau eines Tenants.
+Der Betroffenenexport ist ein eigener DSGVO-/Datenschutzpfad und **kein** vollständiger Tenant-Portabilitätsexport. Er sammelt ausschließlich die fachlichen Daten eines einzelnen Athleten innerhalb genau eines Tenants, entfernt bekannte Drittpersonenkennungen, erzwingt eine explizite administrative Prüfung von Freitexten und liefert den freigegebenen Stand über ein kurzlebiges, verschlüsseltes Einmal-Downloadpaket aus.
 
-Der Datenquellenpfad ist bewusst read-only. Er erzeugt noch kein automatisch zustellbares Paket und schreibt deshalb auch noch keinen Export-Audit. Die spätere administrative Erzeugung/Auslieferung muss gemäß `SPEC.md` §33.1 als Exportereignis auditiert werden.
+Der Ablauf ist in mehrere getrennte Verträge zerlegt. Read-only Source, Privacy-Projection, Review-Approval, reviewed Snapshot und Paketvorbereitung verändern keine Fachdaten. Erst die administrative Paketerzeugung persistiert ein verschlüsseltes Artefakt und schreibt den Export-Audit; der erfolgreiche Einmal-Download schreibt einen separaten Download-Audit.
 
 ## Versionierter Source-Vertrag
 
@@ -53,7 +53,7 @@ Der Source enthält nicht:
 - interne Audit-Logs oder Audit-Privacy-Nachweise
 - Dateiinhalte der Report-PDFs
 
-Audit-Logs werden nicht pauschal in eine automatisch zustellbare Datenkopie aufgenommen, weil sie Identitäten und Rechte Dritter enthalten können. Ihre Behandlung benötigt einen expliziten Auslieferungsvertrag statt eines ungefilterten Tenant-Audit-Dumps.
+Audit-Logs werden nicht pauschal in die zustellbare Datenkopie aufgenommen, weil sie Identitäten und Rechte Dritter enthalten können. Die Audit-Privacy-Verarbeitung bleibt ein eigener kontrollierter Compliance-Pfad.
 
 ## Report-Artefakte
 
@@ -63,7 +63,7 @@ Audit-Logs werden nicht pauschal in eine automatisch zustellbare Datenkopie aufg
 - `storageReference`
 - Medientyp `application/pdf`
 
-Der read-only DB-Service liest keine Dateien. Die spätere Paketierung muss die tatsächlich vorhandenen PDFs über den Report-Storage laden, Integrität prüfen und kontrolliert in das Zustellpaket aufnehmen.
+Der DB-Source liest keine Dateien. Erst die Paketvorbereitung lädt die tatsächlich vorhandenen PDFs aus dem Report-Storage und verifiziert ihre Integrität.
 
 ## Delivery-Privacy-Projection
 
@@ -92,11 +92,11 @@ Stattdessen gilt:
 - der ursprüngliche Freitext erscheint weder in der Auslieferungsprojektion noch im Review-Metadatensatz,
 - `readyForDelivery` ist `false`, solange mindestens ein solcher Review-Punkt offen ist.
 
-Damit kann kein unreviewter Freitext versehentlich in ein späteres Betroffenenpaket gelangen.
+Damit kann kein unreviewter Freitext versehentlich in ein Betroffenenpaket gelangen.
 
 ## Administrative Review-/Freigabe
 
-Migration `0019_data_subject_delivery_approvals` und `approveAthleteDataSubjectDeliveryReview()` führen einen separaten, unveränderlichen Freigabevertrag ein. Die Freigabe ist noch **keine** Auslieferung; sie autorisiert ausschließlich, welche der aktuell inventarisierten Freitextfelder in einem späteren reviewed Delivery-Snapshot übernommen oder redigiert werden dürfen.
+Migration `0019_data_subject_delivery_approvals` und `approveAthleteDataSubjectDeliveryReview()` bilden einen separaten, unveränderlichen Freigabevertrag. Die Freigabe autorisiert ausschließlich, welche der aktuell inventarisierten Freitextfelder im reviewed Delivery-Snapshot übernommen oder redigiert werden dürfen.
 
 Zulässige Entscheidungen je Review-Punkt:
 
@@ -118,7 +118,7 @@ Für jede aktuelle Review-Position muss exakt eine Entscheidung vorhanden sein. 
 - Section, Row-ID, Feld und Entscheidung je Review-Punkt,
 - freigebenden Tenant-Admin und Zeitstempel.
 
-Der geprüfte Freitext selbst wird **nicht** in der Approval und nicht im Approval-Audit gespeichert. `INCLUDE_ORIGINAL` bedeutet daher nur, dass ein späterer Paketierungsschritt den dann noch aktuellen Rohwert nach erneuter Validierung übernehmen darf.
+Der geprüfte Freitext selbst wird **nicht** in der Approval und nicht im Approval-Audit gespeichert. `INCLUDE_ORIGINAL` bedeutet nur, dass der spätere Paketierungsschritt den dann noch aktuellen Rohwert nach erneuter Validierung übernehmen darf.
 
 ### Fingerprint-Bindung und Drift
 
@@ -130,7 +130,7 @@ Der Source-Fingerprint bindet:
 - automatische Drittpersonen-Redaktionen,
 - das vollständige aktuelle Review-Item-Set.
 
-Der Decision-Fingerprint bindet die normalisierte Entscheidungsliste. Jede Änderung des fachlichen Source, des Review-Scopes oder der Vertragsversion macht eine bestehende Freigabe für die spätere Paketierung ungültig.
+Der Decision-Fingerprint bindet die normalisierte Entscheidungsliste. Jede Änderung des fachlichen Source, des Review-Scopes oder der Vertragsversion macht eine bestehende Freigabe für die Paketierung ungültig.
 
 `validateAthleteDataSubjectDeliveryApproval()` revalidiert diese Bindung gegen den aktuellen Source. Eine Approval darf nur weiterverwendet werden, wenn `validForDeliveryPackaging=true` und keine Blocker vorliegen.
 
@@ -166,11 +166,11 @@ Der Snapshot enthält zusätzlich:
 - Decision-Fingerprint,
 - einen eigenen SHA-256-`reviewedFingerprint` über den vollständigen reviewed Source.
 
-Wiederholte Erzeugung aus identischem Source und identischer Approval liefert denselben reviewed Fingerprint. Die Snapshot-Erzeugung ist read-only und erzeugt bewusst noch kein weiteres Audit-Ereignis.
+Wiederholte Erzeugung aus identischem Source und identischer Approval liefert denselben reviewed Fingerprint. Die Snapshot-Erzeugung ist read-only.
 
 ## Verifiziertes Paketmanifest
 
-`prepareAthleteDataSubjectDeliveryPackage()` bildet den letzten read-only Vorbau vor einer tatsächlichen Auslieferung. Der Service erzeugt einen in-memory Paketkandidaten aus dem frisch validierten reviewed Snapshot und den zugehörigen Report-PDFs.
+`prepareAthleteDataSubjectDeliveryPackage()` bildet den letzten read-only Vorbau vor der tatsächlichen Auslieferung. Der Service erzeugt einen In-Memory-Paketkandidaten aus dem frisch validierten reviewed Snapshot und den zugehörigen Report-PDFs.
 
 Version des Manifests: `masters-data-subject-package-manifest-v1`.
 
@@ -190,7 +190,7 @@ Für jede im reviewed Snapshot gebundene Report-Artefaktreferenz gilt fail-close
 
 Eine fehlende Datei, ein ungültiger gespeicherter Hash oder eine Hash-Abweichung bricht die Vorbereitung vollständig ab.
 
-Die bereits verifizierten PDF-Bytes werden im vorbereiteten Paketkandidaten gehalten. Ein späterer Writer darf die Reports nicht nach der Verifikation erneut aus dem Storage lesen, weil dies die Bindung zwischen geprüften und tatsächlich ausgelieferten Bytes aufbrechen würde.
+Die bereits verifizierten PDF-Bytes werden im vorbereiteten Paketkandidaten gehalten. Der Writer liest die Reports nach dieser Verifikation nicht erneut aus dem Storage.
 
 ### Paketpfade und Manifest-Bindung
 
@@ -211,19 +211,117 @@ Das Manifest bindet:
 - Paketpfad und Medientyp,
 - SHA-256 und Byte-Länge jeder Datei.
 
-Über diesen Manifest-Core wird zusätzlich ein eigener deterministischer `manifestFingerprint` gebildet. `manifest.json` wird aus dem vollständigen Manifest vorbereitet.
+Über diesen Manifest-Core wird zusätzlich ein deterministischer `manifestFingerprint` gebildet. `manifest.json` wird aus dem vollständigen Manifest vorbereitet.
 
-Die Paketvorbereitung bleibt read-only und schreibt bewusst noch keinen Export-Audit, weil weder ein dauerhaftes Paket erzeugt noch eine Datei an einen Betroffenen ausgeliefert wurde.
+## Persistiertes verschlüsseltes Auslieferungspaket
 
-## Noch keine Auslieferung
+`createDataSubjectDeliveryPackage()` erzeugt aus den bereits verifizierten Bytes ein deterministisches TAR-Dateiset und persistiert es ausschließlich **verschlüsselt**.
 
-Source, Delivery-Projection, Review-Approval, reviewed Snapshot und Paketmanifest zusammen:
+### Archivinhalt
 
-- erzeugen noch kein dauerhaftes Downloadpaket oder Archiv,
-- veröffentlichen keine Web- oder Download-Route,
-- schreiben noch keinen finalen Export-/Download-Audit.
+Das TAR enthält:
 
-Der nächste und abschließende Betroffenenexport-Slice muss aus `manifest.json`, `data.json` und den **bereits verifizierten** PDF-Bytes ein persistiertes, tenantgebundenes Auslieferungspaket erzeugen und administrative Erzeugung sowie Download mit den spezifizierten Export-/Download-Audits absichern.
+- `manifest.json`
+- `data.json`
+- die im Manifest gebundenen `reports/NNNN.pdf`
+
+TAR-Pfade werden auf einen engen sicheren Zeichensatz geprüft; absolute Pfade, `..` und doppelte Einträge werden verworfen.
+
+### Verschlüsselung und Token
+
+- Archivversion: `1`
+- Dateierweiterung im privaten Storage: `.mdse`
+- Formatpräfix: `MDS1`
+- Verschlüsselung: AES-GCM
+- zufällige 96-Bit-IV
+- Additional Authenticated Data bindet Paket-ID und `manifestFingerprint`
+- der 256-Bit-Bearer-Token wird zufällig erzeugt
+- der AES-Schlüssel wird deterministisch aus dem Token abgeleitet und **nicht** gespeichert
+- in der DB wird nur der SHA-256-Hash des Tokens gespeichert
+- die verschlüsselten Bytes erhalten zusätzlich einen eigenen SHA-256-Pakethash
+
+Standard-TTL ist 24 Stunden; der Writer erlaubt höchstens sieben Tage. Ungültige oder nichtpositive TTLs werden abgewiesen.
+
+Migration `0020_data_subject_delivery_packages` schützt die Paketmetadaten. Nach Erstellung sind technische Identität, Scope, Token-Hash, Storage-Referenz, Paket-Hash und Ablaufzeit unveränderlich; einzig der atomare One-Time-Consume-Übergang darf `downloaded_at` setzen.
+
+Schlägt die DB-Persistierung nach erfolgreicher Dateierzeugung fehl, wird die verschlüsselte Datei wieder entfernt. Schlägt auch dieser Cleanup fehl, bleibt der kombinierte Fehler sichtbar.
+
+## Administrative HTTP-Erzeugung
+
+`POST /api/data-subject/export` ist die administrative Erzeugungsgrenze.
+
+Voraussetzungen:
+
+- authentifizierter Tenant-Kontext,
+- Rolle `TENANT_ADMIN`,
+- Request mit `athleteId`, `approvalId` und Passwort,
+- erfolgreiche Passwort-Reauthentisierung,
+- aktuell gültige, fingerprintgebundene Delivery-Approval.
+
+Die Approval wird vor dem Writer geprüft. Scheitert der Writer nach positiver Vorprüfung, wird die Approval erneut validiert: Source-/Approval-Drift wird als `409` behandelt; echte Storage-/DB-/Writerfehler bleiben `500`.
+
+Eine erfolgreiche `201`-Antwort enthält ausschließlich technische Paketmetadaten sowie den Bearer-Token:
+
+- `packageId`
+- `expiresAt`
+- `manifestFingerprint`
+- `packageSha256`
+- tokenfreien `downloadEndpoint`
+- `tokenType: Bearer`
+- `downloadToken`
+
+Der Token wird **nicht** in eine URL oder Query eingebettet. Antworten verwenden `private, no-store`, `Pragma: no-cache`, `nosniff` und `no-referrer`.
+
+Die erfolgreiche Erzeugung schreibt `athlete.data_subject_export_created` mit technischen Paket-/Fingerprint-Metadaten, aber ohne Token oder Subject-PII.
+
+## Einmal-Download
+
+`GET /api/data-subject/export/download` akzeptiert den Token ausschließlich als
+
+```http
+Authorization: Bearer <token>
+```
+
+Query- oder URL-Tokens werden nicht verwendet.
+
+Der Downloadpfad:
+
+1. hasht den Bearer-Token,
+2. sucht genau ein nicht konsumiertes, noch nicht abgelaufenes Paket,
+3. lädt die verschlüsselten `.mdse`-Bytes,
+4. prüft den gespeicherten Paket-Hash,
+5. entschlüsselt und authentifiziert das Archiv mit dem Token,
+6. führt den atomaren DB-Consume aus,
+7. liefert das TAR genau einmal aus.
+
+Unbekannte, abgelaufene und bereits konsumierte Tokens werden absichtlich als gleiche leere `404` behandelt. Ein manipulierter oder inkonsistenter Storage-Inhalt wird nicht konsumiert und führt fail-closed zum Fehler.
+
+Erfolgreiche Downloads liefern:
+
+- `Content-Type: application/x-tar`
+- PII-freien UUID-basierten Dateinamen
+- `Cache-Control: private, no-store, max-age=0`
+- `Pragma: no-cache`
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: no-referrer`
+
+Der atomare Consume setzt `downloaded_at` nur für den ersten Gewinner. Parallelversuche können daher höchstens einen erfolgreichen Download erzeugen. In derselben DB-Transaktion wird `athlete.data_subject_export_downloaded` geschrieben; Token und Subject-PII werden nicht auditiert.
+
+## Anonymisierung und verbleibender Lifecycle
+
+Ein persistiertes `.mdse` kann auch nach Download oder Ablauf noch personenbezogene Pre-Anonymisierungsdaten enthalten. Deshalb gehört **jedes** `athlete_data_subject_delivery_packages` des Athleten zum irreversiblen Anonymisierungs-Scope.
+
+Policy `1.6.0` und Migration `0021_data_subject_anonymization_artifacts` integrieren diese Pakete als `DATA_SUBJECT_EXPORT` in das durable Anonymisierungs-Manifest:
+
+- alle athletenbezogenen `.mdse`-Referenzen werden in der Preview inventarisiert,
+- ältere Anonymisierungs-Approvals werden durch den Policy-Versionssprung invalidiert,
+- die Dateien werden vor DB-Commit quarantänisiert,
+- der aktuelle Paket-Scope muss unmittelbar vor dem Commit exakt dem Manifest entsprechen,
+- die Paketzeilen werden in derselben irreversiblen DB-Transaktion entfernt,
+- die Dateien werden erst nach `DB_COMMITTED` endgültig gepurged,
+- bei Fehlern vor dem Commit werden sie restauriert.
+
+Der noch separate Betriebs-Slice ist der normale Lifecycle-Cleanup konsumierter oder abgelaufener `.mdse`-Pakete außerhalb einer Athletenanonymisierung. Dieser Cleanup muss aktive `PREPARING`-/`ARTIFACTS_STAGED`-Executions respektieren.
 
 ## Sicherheitsinvarianten
 
@@ -253,20 +351,21 @@ Der nächste und abschließende Betroffenenexport-Slice muss aus `manifest.json`
 - bleiben DB-seitig immutable,
 - invalidieren bei Source-/Review-/Vertragsdrift fail-closed.
 
-`buildAthleteDataSubjectReviewedDeliverySnapshot()`:
+`buildAthleteDataSubjectReviewedDeliverySnapshot()` und `prepareAthleteDataSubjectDeliveryPackage()`:
 
-- nutzt nur frisch validierte Approvals,
-- re-fingerprintet den tatsächlich verwendeten Source,
-- kann ausschließlich exakt freigegebene Freitextfelder wiederherstellen,
-- ersetzt `REDACT` deterministisch,
-- bewahrt strukturierte Drittpersonenredaktionen,
-- ist read-only und liefert einen eigenen deterministischen Snapshot-Fingerprint.
+- nutzen nur frisch validierte Approvals,
+- re-fingerprinten den tatsächlich verwendeten Source,
+- können ausschließlich exakt freigegebene Freitextfelder wiederherstellen,
+- bewahren strukturierte Drittpersonenredaktionen,
+- verifizieren die tatsächlichen PDF-Bytes gegen immutable Content-Hashes,
+- binden Daten, Reports und Fingerprints deterministisch im Manifest.
 
-`prepareAthleteDataSubjectDeliveryPackage()`:
+Persistenz und HTTP-Auslieferung:
 
-- verwendet nur frisch validierte reviewed Snapshots,
-- nimmt nur Reports mit exakt passender Report-Version und Storage-Referenz auf,
-- verifiziert die tatsächlichen PDF-Bytes gegen den unveränderlichen Content-Hash,
-- hält exakt die verifizierten Bytes für den späteren Writer fest,
-- erzeugt deterministische Paketpfade, Datei-Hashes und einen Manifest-Fingerprint,
-- mutiert weder Fachdaten noch Audit-Log und stellt selbst noch nichts aus.
+- speichern weder Bearer-Token noch abgeleiteten Verschlüsselungsschlüssel,
+- geben den Token nur an der administrativen Erzeugungsgrenze zurück,
+- transportieren den Token nicht in URL/Query,
+- liefern Paketbytes höchstens einmal aus,
+- unterscheiden extern nicht zwischen unbekannt, abgelaufen und bereits konsumiert,
+- schreiben getrennte PII-arme Erzeugungs- und Download-Audits,
+- integrieren verbliebene `.mdse`-Pakete in den irreversiblen Athleten-Scope.

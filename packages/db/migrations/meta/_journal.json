@@ -148,6 +148,13 @@
       "when": 1785942600000,
       "tag": "0020_data_subject_delivery_packages",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1785962400000,
+      "tag": "0021_data_subject_anonymization_artifacts",
+      "breakpoints": true
     }
   ]
 }

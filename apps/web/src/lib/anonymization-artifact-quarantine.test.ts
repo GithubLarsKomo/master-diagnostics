@@ -2,10 +2,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { FileSystemDataSubjectDeliveryPackageStorage } from './data-subject-delivery-package-storage';
 import { FileSystemReportArtifactStorage } from './report-artifact-storage';
-import {
-  stageAnonymizationArtifacts,
-} from './server/anonymization-artifact-quarantine';
+import { stageAnonymizationArtifacts } from './server/anonymization-artifact-quarantine';
 import { FileSystemTenantExportPackageStorage } from './tenant-export-package-storage';
 
 const roots: string[] = [];
@@ -66,9 +65,25 @@ describe('anonymization artifact quarantine', () => {
     expect(Array.from(await storage.get(reference))).toEqual(Array.from(bytes));
   });
 
+  it('stages and restores an encrypted data-subject package with the same protocol', async () => {
+    const storage = new FileSystemDataSubjectDeliveryPackageStorage(await tempRoot('masters-subject-quarantine-'));
+    const reference = '123e4567-e89b-12d3-a456-426614174000.mdse';
+    const executionId = 'execution-subject-export';
+    const bytes = new TextEncoder().encode('encrypted-subject-package');
+    await storage.put(reference, bytes);
+
+    const handle = await storage.stageForDeletion(executionId, reference);
+    await expect(storage.get(reference)).rejects.toThrow();
+    expect(await storage.stageForDeletion(executionId, reference)).toEqual(handle);
+
+    await storage.restoreStaged(handle);
+    expect(Array.from(await storage.get(reference))).toEqual(Array.from(bytes));
+  });
+
   it('restores already staged artifacts if a later staging operation fails', async () => {
     const reportStorage = new FileSystemReportArtifactStorage(await tempRoot('masters-report-rollback-'));
     const exportStorage = new FileSystemTenantExportPackageStorage(await tempRoot('masters-export-rollback-'));
+    const subjectStorage = new FileSystemDataSubjectDeliveryPackageStorage(await tempRoot('masters-subject-rollback-'));
     const activeReference = 'tenant/test/de/a-report.pdf';
     const missingReference = 'tenant/test/de/z-missing.pdf';
     const bytes = new TextEncoder().encode('active-report');
@@ -78,8 +93,10 @@ describe('anonymization artifact quarantine', () => {
       'execution-rollback-1234',
       [activeReference, missingReference],
       [],
+      [],
       reportStorage,
       exportStorage,
+      subjectStorage,
     )).rejects.toThrow(/not found/i);
 
     expect(Array.from(await reportStorage.get(activeReference))).toEqual(Array.from(bytes));
@@ -92,8 +109,13 @@ describe('anonymization artifact quarantine', () => {
       .rejects.toThrow(/execution id/i);
 
     const exportStorage = new FileSystemTenantExportPackageStorage(await tempRoot('masters-export-invalid-'));
-    const reference = '01234567-89ab-cdef-0123-456789abcdef.mde';
-    await exportStorage.put(reference, new TextEncoder().encode('export'));
-    await expect(exportStorage.stageForDeletion('bad/id', reference)).rejects.toThrow(/execution id/i);
+    const exportReference = '01234567-89ab-cdef-0123-456789abcdef.mde';
+    await exportStorage.put(exportReference, new TextEncoder().encode('export'));
+    await expect(exportStorage.stageForDeletion('bad/id', exportReference)).rejects.toThrow(/execution id/i);
+
+    const subjectStorage = new FileSystemDataSubjectDeliveryPackageStorage(await tempRoot('masters-subject-invalid-'));
+    const subjectReference = '123e4567-e89b-12d3-a456-426614174000.mdse';
+    await subjectStorage.put(subjectReference, new TextEncoder().encode('subject'));
+    await expect(subjectStorage.stageForDeletion('bad/id', subjectReference)).rejects.toThrow(/execution id/i);
   });
 });

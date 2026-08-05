@@ -16,6 +16,10 @@ import {
 } from '@masters/db';
 import { db as configuredDb } from '../db';
 import {
+  createDataSubjectDeliveryPackageStorage,
+  type QuarantinableDataSubjectDeliveryPackageStorage,
+} from '../data-subject-delivery-package-storage';
+import {
   createReportArtifactStorage,
   type QuarantinableReportArtifactStorage,
 } from '../report-artifact-storage';
@@ -49,6 +53,7 @@ export interface AthleteAnonymizationOrchestratorDependencies {
   db: Database;
   reportStorage: QuarantinableReportArtifactStorage;
   exportStorage: QuarantinableTenantExportPackageStorage;
+  dataSubjectExportStorage: QuarantinableDataSubjectDeliveryPackageStorage;
   now?: () => string;
 }
 
@@ -75,6 +80,9 @@ async function artifactHandles(
       .map((item) => Object.freeze({ executionId, reference: item.storageReference }))),
     tenantExports: Object.freeze(manifest
       .filter((item) => item.kind === 'TENANT_EXPORT')
+      .map((item) => Object.freeze({ executionId, reference: item.storageReference }))),
+    dataSubjectExports: Object.freeze(manifest
+      .filter((item) => item.kind === 'DATA_SUBJECT_EXPORT')
       .map((item) => Object.freeze({ executionId, reference: item.storageReference }))),
   });
 }
@@ -115,8 +123,12 @@ async function requireFreshPreStageState(
 
   const manifestReports = manifest.filter((item) => item.kind === 'REPORT').map((item) => item.storageReference);
   const manifestExports = manifest.filter((item) => item.kind === 'TENANT_EXPORT').map((item) => item.storageReference);
+  const manifestSubjectExports = manifest
+    .filter((item) => item.kind === 'DATA_SUBJECT_EXPORT')
+    .map((item) => item.storageReference);
   if (!sameStrings(preview.preview.reportArtifactReferences, manifestReports)
-    || !sameStrings(preview.preview.activeTenantExportPackageReferences, manifestExports)) {
+    || !sameStrings(preview.preview.activeTenantExportPackageReferences, manifestExports)
+    || !sameStrings(preview.preview.dataSubjectDeliveryPackageReferences, manifestSubjectExports)) {
     throw new Error('Anonymization artifact manifest no longer matches the current preview');
   }
 
@@ -152,7 +164,12 @@ async function finalizeCommittedExecution(
   input: Pick<AthleteAnonymizationRecoveryInput, 'tenantId' | 'athleteId' | 'executionId' | 'actor'>,
 ): Promise<Readonly<StoredAthleteAnonymizationExecution>> {
   const handles = await artifactHandles(deps, input.tenantId, input.executionId);
-  await purgeAnonymizationArtifacts(handles, deps.reportStorage, deps.exportStorage);
+  await purgeAnonymizationArtifacts(
+    handles,
+    deps.reportStorage,
+    deps.exportStorage,
+    deps.dataSubjectExportStorage,
+  );
   const completedAt = (deps.now ?? (() => new Date().toISOString()))();
   try {
     return await completeAthleteAnonymizationExecution(
@@ -215,8 +232,10 @@ export async function executeAthleteAnonymization(
         execution.id,
         handles.reports.map((item) => item.reference),
         handles.tenantExports.map((item) => item.reference),
+        handles.dataSubjectExports.map((item) => item.reference),
         deps.reportStorage,
         deps.exportStorage,
+        deps.dataSubjectExportStorage,
       );
     } catch (stageError) {
       if (stageError instanceof AggregateError) throw stageError;
@@ -235,7 +254,12 @@ export async function executeAthleteAnonymization(
         execution = current;
       } else {
         try {
-          await restoreAnonymizationArtifacts(staged, deps.reportStorage, deps.exportStorage);
+          await restoreAnonymizationArtifacts(
+            staged,
+            deps.reportStorage,
+            deps.exportStorage,
+            deps.dataSubjectExportStorage,
+          );
         } catch (restoreError) {
           throw new AggregateError(
             [transitionError, restoreError],
@@ -252,8 +276,10 @@ export async function executeAthleteAnonymization(
         execution.id,
         handles.reports.map((item) => item.reference),
         handles.tenantExports.map((item) => item.reference),
+        handles.dataSubjectExports.map((item) => item.reference),
         deps.reportStorage,
         deps.exportStorage,
+        deps.dataSubjectExportStorage,
       );
     } catch (stageError) {
       if (stageError instanceof AggregateError) throw stageError;
@@ -288,7 +314,12 @@ export async function executeAthleteAnonymization(
     }
 
     try {
-      await restoreAnonymizationArtifacts(staged, deps.reportStorage, deps.exportStorage);
+      await restoreAnonymizationArtifacts(
+        staged,
+        deps.reportStorage,
+        deps.exportStorage,
+        deps.dataSubjectExportStorage,
+      );
     } catch (restoreError) {
       throw new AggregateError(
         [commitError, restoreError],
@@ -321,5 +352,6 @@ export function configuredAnonymizationOrchestratorDependencies(): AthleteAnonym
     db: configuredDb,
     reportStorage: createReportArtifactStorage(),
     exportStorage: createTenantExportPackageStorage(),
+    dataSubjectExportStorage: createDataSubjectDeliveryPackageStorage(),
   };
 }

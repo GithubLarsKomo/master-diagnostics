@@ -4,6 +4,7 @@ import {
   athleteAnonymizationApprovals,
   athleteAnonymizationExecutionArtifacts,
   athleteAnonymizationExecutions,
+  athleteDataSubjectDeliveryPackages,
   athleteDeletionRequests,
   athleteGuardians,
   athleteSnapshots,
@@ -146,6 +147,9 @@ export async function commitStagedAthleteAnonymizationDatabase(
     ));
     const reportManifest = manifest.filter((item) => item.kind === 'REPORT').map((item) => item.storageReference);
     const exportManifest = manifest.filter((item) => item.kind === 'TENANT_EXPORT').map((item) => item.storageReference);
+    const subjectExportManifest = manifest
+      .filter((item) => item.kind === 'DATA_SUBJECT_EXPORT')
+      .map((item) => item.storageReference);
 
     const currentReports = await tx.select({ storageReference: reportVersions.storageReference })
       .from(reportVersions)
@@ -178,6 +182,16 @@ export async function commitStagedAthleteAnonymizationDatabase(
       if (!sameStrings(manifestExportRows.map((item) => item.storageReference), exportManifest)) {
         throw new Error('Tenant export artifact manifest source rows changed before database commit');
       }
+    }
+
+    const currentSubjectExports = await tx.select({ storageReference: athleteDataSubjectDeliveryPackages.storageReference })
+      .from(athleteDataSubjectDeliveryPackages)
+      .where(and(
+        eq(athleteDataSubjectDeliveryPackages.tenantId, tenantId),
+        eq(athleteDataSubjectDeliveryPackages.athleteId, athleteId),
+      ));
+    if (!sameStrings(currentSubjectExports.map((item) => item.storageReference), subjectExportManifest)) {
+      throw new Error('Data subject export artifact manifest no longer matches database scope');
     }
 
     for (const candidate of auditInventory.candidates) {
@@ -286,6 +300,16 @@ export async function commitStagedAthleteAnonymizationDatabase(
         inArray(tenantExportPackages.storageReference, exportManifest),
       )).returning({ id: tenantExportPackages.id }));
     } else removed.tenantExportPackages = 0;
+
+    if (subjectExportManifest.length > 0) {
+      removed.dataSubjectDeliveryPackages = await deletedCount(
+        tx.delete(athleteDataSubjectDeliveryPackages).where(and(
+          eq(athleteDataSubjectDeliveryPackages.tenantId, tenantId),
+          eq(athleteDataSubjectDeliveryPackages.athleteId, athleteId),
+          inArray(athleteDataSubjectDeliveryPackages.storageReference, subjectExportManifest),
+        )).returning({ id: athleteDataSubjectDeliveryPackages.id }),
+      );
+    } else removed.dataSubjectDeliveryPackages = 0;
 
     await tx.update(athleteDeletionRequests).set({
       reason: AUDIT_PRIVACY_REDACTED_TEXT,

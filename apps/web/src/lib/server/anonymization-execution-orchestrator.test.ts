@@ -12,6 +12,11 @@ import {
 } from '@masters/db';
 import * as schema from '@masters/db';
 import {
+  FileSystemDataSubjectDeliveryPackageStorage,
+  type QuarantinableDataSubjectDeliveryPackageStorage,
+  type StagedDataSubjectDeliveryPackage,
+} from '../data-subject-delivery-package-storage';
+import {
   FileSystemReportArtifactStorage,
   type QuarantinableReportArtifactStorage,
   type StagedReportArtifact,
@@ -57,6 +62,7 @@ const capabilities: GlobalPrivacyCapabilities = {
 };
 const reportReference = 'tenant-a/test-a/de/report-a.pdf';
 const exportReference = '01234567-89ab-cdef-0123-456789abcdef.mde';
+const subjectReference = '123e4567-e89b-12d3-a456-426614174000.mdse';
 
 async function seed(db: Database) {
   await db.insert(schema.tenants).values({
@@ -96,6 +102,23 @@ async function seed(db: Database) {
     createdByUserId: 'admin-a', expiresAt: '2027-01-01T00:00:00.000Z', downloadedAt: null,
     createdAt, updatedAt: createdAt,
   });
+  await db.insert(schema.athleteDataSubjectDeliveryApprovals).values({
+    id: 'subject-approval-a', tenantId: 'tenant-a', athleteId: 'athlete-a', approvalVersion: 1,
+    sourceSchemaVersion: 'masters-data-subject-export-v1',
+    deliveryPolicyVersion: 'masters-data-subject-delivery-v1',
+    assessedAt: '2026-08-05T12:00:00.000Z', sourceFingerprint: `sha256:${'d'.repeat(64)}`,
+    decisionsFingerprint: `sha256:${'e'.repeat(64)}`, reviewDecisionsJson: '[]',
+    approvedByUserId: 'admin-a', approvedAt: '2026-08-05T12:00:00.000Z',
+    createdAt: '2026-08-05T12:00:00.000Z', updatedAt: '2026-08-05T12:00:00.000Z',
+  });
+  await db.insert(schema.athleteDataSubjectDeliveryPackages).values({
+    id: '123e4567-e89b-12d3-a456-426614174000', tenantId: 'tenant-a', athleteId: 'athlete-a',
+    approvalId: 'subject-approval-a', packageVersion: 1,
+    manifestFingerprint: `sha256:${'f'.repeat(64)}`, tokenHash: `sha256:${'1'.repeat(64)}`,
+    storageReference: subjectReference, packageSha256: `sha256:${'2'.repeat(64)}`,
+    createdByUserId: 'admin-a', expiresAt: '2027-01-01T00:00:00.000Z', downloadedAt: null,
+    createdAt: '2026-08-05T12:01:00.000Z', updatedAt: '2026-08-05T12:01:00.000Z',
+  });
   await db.insert(schema.athleteDeletionRequests).values({
     id: 'deletion-a', tenantId: 'tenant-a', athleteId: 'athlete-a', status: 'COMPLETED',
     reason: 'Petra requested deletion', requestedAt: '2025-01-01T00:00:00.000Z',
@@ -109,15 +132,23 @@ async function setup() {
   await seed(db);
   const reportStorage = new FileSystemReportArtifactStorage(await tempRoot('masters-orchestrator-reports-'));
   const exportStorage = new FileSystemTenantExportPackageStorage(await tempRoot('masters-orchestrator-exports-'));
+  const dataSubjectExportStorage = new FileSystemDataSubjectDeliveryPackageStorage(
+    await tempRoot('masters-orchestrator-subject-exports-'),
+  );
   await reportStorage.put(reportReference, new TextEncoder().encode('report-pdf'));
   await exportStorage.put(exportReference, new TextEncoder().encode('encrypted-export'));
+  await dataSubjectExportStorage.put(subjectReference, new TextEncoder().encode('encrypted-subject-export'));
   const approval = await approveAthleteAnonymization(
     db, 'tenant-a', 'athlete-a', actor, capabilities, '2026-08-05T13:00:00.000Z',
   );
   const deps: AthleteAnonymizationOrchestratorDependencies = {
-    db, reportStorage, exportStorage, now: () => '2026-08-05T13:05:00.000Z',
+    db,
+    reportStorage,
+    exportStorage,
+    dataSubjectExportStorage,
+    now: () => '2026-08-05T13:05:00.000Z',
   };
-  return { db, reportStorage, exportStorage, approval, deps };
+  return { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, deps };
 }
 
 class MutatingExportStorage implements QuarantinableTenantExportPackageStorage {
@@ -141,6 +172,30 @@ class MutatingExportStorage implements QuarantinableTenantExportPackageStorage {
   purgeStaged(handle: Readonly<StagedTenantExportPackage>) { return this.base.purgeStaged(handle); }
 }
 
+class MutatingSubjectStorage implements QuarantinableDataSubjectDeliveryPackageStorage {
+  private mutated = false;
+  constructor(
+    private readonly base: QuarantinableDataSubjectDeliveryPackageStorage,
+    private readonly afterStage: () => Promise<void>,
+  ) {}
+  put(reference: string, bytes: Uint8Array) { return this.base.put(reference, bytes); }
+  get(reference: string) { return this.base.get(reference); }
+  remove(reference: string) { return this.base.remove(reference); }
+  async stageForDeletion(
+    executionId: string,
+    reference: string,
+  ): Promise<Readonly<StagedDataSubjectDeliveryPackage>> {
+    const handle = await this.base.stageForDeletion(executionId, reference);
+    if (!this.mutated) {
+      this.mutated = true;
+      await this.afterStage();
+    }
+    return handle;
+  }
+  restoreStaged(handle: Readonly<StagedDataSubjectDeliveryPackage>) { return this.base.restoreStaged(handle); }
+  purgeStaged(handle: Readonly<StagedDataSubjectDeliveryPackage>) { return this.base.purgeStaged(handle); }
+}
+
 class FailOnceReportPurgeStorage implements QuarantinableReportArtifactStorage {
   private failed = false;
   constructor(private readonly base: QuarantinableReportArtifactStorage) {}
@@ -160,7 +215,7 @@ class FailOnceReportPurgeStorage implements QuarantinableReportArtifactStorage {
 
 describe('athlete anonymization end-to-end orchestrator', () => {
   it('stages artifacts, commits the DB, purges quarantine and completes exactly once', async () => {
-    const { db, reportStorage, exportStorage, approval, deps } = await setup();
+    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, deps } = await setup();
 
     const completed = await executeAthleteAnonymization(deps, {
       tenantId: 'tenant-a', athleteId: 'athlete-a', approvalId: approval.id,
@@ -169,8 +224,10 @@ describe('athlete anonymization end-to-end orchestrator', () => {
     expect(completed.status).toBe('COMPLETED');
     await expect(reportStorage.get(reportReference)).rejects.toThrow();
     await expect(exportStorage.get(exportReference)).rejects.toThrow();
+    await expect(dataSubjectExportStorage.get(subjectReference)).rejects.toThrow();
     expect(await db.select().from(schema.reportVersions)).toEqual([]);
     expect(await db.select().from(schema.tenantExportPackages)).toEqual([]);
+    expect(await db.select().from(schema.athleteDataSubjectDeliveryPackages)).toEqual([]);
     expect(await db.select().from(schema.tests)).toEqual([]);
     const [athlete] = await db.select().from(schema.athletes);
     expect(athlete).toMatchObject({
@@ -192,11 +249,11 @@ describe('athlete anonymization end-to-end orchestrator', () => {
   });
 
   it('restores staged artifacts and aborts when DB scope drifts after staging', async () => {
-    const { db, reportStorage, exportStorage, approval, deps } = await setup();
+    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, deps } = await setup();
     const mutatingExportStorage = new MutatingExportStorage(exportStorage, async () => {
       await db.insert(schema.tenantExportPackages).values({
-        id: 'export-late', tenantId: 'tenant-a', tokenHash: `sha256:${'d'.repeat(64)}`,
-        storageReference: 'fedcba98-7654-3210-fedc-ba9876543210.mde', packageSha256: `sha256:${'e'.repeat(64)}`,
+        id: 'export-late', tenantId: 'tenant-a', tokenHash: `sha256:${'3'.repeat(64)}`,
+        storageReference: 'fedcba98-7654-3210-fedc-ba9876543210.mde', packageSha256: `sha256:${'4'.repeat(64)}`,
         createdByUserId: 'admin-a', expiresAt: '2027-01-01T00:00:00.000Z', downloadedAt: null,
         createdAt: '2026-08-05T13:05:00.000Z', updatedAt: '2026-08-05T13:05:00.000Z',
       });
@@ -209,6 +266,7 @@ describe('athlete anonymization end-to-end orchestrator', () => {
 
     expect(new TextDecoder().decode(await reportStorage.get(reportReference))).toBe('report-pdf');
     expect(new TextDecoder().decode(await exportStorage.get(exportReference))).toBe('encrypted-export');
+    expect(new TextDecoder().decode(await dataSubjectExportStorage.get(subjectReference))).toBe('encrypted-subject-export');
     const execution = await getAthleteAnonymizationExecutionByApproval(
       db, 'tenant-a', 'athlete-a', approval.id,
     );
@@ -218,8 +276,39 @@ describe('athlete anonymization end-to-end orchestrator', () => {
     expect(await db.select().from(schema.tests)).toHaveLength(1);
   });
 
+  it('restores all artifacts when a new subject package appears after subject staging', async () => {
+    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, deps } = await setup();
+    const mutatingSubjectStorage = new MutatingSubjectStorage(dataSubjectExportStorage, async () => {
+      await db.insert(schema.athleteDataSubjectDeliveryPackages).values({
+        id: '223e4567-e89b-12d3-a456-426614174000', tenantId: 'tenant-a', athleteId: 'athlete-a',
+        approvalId: 'subject-approval-a', packageVersion: 1,
+        manifestFingerprint: `sha256:${'5'.repeat(64)}`, tokenHash: `sha256:${'6'.repeat(64)}`,
+        storageReference: '223e4567-e89b-12d3-a456-426614174000.mdse',
+        packageSha256: `sha256:${'7'.repeat(64)}`, createdByUserId: 'admin-a',
+        expiresAt: '2027-01-01T00:00:00.000Z', downloadedAt: null,
+        createdAt: '2026-08-05T13:05:00.000Z', updatedAt: '2026-08-05T13:05:00.000Z',
+      });
+    });
+
+    await expect(executeAthleteAnonymization({
+      ...deps,
+      dataSubjectExportStorage: mutatingSubjectStorage,
+    }, {
+      tenantId: 'tenant-a', athleteId: 'athlete-a', approvalId: approval.id,
+      actor, globalCapabilities: capabilities,
+    })).rejects.toThrow();
+
+    expect(new TextDecoder().decode(await reportStorage.get(reportReference))).toBe('report-pdf');
+    expect(new TextDecoder().decode(await exportStorage.get(exportReference))).toBe('encrypted-export');
+    expect(new TextDecoder().decode(await dataSubjectExportStorage.get(subjectReference))).toBe('encrypted-subject-export');
+    const execution = await getAthleteAnonymizationExecutionByApproval(db, 'tenant-a', 'athlete-a', approval.id);
+    expect(execution?.status).toBe('ABORTED');
+    const [athlete] = await db.select().from(schema.athletes);
+    expect(athlete?.firstName).toBe('Petra');
+  });
+
   it('leaves DB_COMMITTED on purge failure and recovers without replaying approval or DB mutation', async () => {
-    const { db, reportStorage, exportStorage, approval, deps } = await setup();
+    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, deps } = await setup();
     const failOnce = new FailOnceReportPurgeStorage(reportStorage);
     const failingDeps = { ...deps, reportStorage: failOnce };
 
@@ -233,6 +322,7 @@ describe('athlete anonymization end-to-end orchestrator', () => {
     );
     expect(committed?.status).toBe('DB_COMMITTED');
     expect(await db.select().from(schema.tests)).toEqual([]);
+    expect(await db.select().from(schema.athleteDataSubjectDeliveryPackages)).toEqual([]);
     const [athleteAfterCommit] = await db.select().from(schema.athletes);
     expect(athleteAfterCommit?.firstName).toBe('[ANONYMIZED]');
 
@@ -242,6 +332,7 @@ describe('athlete anonymization end-to-end orchestrator', () => {
     expect(recovered.status).toBe('COMPLETED');
     await expect(reportStorage.get(reportReference)).rejects.toThrow();
     await expect(exportStorage.get(exportReference)).rejects.toThrow();
+    await expect(dataSubjectExportStorage.get(subjectReference)).rejects.toThrow();
 
     const actions = (await db.select().from(schema.auditEvents)).map((row) => row.action);
     expect(actions.filter((action) => action === 'athlete.anonymization_db_committed')).toHaveLength(1);
