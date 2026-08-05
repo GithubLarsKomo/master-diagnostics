@@ -11,7 +11,8 @@
     "test:e2e": "pnpm --filter @masters/web test:e2e",
     "db:generate": "pnpm --filter @masters/db db:generate",
     "db:push": "pnpm --filter @masters/db db:push",
-    "db:migrate": "pnpm --filter @masters/db db:migrate"
+    "db:migrate": "pnpm --filter @masters/db db:migrate",
+    "retention:scan": "pnpm --filter @masters/db retention:scan"
   },
   "devDependencies": {
     "turbo": "^2.5.6",
