@@ -307,7 +307,7 @@ Erfolgreiche Downloads liefern:
 
 Der atomare Consume setzt `downloaded_at` nur für den ersten Gewinner. Parallelversuche können daher höchstens einen erfolgreichen Download erzeugen. In derselben DB-Transaktion wird `athlete.data_subject_export_downloaded` geschrieben; Token und Subject-PII werden nicht auditiert.
 
-## Anonymisierung und verbleibender Lifecycle
+## Anonymisierung und Lifecycle
 
 Ein persistiertes `.mdse` kann auch nach Download oder Ablauf noch personenbezogene Pre-Anonymisierungsdaten enthalten. Deshalb gehört **jedes** `athlete_data_subject_delivery_packages` des Athleten zum irreversiblen Anonymisierungs-Scope.
 
@@ -321,7 +321,31 @@ Policy `1.6.0` und Migration `0021_data_subject_anonymization_artifacts` integri
 - die Dateien werden erst nach `DB_COMMITTED` endgültig gepurged,
 - bei Fehlern vor dem Commit werden sie restauriert.
 
-Der noch separate Betriebs-Slice ist der normale Lifecycle-Cleanup konsumierter oder abgelaufener `.mdse`-Pakete außerhalb einer Athletenanonymisierung. Dieser Cleanup muss aktive `PREPARING`-/`ARTIFACTS_STAGED`-Executions respektieren.
+### Normaler Lifecycle-Cleanup
+
+Außerhalb einer Athletenanonymisierung entfernt `cleanupUnavailableAthleteDataSubjectDeliveryPackages()` Pakete, deren Capability nicht mehr auslieferbar ist. Kandidat ist ein Paket genau dann, wenn mindestens eine Bedingung erfüllt ist:
+
+- `downloaded_at IS NOT NULL`, oder
+- `expires_at <= assessedAt`.
+
+Noch nicht konsumierte und noch nicht abgelaufene Pakete bleiben unangetastet. Die Kandidatenprojektion enthält nur Paket-ID, Tenant-/Athlete-ID, `storage_reference`, `expires_at` und `downloaded_at`; Token-, Manifest- und Pakethashes werden dem Maintenance-Pfad nicht ausgehändigt.
+
+Für jeden Kandidaten gilt fail-closed:
+
+1. `PREPARING`-/`ARTIFACTS_STAGED`-Anonymisierung im Tenant prüfen,
+2. bei aktiver Execution den Kandidaten überspringen,
+3. verschlüsselte `.mdse`-Datei entfernen,
+4. erst danach die exakt über Tenant, Athlete und Paket-ID gebundene DB-Zeile entfernen.
+
+Schlägt die Dateilöschung fehl, bleibt die DB-Zeile stehen und der Cleanup kann später wiederholt werden. Der dauerhafte Export-/Download-Audit wird nicht entfernt.
+
+Der Maintenance-Befehl lautet:
+
+```bash
+pnpm data-subject-delivery:cleanup
+```
+
+`DATA_SUBJECT_DELIVERY_PACKAGE_ROOT` setzt den Storage-Root. Für reproduzierbare Tests oder kontrollierte Betriebsaufrufe kann `DATA_SUBJECT_DELIVERY_CLEANUP_NOW` einen ISO-8601-Prüfzeitpunkt vorgeben. Der produktive Scheduler für wiederkehrende Maintenance-Aufrufe bleibt Teil der allgemeinen Deployment-/Betriebsplanung.
 
 ## Sicherheitsinvarianten
 
@@ -360,7 +384,7 @@ Der noch separate Betriebs-Slice ist der normale Lifecycle-Cleanup konsumierter 
 - verifizieren die tatsächlichen PDF-Bytes gegen immutable Content-Hashes,
 - binden Daten, Reports und Fingerprints deterministisch im Manifest.
 
-Persistenz und HTTP-Auslieferung:
+Persistenz, HTTP-Auslieferung und Cleanup:
 
 - speichern weder Bearer-Token noch abgeleiteten Verschlüsselungsschlüssel,
 - geben den Token nur an der administrativen Erzeugungsgrenze zurück,
@@ -368,4 +392,6 @@ Persistenz und HTTP-Auslieferung:
 - liefern Paketbytes höchstens einmal aus,
 - unterscheiden extern nicht zwischen unbekannt, abgelaufen und bereits konsumiert,
 - schreiben getrennte PII-arme Erzeugungs- und Download-Audits,
-- integrieren verbliebene `.mdse`-Pakete in den irreversiblen Athleten-Scope.
+- integrieren verbliebene `.mdse`-Pakete in den irreversiblen Athleten-Scope,
+- entfernen im normalen Lifecycle nur bereits konsumierte oder abgelaufene Pakete,
+- entfernen die Datei vor der technischen DB-Zeile und pausieren bei aktiver Anonymisierung.

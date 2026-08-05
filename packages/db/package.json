@@ -12,6 +12,7 @@
     "db:push": "drizzle-kit push",
     "db:migrate": "tsx src/migrate.ts",
     "tenant-exports:cleanup": "tsx src/cleanup-tenant-exports.ts",
+    "data-subject-delivery:cleanup": "tsx src/cleanup-data-subject-delivery-packages.ts",
     "retention:scan": "tsx src/run-retention-job.ts"
   },
   "dependencies": {

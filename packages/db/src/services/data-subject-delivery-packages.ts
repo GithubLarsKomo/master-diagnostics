@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, isNotNull, isNull, lte, or } from 'drizzle-orm';
 import type { Database } from '../client';
 import { athleteDataSubjectDeliveryPackages } from '../schema';
 import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
@@ -33,6 +33,15 @@ export interface StoredAthleteDataSubjectDeliveryPackage {
   expiresAt: string;
   downloadedAt: string | null;
   createdAt: string;
+}
+
+export interface AthleteDataSubjectDeliveryCleanupCandidate {
+  id: string;
+  tenantId: string;
+  athleteId: string;
+  storageReference: string;
+  expiresAt: string;
+  downloadedAt: string | null;
 }
 
 function stored(
@@ -174,4 +183,47 @@ export async function consumeAthleteDataSubjectDeliveryPackage(
     });
     return stored(row);
   });
+}
+
+/**
+ * Returns only packages that can no longer be delivered: already consumed or
+ * expired at the supplied instant. Cleanup callers intentionally receive only
+ * the minimal technical fields required to remove storage and metadata.
+ */
+export async function listAthleteDataSubjectDeliveryCleanupCandidates(
+  db: Database,
+  now = new Date().toISOString(),
+): Promise<ReadonlyArray<Readonly<AthleteDataSubjectDeliveryCleanupCandidate>>> {
+  if (!Number.isFinite(Date.parse(now))) throw new Error('Cleanup time must be a valid ISO-8601 timestamp');
+  const rows = await db.select({
+    id: athleteDataSubjectDeliveryPackages.id,
+    tenantId: athleteDataSubjectDeliveryPackages.tenantId,
+    athleteId: athleteDataSubjectDeliveryPackages.athleteId,
+    storageReference: athleteDataSubjectDeliveryPackages.storageReference,
+    expiresAt: athleteDataSubjectDeliveryPackages.expiresAt,
+    downloadedAt: athleteDataSubjectDeliveryPackages.downloadedAt,
+  }).from(athleteDataSubjectDeliveryPackages).where(or(
+    isNotNull(athleteDataSubjectDeliveryPackages.downloadedAt),
+    lte(athleteDataSubjectDeliveryPackages.expiresAt, now),
+  )).orderBy(
+    asc(athleteDataSubjectDeliveryPackages.tenantId),
+    asc(athleteDataSubjectDeliveryPackages.athleteId),
+    asc(athleteDataSubjectDeliveryPackages.expiresAt),
+    asc(athleteDataSubjectDeliveryPackages.id),
+  );
+  return Object.freeze(rows.map((row) => Object.freeze({ ...row })));
+}
+
+export async function removeAthleteDataSubjectDeliveryPackageRecord(
+  db: Database,
+  tenantId: string,
+  athleteId: string,
+  packageId: string,
+): Promise<boolean> {
+  const removed = await db.delete(athleteDataSubjectDeliveryPackages).where(and(
+    eq(athleteDataSubjectDeliveryPackages.id, packageId),
+    eq(athleteDataSubjectDeliveryPackages.tenantId, tenantId),
+    eq(athleteDataSubjectDeliveryPackages.athleteId, athleteId),
+  )).returning({ id: athleteDataSubjectDeliveryPackages.id });
+  return removed.length === 1;
 }

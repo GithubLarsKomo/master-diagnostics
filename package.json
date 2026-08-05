@@ -12,6 +12,8 @@
     "db:generate": "pnpm --filter @masters/db db:generate",
     "db:push": "pnpm --filter @masters/db db:push",
     "db:migrate": "pnpm --filter @masters/db db:migrate",
+    "tenant-exports:cleanup": "pnpm --filter @masters/db tenant-exports:cleanup",
+    "data-subject-delivery:cleanup": "pnpm --filter @masters/db data-subject-delivery:cleanup",
     "retention:scan": "pnpm --filter @masters/db retention:scan"
   },
   "devDependencies": {

@@ -161,7 +161,7 @@
   - [x] versionierte Regeln für Report-, Tenant-Export- und Betroffenenexportartefakte
   - [x] globale Backup-/Notification-Privacy-Verträge versioniert definiert
   - [ ] produktive Backup-/Notification-Capabilities gegen die Verträge attestieren
-- [ ] Betroffenenexport
+- [x] Betroffenenexport
   - [x] versionierten JSON-Vertrag und feste fachliche Datenabschnitte definieren
   - [x] tenant-isolierten read-only Athleten-Source über Profil, Beziehungen, Privacy-, Test-, Diagnostik- und Report-Metadaten implementieren
   - [x] Report-PDFs als externe Artefaktreferenzen inventarisieren
@@ -174,7 +174,7 @@
   - [x] administrative Erzeugung mit Tenant-Admin-Reauthentisierung und Export-Audit implementieren
   - [x] tokenfreien Download-Endpunkt mit atomarem One-Time-Bearer-Consume und Download-Audit implementieren
   - [x] verbliebene `.mdse`-Pakete in Policy 1.6 / irreversiblen Athleten-Scope integrieren
-  - [ ] normalen Lifecycle-Cleanup für konsumierte/abgelaufene `.mdse`-Pakete implementieren
+  - [x] normalen Lifecycle-Cleanup für konsumierte/abgelaufene `.mdse`-Pakete als Maintenance-Befehl implementieren
 - [ ] Löschung/Anonymisierung mit Vorschau
   - [x] vollständige read-only Scope-Preview über Profil, Snapshots, Beziehungsdaten, Diagnostik, Reports, Audit und Exportartefakte
   - [x] versionierte fail-closed Dispositionsregeln für bekannte Scopes

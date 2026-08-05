@@ -135,6 +135,30 @@ async function requireFreshPreStageState(
   return artifactHandles(deps, input.tenantId, execution.id);
 }
 
+async function abortBeforeStaging(
+  deps: AthleteAnonymizationOrchestratorDependencies,
+  input: AthleteAnonymizationExecutionInput,
+  executionId: string,
+  originalError: unknown,
+): Promise<never> {
+  try {
+    await abortAthleteAnonymizationExecution(
+      deps.db,
+      input.tenantId,
+      input.athleteId,
+      executionId,
+      input.actor,
+      (deps.now ?? (() => new Date().toISOString()))(),
+    );
+  } catch (abortError) {
+    throw new AggregateError(
+      [originalError, abortError],
+      'Anonymization pre-stage validation failed and execution abort also failed',
+    );
+  }
+  throw originalError;
+}
+
 async function abortAfterSuccessfulRestore(
   deps: AthleteAnonymizationOrchestratorDependencies,
   input: AthleteAnonymizationExecutionInput,
@@ -226,7 +250,13 @@ export async function executeAthleteAnonymization(
 
   let staged: Readonly<StagedAnonymizationArtifacts>;
   if (execution.status === 'PREPARING') {
-    const handles = await requireFreshPreStageState(deps, input, execution, now());
+    let handles: Readonly<StagedAnonymizationArtifacts>;
+    try {
+      handles = await requireFreshPreStageState(deps, input, execution, now());
+    } catch (preStageError) {
+      return abortBeforeStaging(deps, input, execution.id, preStageError);
+    }
+
     try {
       staged = await stageAnonymizationArtifacts(
         execution.id,
