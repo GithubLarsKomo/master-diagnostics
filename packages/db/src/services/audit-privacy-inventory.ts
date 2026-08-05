@@ -7,7 +7,12 @@ import {
   auditEvents,
 } from '../schema';
 
-export type AuditPrivacyLocation = 'REASON' | 'BEFORE_JSON' | 'AFTER_JSON';
+export type AuditPrivacyLocation =
+  | 'ACTOR_USER_ID'
+  | 'SESSION_ID'
+  | 'REASON'
+  | 'BEFORE_JSON'
+  | 'AFTER_JSON';
 
 export type AuditDirectIdentifierClass =
   | 'ATHLETE_NAME'
@@ -152,6 +157,19 @@ function locationMatch(
     : null;
 }
 
+function actorMatches(
+  location: 'ACTOR_USER_ID' | 'SESSION_ID',
+  event: { actorUserId: string | null; sessionId: string | null },
+  linkedUserId: string | null,
+): Readonly<AuditPrivacyLocationMatch> | null {
+  if (!linkedUserId || event.actorUserId !== linkedUserId) return null;
+  if (location === 'SESSION_ID' && !event.sessionId) return null;
+  return Object.freeze({
+    location,
+    identifierClasses: Object.freeze(['ATHLETE_LINKED_USER'] as const),
+  });
+}
+
 /**
  * Builds a conservative, tenant-scoped and completely read-only inventory of
  * historic audit entries that may still contain known direct identifiers for an
@@ -203,12 +221,14 @@ export async function inventoryAthleteAuditPrivacyMaintenance(
       .select({
         id: auditEvents.id,
         occurredAt: auditEvents.occurredAt,
+        actorUserId: auditEvents.actorUserId,
         action: auditEvents.action,
         entityType: auditEvents.entityType,
         entityId: auditEvents.entityId,
         reason: auditEvents.reason,
         beforeJson: auditEvents.beforeJson,
         afterJson: auditEvents.afterJson,
+        sessionId: auditEvents.sessionId,
       })
       .from(auditEvents)
       .where(eq(auditEvents.tenantId, tenantId))
@@ -230,6 +250,8 @@ export async function inventoryAthleteAuditPrivacyMaintenance(
 
   const candidates = tenantAuditEvents.flatMap((event) => {
     const matches = [
+      actorMatches('ACTOR_USER_ID', event, athlete.linkedUserId),
+      actorMatches('SESSION_ID', event, athlete.linkedUserId),
       locationMatch('REASON', event.reason, matchers),
       locationMatch('BEFORE_JSON', event.beforeJson, matchers),
       locationMatch('AFTER_JSON', event.afterJson, matchers),
