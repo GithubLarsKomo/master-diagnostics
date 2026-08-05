@@ -13,7 +13,10 @@ Die Preview weist getrennt aus:
 - aktuelles Athletenprofil,
 - unveränderliche Athleten-Snapshots,
 - Testplan-Snapshots,
-- Trainerzuordnungen, Einwilligungen, Guardian- und Löschworkflow-Daten,
+- Coach-Zuordnungen,
+- Einwilligungsnachweise,
+- Guardian-Datensätze,
+- Löschworkflow-Datensätze,
 - Test-, Mess-, Qualitäts-, Korrektur-, Schwellen-, Ergebnis-, Interpretations- und Zonen-Daten,
 - persistierte Report-Datensätze samt `storage_reference`,
 - noch offene historische Audit-Privacy-Kandidaten und bereits vorhandene Redaktionsnachweise,
@@ -27,11 +30,16 @@ Die Preview klassifiziert Datenklassen mit einer erforderlichen Behandlung, ohne
 
 - `DIRECT_IDENTIFIER_REDACTION_REQUIRED`
 - `EMBEDDED_IDENTIFIER_REWRITE_REQUIRED`
-- `RELATIONSHIP_DATA_POLICY_REQUIRED`
+- `RELATIONSHIP_LINK_REMOVAL_REQUIRED`
+- `MINIMIZED_COMPLIANCE_RECORD_REQUIRED`
+- `THIRD_PARTY_RECORD_REMOVAL_REQUIRED`
+- `FREE_TEXT_REDACTION_REQUIRED`
 - `REIDENTIFICATION_RISK_REVIEW_REQUIRED`
 - `EXTERNAL_ARTIFACT_HANDLING_REQUIRED`
 - `AUDIT_PRIVACY_REDACTION_REQUIRED`
 - `EPHEMERAL_EXPORT_CLEANUP_REQUIRED`
+
+Die Aufteilung der früher zusammengefassten Beziehungs-/Privacy-Daten verhindert, dass unterschiedliche Datenschutzanforderungen in einer einzigen Sammelentscheidung verborgen werden. Coach-Zuordnungen, Einwilligungsnachweise, Guardian-Daten und Löschworkflow werden deshalb als eigene Scopes ausgewiesen.
 
 Insbesondere `REIDENTIFICATION_RISK_REVIEW_REQUIRED` bedeutet, dass diagnostische Daten nicht allein durch Entfernung von Name und Geburtsdatum automatisch als anonym gelten. Ob solche Daten entfernt, generalisiert oder unter einem nicht rückführbaren technischen Bezug erhalten werden dürfen, bleibt ein eigenes versioniertes Policy-Gate.
 
@@ -47,4 +55,4 @@ Insbesondere `REIDENTIFICATION_RISK_REVIEW_REQUIRED` bedeutet, dass diagnostisch
 
 ## Nächste Gates
 
-Nach dieser Preview müssen die versionierten Regeln für Profil/Snapshots, Report-/Dateiartefakte und verbleibende Diagnostikdaten festgelegt werden. Erst danach kann eine explizite administrative Ausführungsfreigabe und schließlich ein atomarer irreversibler Writer implementiert werden.
+Die Policy v1.1.0 schließt die Beziehungs-/Privacy-Entscheidungen. Offen bleiben die Reidentifikationsentscheidung für Diagnostikdaten, Report-/Datei-/Exportartefakte sowie globale Backup-/Notification-Anforderungen. Erst nach deren versionierter Auflösung kann eine explizite administrative Ausführungsfreigabe und schließlich ein atomarer irreversibler Writer implementiert werden.

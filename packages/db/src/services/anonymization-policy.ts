@@ -5,12 +5,15 @@ import {
   type AthleteAnonymizationPreview,
 } from './anonymization-preview';
 
-export const ANONYMIZATION_POLICY_VERSION = '1.0.0' as const;
+export const ANONYMIZATION_POLICY_VERSION = '1.1.0' as const;
 
 export type AnonymizationPolicyDisposition =
   | 'REDACT_DIRECT_IDENTIFIERS'
   | 'REWRITE_EMBEDDED_IDENTIFIERS'
-  | 'REVIEW_RELATIONSHIP_DATA'
+  | 'REMOVE_COACH_RELATIONSHIPS'
+  | 'PRESERVE_MINIMIZED_CONSENT_RECORDS'
+  | 'REMOVE_GUARDIAN_RECORDS'
+  | 'REDACT_DELETION_REQUEST_FREE_TEXT'
   | 'REVIEW_DIAGNOSTIC_REIDENTIFICATION_RISK'
   | 'VERIFY_AND_HANDLE_EXTERNAL_ARTIFACT'
   | 'USE_CONTROLLED_AUDIT_PRIVACY_PATH'
@@ -35,7 +38,6 @@ export interface AthleteAnonymizationPolicyEvaluation {
   unresolvedScopes: ReadonlyArray<string>;
   blockers: ReadonlyArray<
     | 'ADMINISTRATIVE_APPROVAL_REQUIRED'
-    | 'RELATIONSHIP_POLICY_REVIEW_REQUIRED'
     | 'DIAGNOSTIC_REIDENTIFICATION_REVIEW_REQUIRED'
     | 'EXTERNAL_ARTIFACT_VERIFICATION_REQUIRED'
     | 'GLOBAL_RETENTION_AND_NOTIFICATION_REVIEW_REQUIRED'
@@ -63,9 +65,21 @@ const rules: Readonly<Record<string, Readonly<{
     disposition: 'REWRITE_EMBEDDED_IDENTIFIERS',
     gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
   }),
-  RELATIONSHIP_AND_PRIVACY_RECORDS: Object.freeze({
-    disposition: 'REVIEW_RELATIONSHIP_DATA',
-    gate: 'POLICY_REVIEW_REQUIRED',
+  COACH_ASSIGNMENTS: Object.freeze({
+    disposition: 'REMOVE_COACH_RELATIONSHIPS',
+    gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
+  }),
+  CONSENT_RECORDS: Object.freeze({
+    disposition: 'PRESERVE_MINIMIZED_CONSENT_RECORDS',
+    gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
+  }),
+  GUARDIAN_RECORDS: Object.freeze({
+    disposition: 'REMOVE_GUARDIAN_RECORDS',
+    gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
+  }),
+  DELETION_REQUESTS: Object.freeze({
+    disposition: 'REDACT_DELETION_REQUEST_FREE_TEXT',
+    gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
   }),
   DIAGNOSTIC_AND_OPERATIONAL_RECORDS: Object.freeze({
     disposition: 'REVIEW_DIAGNOSTIC_REIDENTIFICATION_RISK',
@@ -124,9 +138,6 @@ export function evaluateAnonymizationPolicy(
 
   const blockers = new Set<AthleteAnonymizationPolicyEvaluation['blockers'][number]>();
   blockers.add('ADMINISTRATIVE_APPROVAL_REQUIRED');
-  if (unresolvedScopes.includes('RELATIONSHIP_AND_PRIVACY_RECORDS')) {
-    blockers.add('RELATIONSHIP_POLICY_REVIEW_REQUIRED');
-  }
   if (unresolvedScopes.includes('DIAGNOSTIC_AND_OPERATIONAL_RECORDS')) {
     blockers.add('DIAGNOSTIC_REIDENTIFICATION_REVIEW_REQUIRED');
   }
