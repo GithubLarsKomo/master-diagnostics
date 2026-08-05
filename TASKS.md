@@ -146,12 +146,12 @@
   - [x] tenantweite read-only Kandidatenermittlung
   - [x] ausführbarer read-only Retention-Job mit tenantweiser Planung und JSON-Ausgabe
   - [ ] produktive Zeitplanung im Deployment/Betrieb
-- [ ] Lösch-/Anonymisierungsanträge und Aufbewahrungsprüfung
+- [x] Lösch-/Anonymisierungsanträge und Aufbewahrungsprüfung
   - [x] Antrag, Entscheidung und sofortiger Soft-Delete/Nutzungsschutz
   - [x] read-only Aufbewahrungsprüfung für irreversible Verarbeitung
   - [x] Retention-Status in die Löschvorschau integriert
   - [x] read-only Schutzprüfung für Retention, Nutzungssperre, Soft-Delete und abgeschlossenen Löschworkflow
-  - [ ] irreversible Verarbeitung nur nach versionierter Policy und expliziter Freigabe
+  - [x] irreversible Verarbeitung nur nach versionierter Policy und gebundener expliziter Tenant-Admin-Freigabe vorbereitbar
 - [ ] Pseudonymisierung nach Löschung
   - [x] Daten-Scope und Audit-Randbedingungen für irreversible Anonymisierung dokumentiert
   - [x] Audit-Payload-Minimierung für neue Athleten-, Guardian- und Löschereignisse
@@ -170,7 +170,7 @@
   - [x] Report-/Exportartefakt-Policy: Storage-Artefakte und referenzierende Datensätze entfernen
   - [x] Backup-/Notification-Policy in Runtime-Capability-Verträge überführt
   - [ ] Runtime-Capability-Attestation im produktiven Betrieb bereitstellen
-  - [ ] explizite administrative Freigabe
+  - [x] explizite administrative Freigabe als immutable, fingerprintgebundener Vertrag
   - [ ] atomare irreversible Ausführung
 
 ## Epic 11 — Bluetooth-Beta
