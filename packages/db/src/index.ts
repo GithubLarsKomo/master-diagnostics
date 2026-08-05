@@ -10,6 +10,7 @@ export * from './services/athlete-context';
 export * from './services/consents';
 export * from './services/guardians';
 export * from './services/deletion-requests';
+export * from './services/retention';
 export * from './services/test-plans';
 export * from './services/test-safety';
 export * from './services/test-lifecycle';
