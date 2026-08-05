@@ -45,7 +45,7 @@ describe('athlete deletion requests', () => {
   let db: Database;
   beforeEach(async () => { db = await createTestDatabase(); });
 
-  it('keeps preview and lifecycle tenant scoped', async () => {
+  it('keeps preview and lifecycle tenant scoped with PII-minimized audit payloads', async () => {
     await seedAthlete(db, 'tenant-a', 'athlete-a');
     const preview = await previewAthleteDeletion(db, 'tenant-a', 'athlete-a');
     expect(preview.strategy).toBe('SOFT_DELETE_AND_RETAIN_AUDIT');
@@ -71,6 +71,35 @@ describe('athlete deletion requests', () => {
     ]);
     expect(events.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
     expect(events.every((event) => event.sessionId === 'session-deletion-a')).toBe(true);
+
+    const payloads = events
+      .flatMap((event) => [event.beforeJson, event.afterJson])
+      .filter((value): value is string => value !== null)
+      .join('\n');
+    expect(payloads).not.toContain('Petra');
+    expect(payloads).not.toContain('Muster');
+    expect(payloads).not.toContain('1995-01-01');
+    expect(payloads).not.toContain('Betroffenenantrag');
+    expect(payloads).not.toContain('Identität geprüft');
+    expect(payloads).not.toContain('Aufbewahrungspflichten geprüft');
+
+    expect(events.map((event) => event.reason)).toEqual([
+      'Betroffenenantrag',
+      'Identität geprüft',
+      'Aufbewahrungspflichten geprüft',
+    ]);
+    expect(JSON.parse(events[0]!.afterJson!)).toMatchObject({
+      auditSchemaVersion: 2,
+      athleteId: 'athlete-a',
+      status: 'REQUESTED',
+    });
+    expect(JSON.parse(events[2]!.beforeJson!)).toMatchObject({
+      auditSchemaVersion: 2,
+      id: 'athlete-a',
+      linkedUserAttached: false,
+      deletedAt: null,
+    });
+    expect(JSON.parse(events[2]!.afterJson!).deletedAt).toBeTruthy();
   });
 
   it('unblocks the athlete after a rejected request', async () => {
