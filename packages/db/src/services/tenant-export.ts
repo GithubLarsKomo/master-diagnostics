@@ -26,6 +26,7 @@ export const TENANT_PORTABILITY_TABLES = [
   'zone_profiles',
   'report_versions',
   'audit_events',
+  'audit_event_privacy_redactions',
 ] as const;
 
 export type TenantPortabilityTable = (typeof TENANT_PORTABILITY_TABLES)[number];

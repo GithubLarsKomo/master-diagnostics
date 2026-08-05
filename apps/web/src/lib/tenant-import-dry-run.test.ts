@@ -6,7 +6,7 @@ function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function fixture() {
+function fixture(schemaVersion = 'masters-tenant-export-v2') {
   const tenant = { id: 'tenant-source', name: 'Source Club' };
   const users = [{ id: 'user-1', display_name: 'Admin' }];
   const memberships = [{ id: 'membership-1', tenant_id: 'tenant-source', user_id: 'user-1' }];
@@ -25,9 +25,9 @@ function fixture() {
   }]));
 
   return {
-    schemaVersion: 'masters-tenant-export-v1',
+    schemaVersion,
     manifest: {
-      schemaVersion: 'masters-tenant-export-v1',
+      schemaVersion,
       exportedAt: '2026-08-03T08:00:00.000Z',
       tenantId: 'tenant-source',
       sections,
@@ -49,7 +49,7 @@ function fixture() {
 }
 
 describe('tenant import dry-run', () => {
-  it('accepts a structurally intact export and returns a write-free preview', () => {
+  it('accepts the current v2 export contract and returns a write-free preview', () => {
     const preview = validateTenantImportDryRun(fixture());
     expect(preview.valid).toBe(true);
     expect(preview.sourceTenantId).toBe('tenant-source');
@@ -57,6 +57,23 @@ describe('tenant import dry-run', () => {
     expect(preview.reportArtifacts).toBe(1);
     expect(preview.totalRows).toBe(4);
     expect(preview.issues).toEqual([]);
+  });
+
+  it('keeps legacy v1 exports importable', () => {
+    const preview = validateTenantImportDryRun(fixture('masters-tenant-export-v1'));
+    expect(preview.valid).toBe(true);
+    expect(preview.issues).toEqual([]);
+  });
+
+  it('rejects an unknown version and a document/manifest version mismatch', () => {
+    const unsupported = fixture('masters-tenant-export-v3');
+    expect(validateTenantImportDryRun(unsupported).issues.map((entry) => entry.code))
+      .toContain('UNSUPPORTED_SCHEMA_VERSION');
+
+    const mismatch = fixture();
+    mismatch.manifest.schemaVersion = 'masters-tenant-export-v1';
+    expect(validateTenantImportDryRun(mismatch).issues.map((entry) => entry.code))
+      .toContain('MANIFEST_SCHEMA_VERSION_MISMATCH');
   });
 
   it('detects tampered section content and row counts', () => {
@@ -80,7 +97,7 @@ describe('tenant import dry-run', () => {
 
   it('fails closed on a structurally incomplete manifest instead of throwing', () => {
     const document = fixture() as unknown as Record<string, unknown>;
-    document.manifest = { schemaVersion: 'masters-tenant-export-v1' };
+    document.manifest = { schemaVersion: 'masters-tenant-export-v2' };
     const preview = validateTenantImportDryRun(document);
     expect(preview.valid).toBe(false);
     expect(preview.sourceTenantId).toBeNull();
