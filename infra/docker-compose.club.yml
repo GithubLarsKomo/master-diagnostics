@@ -53,7 +53,7 @@ services:
     environment:
       DATABASE_URL: http://libsql:8080
       RETENTION_JOB_OUTPUT: summary
-    command: ["sh", "-c", "set -e; while true; do pnpm --filter @masters/db retention:scan; sleep 86400; done"]
+    command: ["sh", "-c", "set -e; while true; do pnpm --silent --filter @masters/db retention:scan; sleep 86400; done"]
     depends_on:
       migrate:
         condition: service_completed_successfully
