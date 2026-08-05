@@ -12,6 +12,28 @@ import { appendAuditEvent, auditActorFields, type AuditActorContext } from './au
 
 export type DeletionActor = AuditActorContext;
 
+function deletionRequestAuditState(
+  request: typeof athleteDeletionRequests.$inferSelect | typeof athleteDeletionRequests.$inferInsert,
+) {
+  return {
+    id: request.id,
+    athleteId: request.athleteId,
+    status: request.status,
+    requestedAt: request.requestedAt,
+    decidedAt: request.decidedAt ?? null,
+    completedAt: request.completedAt ?? null,
+  };
+}
+
+function athleteDeletionAuditState(athlete: typeof athletes.$inferSelect) {
+  return {
+    athleteId: athlete.id,
+    usageBlockedAt: athlete.consentBlockedAt,
+    deletedAt: athlete.deletedAt,
+    linkedToUser: athlete.linkedUserId !== null,
+  };
+}
+
 async function requireAthlete(db: Database, tenantId: string, athleteId: string) {
   const [athlete] = await db.select().from(athletes).where(and(
     eq(athletes.id, athleteId),
@@ -85,8 +107,7 @@ export async function requestAthleteDeletion(
       entityType: 'athlete_deletion_request',
       entityId: request.id,
       source: 'WEB',
-      reason: normalizedReason,
-      after: request,
+      after: deletionRequestAuditState(request),
       occurredAt: now,
     });
   });
@@ -111,6 +132,12 @@ export async function decideAthleteDeletion(
   )).limit(1);
   if (!request) throw new Error('Open deletion request not found');
   const now = new Date().toISOString();
+  const decidedRequest = {
+    ...request,
+    status: decision,
+    decidedAt: now,
+    decisionReason: normalizedReason,
+  };
   await db.transaction(async (tx) => {
     await tx.update(athleteDeletionRequests).set({ status: decision, decidedAt: now, decisionReason: normalizedReason, updatedAt: now })
       .where(eq(athleteDeletionRequests.id, requestId));
@@ -124,9 +151,8 @@ export async function decideAthleteDeletion(
       entityType: 'athlete_deletion_request',
       entityId: requestId,
       source: 'WEB',
-      reason: normalizedReason,
-      before: request,
-      after: { ...request, status: decision, decidedAt: now, decisionReason: normalizedReason },
+      before: deletionRequestAuditState(request),
+      after: deletionRequestAuditState(decidedRequest),
       occurredAt: now,
     });
   });
@@ -162,8 +188,14 @@ export async function completeAthleteDeletion(
       entityId: athleteId,
       source: 'WEB',
       reason: normalizedReason,
-      before: athlete,
-      after: { id: athleteId, deletedAt: now, retainedAudit: true },
+      before: athleteDeletionAuditState(athlete),
+      after: {
+        athleteId,
+        usageBlockedAt: now,
+        deletedAt: now,
+        linkedToUser: athlete.linkedUserId !== null,
+        retainedAudit: true,
+      },
       occurredAt: now,
     });
   });
