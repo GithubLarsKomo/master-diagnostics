@@ -144,7 +144,8 @@
 - [ ] Aufbewahrungsjob 1–10 Jahre
   - [x] deterministische Fristberechnung und tenantgebundene Athletenbewertung
   - [x] tenantweite read-only Kandidatenermittlung
-  - [ ] geplanter Retention-Job
+  - [x] ausführbarer read-only Retention-Job mit tenantweiser Planung und JSON-Ausgabe
+  - [ ] produktive Zeitplanung im Deployment/Betrieb
 - [ ] Lösch-/Anonymisierungsanträge und Aufbewahrungsprüfung
   - [x] Antrag, Entscheidung und sofortiger Soft-Delete/Nutzungsschutz
   - [x] read-only Aufbewahrungsprüfung für irreversible Verarbeitung

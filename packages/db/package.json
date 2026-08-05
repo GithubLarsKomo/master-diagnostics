@@ -11,7 +11,8 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:migrate": "tsx src/migrate.ts",
-    "tenant-exports:cleanup": "tsx src/cleanup-tenant-exports.ts"
+    "tenant-exports:cleanup": "tsx src/cleanup-tenant-exports.ts",
+    "retention:scan": "tsx src/run-retention-job.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
