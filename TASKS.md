@@ -160,7 +160,8 @@
   - [x] versionierte Regeln für Profil, Snapshots, Beziehungs-/Privacy- und Diagnostikdaten
   - [x] versionierte Regeln für Report-, Tenant-Export- und Betroffenenexportartefakte
   - [x] globale Backup-/Notification-Privacy-Verträge versioniert definiert
-  - [ ] produktive Backup-/Notification-Capabilities gegen die Verträge attestieren
+  - [x] fail-closed Runtime-Attestation und Club-Deployment-Gate bereitgestellt
+  - [ ] bei produktiver Aktivierung von Backup/Notifications die realen Capabilities gegen die Verträge attestieren
 - [x] Betroffenenexport
   - [x] versionierten JSON-Vertrag und feste fachliche Datenabschnitte definieren
   - [x] tenant-isolierten read-only Athleten-Source über Profil, Beziehungen, Privacy-, Test-, Diagnostik- und Report-Metadaten implementieren
@@ -182,7 +183,7 @@
   - [x] Diagnostik-Policy: detaillierte individuelle Diagnostik-/Verlaufsdaten nach Retention entfernen
   - [x] Report-/Exportartefakt-Policy: Report-, Tenant-Export- und Betroffenenexport-Storage-Artefakte und referenzierende Datensätze entfernen
   - [x] Backup-/Notification-Policy in Runtime-Capability-Verträge überführt
-  - [ ] Runtime-Capability-Attestation im produktiven Betrieb bereitstellen
+  - [x] Runtime-Capability-Attestation im Club-Deployment als Start-Gate bereitgestellt
   - [x] explizite administrative Freigabe als immutable, fingerprintgebundener Vertrag
   - [x] atomare irreversible Ausführung mit Dateisystem-Quarantäne und `DB_COMMITTED`-Recovery
 
