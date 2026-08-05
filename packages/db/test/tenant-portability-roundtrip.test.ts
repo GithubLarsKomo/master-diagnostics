@@ -2,7 +2,10 @@ import { createClient } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import { describe, expect, it } from 'vitest';
-import type { TenantPortabilityExportDocument } from '@masters/domain';
+import {
+  TENANT_EXPORT_SCHEMA_VERSION,
+  type TenantPortabilityExportDocument,
+} from '@masters/domain';
 import type { Database } from '../src/client';
 import * as schema from '../src/schema';
 import { getTenantPortabilityExportSource, type PortableRow } from '../src/services/tenant-export';
@@ -31,7 +34,7 @@ function withoutImportAudit(rows: readonly PortableRow[]): PortableRow[] {
 }
 
 describe('tenant portability roundtrip', () => {
-  it('preserves exported domain data across export, import, and re-export while remapping technical ids', async () => {
+  it('preserves exported domain data and audit-redaction proof while remapping technical ids', async () => {
     const sourceDb = await createTestDatabase('source');
     const targetDb = await createTestDatabase('target');
     const createdAt = '2026-05-01T10:00:00.000Z';
@@ -55,19 +58,30 @@ describe('tenant portability roundtrip', () => {
       primarySport: 'ROWING', primaryDiscipline: 'SINGLE', trainingStatus: 'TRAINED', createdAt, updatedAt,
     });
     await sourceDb.insert(schema.auditEvents).values({
-      id: 'audit-source', tenantId: 'tenant-source', occurredAt: createdAt, actorUserId: 'user-source',
+      id: 'audit-source', tenantId: 'tenant-source', occurredAt: createdAt, actorUserId: null,
       actorRole: 'TENANT_ADMIN', action: 'roundtrip.fixture.created', entityType: 'athlete', entityId: 'athlete-source',
-      source: 'TEST', correlationId: 'corr-source', createdAt, updatedAt,
+      source: 'TEST', correlationId: 'corr-source', reason: '[REDACTED]',
+      beforeJson: '{"auditSchemaVersion":3,"privacyRedacted":true}',
+      afterJson: '{"auditSchemaVersion":3,"privacyRedacted":true}', createdAt, updatedAt,
+    });
+    await sourceDb.insert(schema.auditEventPrivacyRedactions).values({
+      id: 'redaction-source', tenantId: 'tenant-source', auditEventId: 'audit-source',
+      subjectAthleteId: 'athlete-source', redactionVersion: 1,
+      redactActorUserId: true, redactSessionId: false, redactReason: true,
+      redactBeforeJson: true, redactAfterJson: true, requestedByUserId: 'user-source',
+      maintenanceReference: 'PRIVACY/ROUNDTRIP-1', redactedAt: updatedAt,
+      createdAt: updatedAt, updatedAt,
     });
 
     const exported = await getTenantPortabilityExportSource(sourceDb, 'tenant-source');
     expect(exported).not.toBeNull();
     if (!exported) throw new Error('source export unavailable');
+    expect(exported.tables.audit_event_privacy_redactions).toHaveLength(1);
 
     const document: TenantPortabilityExportDocument = {
-      schemaVersion: 'masters-tenant-export-v1',
+      schemaVersion: TENANT_EXPORT_SCHEMA_VERSION,
       manifest: {
-        schemaVersion: 'masters-tenant-export-v1',
+        schemaVersion: TENANT_EXPORT_SCHEMA_VERSION,
         exportedAt: '2026-08-03T15:00:00.000Z',
         tenantId: 'tenant-source',
         sections: {},
@@ -91,10 +105,8 @@ describe('tenant portability roundtrip', () => {
     if (!reExported) throw new Error('target export unavailable');
 
     const inverseIdMap = Object.fromEntries(Object.entries(plan.idMap).map(([sourceId, targetId]) => [targetId, sourceId]));
-
-    const normalizedTenant = normalizeRow(reExported.tenant, inverseIdMap, plan.sourceTenantId);
-    expect(normalizedTenant).toEqual({ ...exported.tenant, slug: 'restored-club' });
-
+    expect(normalizeRow(reExported.tenant, inverseIdMap, plan.sourceTenantId))
+      .toEqual({ ...exported.tenant, slug: 'restored-club' });
     expect(reExported.users.map((row) => normalizeRow(row, inverseIdMap, plan.sourceTenantId))).toEqual(exported.users);
     expect(reExported.memberships.map((row) => normalizeRow(row, inverseIdMap, plan.sourceTenantId))).toEqual(exported.memberships);
 
@@ -102,10 +114,8 @@ describe('tenant portability roundtrip', () => {
       const targetRows = tableName === 'audit_events'
         ? withoutImportAudit(reExported.tables.audit_events)
         : reExported.tables[tableName as keyof typeof reExported.tables];
-      expect(
-        targetRows.map((row) => normalizeRow(row, inverseIdMap, plan.sourceTenantId)),
-        tableName,
-      ).toEqual(sourceRows);
+      expect(targetRows.map((row) => normalizeRow(row, inverseIdMap, plan.sourceTenantId)), tableName)
+        .toEqual(sourceRows);
     }
 
     expect(reExported.dataDictionary).toEqual(exported.dataDictionary);
