@@ -45,18 +45,18 @@ describe('athlete deletion requests', () => {
   let db: Database;
   beforeEach(async () => { db = await createTestDatabase(); });
 
-  it('keeps preview and lifecycle tenant scoped', async () => {
+  it('keeps preview and lifecycle tenant scoped with minimized audit payloads', async () => {
     await seedAthlete(db, 'tenant-a', 'athlete-a');
     const preview = await previewAthleteDeletion(db, 'tenant-a', 'athlete-a');
     expect(preview.strategy).toBe('SOFT_DELETE_AND_RETAIN_AUDIT');
     await expect(previewAthleteDeletion(db, 'tenant-b', 'athlete-a')).rejects.toThrow('Athlete not found');
 
-    const request = await requestAthleteDeletion(db, 'tenant-a', 'athlete-a', actor, 'Betroffenenantrag');
+    const request = await requestAthleteDeletion(db, 'tenant-a', 'athlete-a', actor, 'Betroffenenantrag von Petra Muster');
     const [blocked] = await db.select().from(schema.athletes);
     expect(blocked?.consentBlockedAt).toBeTruthy();
     await expect(requestAthleteDeletion(db, 'tenant-a', 'athlete-a', actor, 'Doppelter Antrag')).rejects.toThrow('already exists');
 
-    await decideAthleteDeletion(db, 'tenant-a', 'athlete-a', request.id, actor, 'APPROVED', 'Identität geprüft');
+    await decideAthleteDeletion(db, 'tenant-a', 'athlete-a', request.id, actor, 'APPROVED', 'Identität Petra Muster geprüft');
     await completeAthleteDeletion(db, 'tenant-a', 'athlete-a', request.id, actor, 'Aufbewahrungspflichten geprüft');
 
     const [athlete] = await db.select().from(schema.athletes);
@@ -71,6 +71,45 @@ describe('athlete deletion requests', () => {
     ]);
     expect(events.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
     expect(events.every((event) => event.sessionId === 'session-deletion-a')).toBe(true);
+
+    expect(events[0]?.reason).toBeNull();
+    expect(events[1]?.reason).toBeNull();
+    expect(events[2]?.reason).toBe('Aufbewahrungspflichten geprüft');
+    expect(JSON.parse(events[0]!.afterJson!)).toMatchObject({
+      id: request.id,
+      athleteId: 'athlete-a',
+      status: 'REQUESTED',
+    });
+    expect(JSON.parse(events[1]!.beforeJson!)).toMatchObject({
+      id: request.id,
+      athleteId: 'athlete-a',
+      status: 'REQUESTED',
+    });
+    expect(JSON.parse(events[1]!.afterJson!)).toMatchObject({
+      id: request.id,
+      athleteId: 'athlete-a',
+      status: 'APPROVED',
+    });
+    expect(JSON.parse(events[2]!.beforeJson!)).toMatchObject({
+      athleteId: 'athlete-a',
+      usageBlockedAt: expect.any(String),
+      deletedAt: null,
+      linkedToUser: false,
+    });
+    expect(JSON.parse(events[2]!.afterJson!)).toMatchObject({
+      athleteId: 'athlete-a',
+      usageBlockedAt: expect.any(String),
+      deletedAt: expect.any(String),
+      linkedToUser: false,
+      retainedAudit: true,
+    });
+
+    const immutableAuditPayload = JSON.stringify(events);
+    expect(immutableAuditPayload).not.toContain('Petra');
+    expect(immutableAuditPayload).not.toContain('Muster');
+    expect(immutableAuditPayload).not.toContain('1995-01-01');
+    expect(immutableAuditPayload).not.toContain('Betroffenenantrag von Petra Muster');
+    expect(immutableAuditPayload).not.toContain('Identität Petra Muster geprüft');
   });
 
   it('unblocks the athlete after a rejected request', async () => {
@@ -86,5 +125,6 @@ describe('athlete deletion requests', () => {
     ]);
     expect(events.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
     expect(events.every((event) => event.sessionId === 'session-deletion-a')).toBe(true);
+    expect(events.every((event) => event.reason === null)).toBe(true);
   });
 });
