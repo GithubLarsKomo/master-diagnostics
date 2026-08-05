@@ -92,19 +92,65 @@ Stattdessen gilt:
 - der ursprüngliche Freitext erscheint weder in der Auslieferungsprojektion noch im Review-Metadatensatz,
 - `readyForDelivery` ist `false`, solange mindestens ein solcher Review-Punkt offen ist.
 
-Damit kann kein unreviewter Freitext versehentlich in ein späteres Betroffenenpaket gelangen. Eine spätere administrative Review-/Freigabestufe muss explizit entscheiden, welcher Inhalt übernommen, ersetzt oder dauerhaft redigiert wird.
+Damit kann kein unreviewter Freitext versehentlich in ein späteres Betroffenenpaket gelangen.
 
-### Noch keine Auslieferung
+## Administrative Review-/Freigabe
 
-Die Delivery-Projection selbst:
+Migration `0019_data_subject_delivery_approvals` und `approveAthleteDataSubjectDeliveryReview()` führen einen separaten, unveränderlichen Freigabevertrag ein. Die Freigabe ist noch **keine** Auslieferung; sie autorisiert ausschließlich, welche der aktuell inventarisierten Freitextfelder in einem späteren reviewed Delivery-Snapshot übernommen oder redigiert werden dürfen.
 
-- erzeugt kein Downloadpaket,
-- liest keine Report-PDFs,
-- schreibt keinen Export-Audit,
-- speichert keine Review-Entscheidung,
-- mutiert den internen Source nicht.
+Zulässige Entscheidungen je Review-Punkt:
 
-Sie ist ausschließlich die sichere Eingabe für den nächsten administrativen Review-/Approval-Schritt.
+- `INCLUDE_ORIGINAL`
+- `REDACT`
+
+Für jede aktuelle Review-Position muss exakt eine Entscheidung vorhanden sein. Fehlende, doppelte oder zusätzliche Entscheidungen werden fail-closed abgewiesen.
+
+### PII-armer Approval-Datensatz
+
+`athlete_data_subject_delivery_approvals` speichert ausschließlich:
+
+- Tenant- und technische Athlete-ID,
+- Approval-Version,
+- Source-Schema-Version und Delivery-Policy-Version,
+- Prüfzeitpunkt,
+- SHA-256-Source-Fingerprint,
+- SHA-256-Decision-Fingerprint,
+- Section, Row-ID, Feld und Entscheidung je Review-Punkt,
+- freigebenden Tenant-Admin und Zeitstempel.
+
+Der geprüfte Freitext selbst wird **nicht** in der Approval und nicht im Approval-Audit gespeichert. `INCLUDE_ORIGINAL` bedeutet daher nur, dass ein späterer Paketierungsschritt den dann noch aktuellen Rohwert nach erneuter Validierung übernehmen darf.
+
+### Fingerprint-Bindung und Drift
+
+Der Source-Fingerprint bindet:
+
+- die vollständigen aktuellen fachlichen Source-Daten,
+- Report-Artefaktreferenzen,
+- Source-Schema- und Delivery-Policy-Version,
+- automatische Drittpersonen-Redaktionen,
+- das vollständige aktuelle Review-Item-Set.
+
+Der Decision-Fingerprint bindet die normalisierte Entscheidungsliste. Jede Änderung des fachlichen Source, des Review-Scopes oder der Vertragsversion macht eine bestehende Freigabe für die spätere Paketierung ungültig.
+
+`validateAthleteDataSubjectDeliveryApproval()` revalidiert diese Bindung gegen den aktuellen Source. Eine Approval darf nur weiterverwendet werden, wenn `validForDeliveryPackaging=true` und keine Blocker vorliegen.
+
+### Immutability und Idempotenz
+
+- Approval-UPDATE und -DELETE werden DB-seitig per Trigger blockiert.
+- Derselbe Tenant-Admin erhält bei identischem Source-/Decision-Scope idempotent dieselbe Approval zurück; es entsteht kein zweites Audit-Ereignis.
+- Ein zweiter Tenant-Admin kann denselben Scope unabhängig freigeben.
+- Das Audit `athlete.data_subject_delivery_review_approved` enthält nur Versionen, Fingerprints und technische Zähler, keinen Roh-Freitext oder Guardian-Kontaktdaten.
+
+## Noch keine Auslieferung
+
+Source, Delivery-Projection und Review-Approval zusammen:
+
+- erzeugen noch kein Downloadpaket,
+- lesen noch keine Report-PDF-Dateiinhalte,
+- schreiben noch keinen finalen Export-/Download-Audit,
+- veröffentlichen keine Web- oder Download-Route.
+
+Der nächste Schritt ist eine deterministische reviewed Delivery-Projection, die eine frisch validierte Approval auf den aktuellen Source anwendet. Erst danach folgen PDF-Integrität/Paketierung und die tatsächliche auditierte Auslieferung.
 
 ## Sicherheitsinvarianten
 
@@ -124,3 +170,12 @@ Sie ist ausschließlich die sichere Eingabe für den nächsten administrativen R
 - lässt keine ungeprüften nichtleeren Freitexte in der Projektion,
 - erzeugt keine Review-Metadaten mit Roh-PII,
 - bleibt ohne Review-Punkte nur dann `readyForDelivery`, wenn keine bekannten Delivery-Blocker vorliegen.
+
+`approveAthleteDataSubjectDeliveryReview()` und die Approval-Validierung:
+
+- akzeptieren ausschließlich Tenant-Admins für neue Freigaben,
+- speichern keinen Roh-Freitext,
+- binden Entscheidungen kryptografisch an den aktuellen Source-/Policy-Scope,
+- sind pro Reviewer idempotent,
+- bleiben DB-seitig immutable,
+- invalidieren bei Source-/Review-/Vertragsdrift fail-closed.
