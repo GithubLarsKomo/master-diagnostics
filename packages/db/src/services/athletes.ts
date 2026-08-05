@@ -17,6 +17,18 @@ export interface AthleteInput {
 
 export type AthleteActor = AuditActorContext;
 
+const athleteInputFields = [
+  'firstName',
+  'lastName',
+  'birthDate',
+  'referenceCategory',
+  'heightCm',
+  'currentWeightKgX100',
+  'primarySport',
+  'primaryDiscipline',
+  'trainingStatus',
+] as const satisfies ReadonlyArray<keyof AthleteInput>;
+
 function normalizeInput(input: AthleteInput): AthleteInput {
   const normalized = {
     ...input,
@@ -45,6 +57,16 @@ function normalizeInput(input: AthleteInput): AthleteInput {
   }
 
   return normalized;
+}
+
+function changedAthleteFields(
+  before: typeof athletes.$inferSelect,
+  after: AthleteInput,
+): string[] {
+  return athleteInputFields
+    .filter((field) => before[field] !== after[field])
+    .slice()
+    .sort();
 }
 
 export async function listAthletes(db: Database, tenantId: string) {
@@ -96,7 +118,10 @@ export async function createAthlete(
       entityId: athleteId,
       source: 'WEB',
       correlationId,
-      after: values,
+      after: {
+        state: 'CREATED',
+        fields: [...athleteInputFields].sort(),
+      },
     });
   });
 
@@ -114,6 +139,7 @@ export async function updateAthlete(
   if (!before) throw new Error('Athlete not found');
 
   const values = normalizeInput(input);
+  const changedFields = changedAthleteFields(before, values);
   const now = new Date().toISOString();
   const correlationId = crypto.randomUUID();
 
@@ -132,8 +158,14 @@ export async function updateAthlete(
       entityId: athleteId,
       source: 'WEB',
       correlationId,
-      before,
-      after: values,
+      before: {
+        state: 'EXISTING',
+        changedFields,
+      },
+      after: {
+        state: 'UPDATED',
+        changedFields,
+      },
     });
   });
 
