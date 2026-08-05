@@ -2,6 +2,11 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../client';
 import { athletes } from '../schema';
 import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
+import {
+  allAthleteMutableFields,
+  changedAthleteFields,
+  projectAthleteForAudit,
+} from './audit-projections';
 
 export interface AthleteInput {
   firstName: string;
@@ -16,18 +21,6 @@ export interface AthleteInput {
 }
 
 export type AthleteActor = AuditActorContext;
-
-const athleteInputFields = [
-  'firstName',
-  'lastName',
-  'birthDate',
-  'referenceCategory',
-  'heightCm',
-  'currentWeightKgX100',
-  'primarySport',
-  'primaryDiscipline',
-  'trainingStatus',
-] as const satisfies ReadonlyArray<keyof AthleteInput>;
 
 function normalizeInput(input: AthleteInput): AthleteInput {
   const normalized = {
@@ -57,16 +50,6 @@ function normalizeInput(input: AthleteInput): AthleteInput {
   }
 
   return normalized;
-}
-
-function changedAthleteFields(
-  before: typeof athletes.$inferSelect,
-  after: AthleteInput,
-): string[] {
-  return athleteInputFields
-    .filter((field) => before[field] !== after[field])
-    .slice()
-    .sort();
 }
 
 export async function listAthletes(db: Database, tenantId: string) {
@@ -119,8 +102,8 @@ export async function createAthlete(
       source: 'WEB',
       correlationId,
       after: {
-        state: 'CREATED',
-        fields: [...athleteInputFields].sort(),
+        ...projectAthleteForAudit(values),
+        changedFields: allAthleteMutableFields(),
       },
     });
   });
@@ -159,11 +142,11 @@ export async function updateAthlete(
       source: 'WEB',
       correlationId,
       before: {
-        state: 'EXISTING',
+        ...projectAthleteForAudit(before),
         changedFields,
       },
       after: {
-        state: 'UPDATED',
+        ...projectAthleteForAudit(values),
         changedFields,
       },
     });
