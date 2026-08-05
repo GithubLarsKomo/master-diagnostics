@@ -13,6 +13,7 @@
     "db:migrate": "tsx src/migrate.ts",
     "tenant-exports:cleanup": "tsx src/cleanup-tenant-exports.ts",
     "data-subject-delivery:cleanup": "tsx src/cleanup-data-subject-delivery-packages.ts",
+    "privacy-capabilities:check": "tsx src/check-global-privacy-capabilities.ts",
     "retention:scan": "tsx src/run-retention-job.ts"
   },
   "dependencies": {
