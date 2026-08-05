@@ -12,7 +12,7 @@ import {
   type Database,
   type GlobalPrivacyCapabilities,
 } from '@masters/db';
-import * as schema from '@masters/db/schema';
+import * as schema from '@masters/db';
 import {
   FileSystemReportArtifactStorage,
   type QuarantinableReportArtifactStorage,
