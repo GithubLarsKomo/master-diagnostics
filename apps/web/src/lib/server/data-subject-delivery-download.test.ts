@@ -41,7 +41,7 @@ const baseCreatedAt = '2020-01-01T00:00:00.000Z';
 const packageCreatedAt = '2026-08-05T21:05:00.000Z';
 const reportReference = 'tenant-a/test-a/de/report-a.pdf';
 const actor = {
-  userId: 'admin-a', role: 'TENANT_ADMIN', authProvider: 'BETTER_AUTH' as const,
+  userId: 'admin-a', role: 'TENANT_ADMIN' as const, authProvider: 'BETTER_AUTH' as const,
   sessionId: 'admin-session-a',
 };
 
@@ -93,14 +93,19 @@ async function setup(ttlMs?: number) {
   const approval = await approveAthleteDataSubjectDeliveryReview(
     db, 'tenant-a', 'athlete-a', actor, [], '2026-08-05T21:00:00.000Z',
   );
+  const input = {
+    tenantId: 'tenant-a',
+    athleteId: 'athlete-a',
+    approvalId: approval.id,
+    actor,
+    ...(ttlMs === undefined ? {} : { ttlMs }),
+  };
   const created = await createDataSubjectDeliveryPackage({
     db,
     reportStorage,
     packageStorage,
     now: () => packageCreatedAt,
-  }, {
-    tenantId: 'tenant-a', athleteId: 'athlete-a', approvalId: approval.id, actor, ttlMs,
-  });
+  }, input);
   return { db, packageStorage, created };
 }
 
@@ -180,7 +185,8 @@ describe('one-time data subject delivery download', () => {
     const { db, packageStorage, created } = await setup();
     const encrypted = await packageStorage.get(created.record.storageReference);
     const tampered = new Uint8Array(encrypted);
-    tampered[tampered.length - 1] ^= 0x01;
+    const lastIndex = tampered.length - 1;
+    tampered[lastIndex] = (tampered[lastIndex] ?? 0) ^ 0x01;
     await packageStorage.remove(created.record.storageReference);
     await packageStorage.put(created.record.storageReference, tampered);
 
