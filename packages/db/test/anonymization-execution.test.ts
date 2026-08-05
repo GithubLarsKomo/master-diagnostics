@@ -8,6 +8,7 @@ import * as schema from '../src/schema';
 import { approveAthleteAnonymization } from '../src/services/anonymization-approval';
 import {
   getAthleteAnonymizationExecution,
+  listAthleteAnonymizationExecutionArtifacts,
   prepareAthleteAnonymizationExecution,
 } from '../src/services/anonymization-execution';
 import type { GlobalPrivacyCapabilities } from '../src/services/global-privacy-policy';
@@ -51,6 +52,27 @@ async function seedReadyAthlete(db: Database) {
   });
 }
 
+async function seedExternalArtifactReferences(db: Database) {
+  const createdAt = '2020-01-01T12:00:00.000Z';
+  await db.insert(schema.interpretations).values({
+    id: 'interpretation-a', tenantId: 'tenant-a', testId: 'test-a', versionNumber: 1,
+    lt1Json: '{}', lt2Json: '{}', rationale: null, status: 'RELEASED',
+    releasedAt: createdAt, releasedByUserId: 'trainer-a', createdAt, updatedAt: createdAt,
+  });
+  await db.insert(schema.reportVersions).values({
+    id: 'report-a', tenantId: 'tenant-a', testId: 'test-a', interpretationId: 'interpretation-a',
+    versionNumber: 1, locale: 'de', contentHash: `sha256:${'a'.repeat(64)}`,
+    storageReference: 'tenant-a/test-a/de/report.pdf', createdAt, updatedAt: createdAt,
+  });
+  await db.insert(schema.tenantExportPackages).values({
+    id: 'export-a', tenantId: 'tenant-a', tokenHash: `sha256:${'b'.repeat(64)}`,
+    storageReference: '01234567-89ab-cdef-0123-456789abcdef.mde',
+    packageSha256: `sha256:${'c'.repeat(64)}`, createdByUserId: 'admin-a',
+    expiresAt: '2027-01-01T00:00:00.000Z', downloadedAt: null,
+    createdAt, updatedAt: createdAt,
+  });
+}
+
 const adminActor = {
   userId: 'admin-a',
   role: 'TENANT_ADMIN',
@@ -64,9 +86,10 @@ const disabledCapabilities: GlobalPrivacyCapabilities = {
 };
 
 describe('athlete anonymization execution contract', () => {
-  it('prepares exactly one PII-free durable execution per fresh approval', async () => {
+  it('prepares exactly one PII-free durable execution and persists its artifact manifest', async () => {
     const db = await createTestDatabase();
     await seedReadyAthlete(db);
+    await seedExternalArtifactReferences(db);
     const approval = await approveAthleteAnonymization(
       db, 'tenant-a', 'athlete-a', adminActor, disabledCapabilities, '2026-08-05T13:00:00.000Z',
     );
@@ -86,14 +109,30 @@ describe('athlete anonymization execution contract', () => {
       executionVersion: 1, status: 'PREPARING', preparedByUserId: 'admin-a',
       artifactsStagedAt: null, dbCommittedAt: null, completedAt: null, abortedAt: null,
     });
-    expect(await getAthleteAnonymizationExecution(db, 'tenant-a', 'athlete-a', first.id))
-      .toEqual(first);
+
+    const manifest = await listAthleteAnonymizationExecutionArtifacts(db, 'tenant-a', first.id);
+    expect(manifest.map(({ kind, storageReference }) => ({ kind, storageReference }))).toEqual([
+      { kind: 'REPORT', storageReference: 'tenant-a/test-a/de/report.pdf' },
+      { kind: 'TENANT_EXPORT', storageReference: '01234567-89ab-cdef-0123-456789abcdef.mde' },
+    ]);
+
+    await db.delete(schema.reportVersions).where(eq(schema.reportVersions.id, 'report-a'));
+    await db.delete(schema.tenantExportPackages).where(eq(schema.tenantExportPackages.id, 'export-a'));
+    expect((await listAthleteAnonymizationExecutionArtifacts(db, 'tenant-a', first.id))).toEqual(manifest);
+
+    await expect(db.update(schema.athleteAnonymizationExecutionArtifacts).set({
+      storageReference: 'changed.pdf', updatedAt: '2099-01-01T00:00:00.000Z',
+    }).where(eq(schema.athleteAnonymizationExecutionArtifacts.executionId, first.id))).rejects.toThrow();
+    await expect(db.delete(schema.athleteAnonymizationExecutionArtifacts)
+      .where(eq(schema.athleteAnonymizationExecutionArtifacts.executionId, first.id))).rejects.toThrow();
 
     const auditRows = await db.select().from(schema.auditEvents)
       .where(eq(schema.auditEvents.action, 'athlete.anonymization_execution_prepared'));
     expect(auditRows).toHaveLength(1);
     expect(auditRows[0]).toMatchObject({ entityId: first.id });
     expect(auditRows[0]?.afterJson).toContain(approval.id);
+    expect(auditRows[0]?.afterJson).toContain('"reportArtifactCount":1');
+    expect(auditRows[0]?.afterJson).toContain('"tenantExportArtifactCount":1');
     expect(auditRows[0]?.afterJson).not.toContain('Petra');
     expect(auditRows[0]?.afterJson).not.toContain('Muster');
   });
