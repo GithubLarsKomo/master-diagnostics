@@ -90,6 +90,20 @@ export async function getAthleteAnonymizationExecution(
   return row ? stored(row) : null;
 }
 
+export async function getAthleteAnonymizationExecutionByApproval(
+  db: Database,
+  tenantId: string,
+  athleteId: string,
+  approvalId: string,
+): Promise<Readonly<StoredAthleteAnonymizationExecution> | null> {
+  const [row] = await db.select().from(athleteAnonymizationExecutions).where(and(
+    eq(athleteAnonymizationExecutions.approvalId, approvalId),
+    eq(athleteAnonymizationExecutions.tenantId, tenantId),
+    eq(athleteAnonymizationExecutions.athleteId, athleteId),
+  )).limit(1);
+  return row ? stored(row) : null;
+}
+
 export async function listAthleteAnonymizationExecutionArtifacts(
   db: Database,
   tenantId: string,
@@ -221,8 +235,6 @@ export async function completeAthleteAnonymizationExecution(
 /**
  * Creates the durable preparation record and its immutable external-artifact
  * manifest for one approved irreversible run. This is still non-destructive.
- * The manifest survives deletion of the source report/export rows so a process
- * restart after DB_COMMITTED can deterministically resume quarantine purge.
  */
 export async function prepareAthleteAnonymizationExecution(
   db: Database,
@@ -237,12 +249,7 @@ export async function prepareAthleteAnonymizationExecution(
   if (!Number.isFinite(Date.parse(preparedAt))) throw new Error('Preparation time must be a valid ISO-8601 timestamp');
 
   const validation = await validateAthleteAnonymizationApproval(
-    db,
-    tenantId,
-    athleteId,
-    approvalId,
-    globalCapabilities,
-    preparedAt,
+    db, tenantId, athleteId, approvalId, globalCapabilities, preparedAt,
   );
   if (!validation.validForExecutionPreparation) {
     throw new Error(`Anonymization approval is not valid for execution preparation: ${validation.blockers.join(', ')}`);
@@ -259,11 +266,7 @@ export async function prepareAthleteAnonymizationExecution(
   }
 
   const policyPreview = await getAthleteAnonymizationPolicyPreview(
-    db,
-    tenantId,
-    athleteId,
-    preparedAt,
-    globalCapabilities,
+    db, tenantId, athleteId, preparedAt, globalCapabilities,
   );
   if (!policyPreview.globalPrivacy.readyForIrreversibleProcessing
     || policyPreview.policy.unresolvedScopes.length > 0
@@ -272,20 +275,11 @@ export async function prepareAthleteAnonymizationExecution(
   }
 
   const row = {
-    id: crypto.randomUUID(),
-    tenantId,
-    athleteId,
-    approvalId,
-    executionVersion: ANONYMIZATION_EXECUTION_VERSION,
-    status: 'PREPARING' as const,
-    preparedByUserId: actor.userId,
-    preparedAt,
-    artifactsStagedAt: null,
-    dbCommittedAt: null,
-    completedAt: null,
-    abortedAt: null,
-    createdAt: preparedAt,
-    updatedAt: preparedAt,
+    id: crypto.randomUUID(), tenantId, athleteId, approvalId,
+    executionVersion: ANONYMIZATION_EXECUTION_VERSION, status: 'PREPARING' as const,
+    preparedByUserId: actor.userId, preparedAt, artifactsStagedAt: null,
+    dbCommittedAt: null, completedAt: null, abortedAt: null,
+    createdAt: preparedAt, updatedAt: preparedAt,
   };
 
   const manifest = [
