@@ -150,8 +150,12 @@
   - [x] Antrag, Entscheidung und sofortiger Soft-Delete/Nutzungsschutz
   - [x] read-only Aufbewahrungsprüfung für irreversible Verarbeitung
   - [x] Retention-Status in die Löschvorschau integriert
+  - [x] read-only Freigabe-/Schutzplan inkl. Audit-Identifikator-Inventar
   - [ ] irreversible Verarbeitung nur nach Ablauf und expliziter Freigabe
 - [ ] Pseudonymisierung nach Löschung
+  - [x] SPEC-konforme Audit-Pseudonymisierungsgrenze dokumentiert
+  - [ ] kontrollierten DB-Pfad für monotone Audit-Pseudonymisierung implementieren
+  - [ ] explizite irreversible Freigabe und atomaren Pseudonymisierungswriter implementieren
 - [ ] Betroffenenexport
 - [ ] Löschung/Anonymisierung mit Vorschau
 
