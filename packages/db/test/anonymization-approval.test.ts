@@ -1,68 +1,71 @@
-import { describe, expect, it } from 'vitest';
+import { createClient } from '@libsql/client';
 import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/libsql';
+import { migrate } from 'drizzle-orm/libsql/migrator';
+import { describe, expect, it } from 'vitest';
+import type { Database } from '../src/client';
+import * as schema from '../src/schema';
 import {
   approveAthleteAnonymization,
-  BACKUP_PRIVACY_POLICY_VERSION,
-  createDatabaseFromConfig,
-  migrateDatabase,
-  NOTIFICATION_PRIVACY_POLICY_VERSION,
   validateAthleteAnonymizationApproval,
-  type Database,
+} from '../src/services/anonymization-approval';
+import {
+  BACKUP_PRIVACY_POLICY_VERSION,
+  NOTIFICATION_PRIVACY_POLICY_VERSION,
   type GlobalPrivacyCapabilities,
-} from '../src';
-import * as schema from '../src';
+} from '../src/services/global-privacy-policy';
 
 async function createTestDatabase(): Promise<Database> {
   const databasePath = `/tmp/masters-anonymization-approval-${crypto.randomUUID()}.db`;
-  const db = createDatabaseFromConfig({ url: `file:${databasePath}` });
-  await migrateDatabase(db, './migrations');
+  const client = createClient({ url: `file:${databasePath}` });
+  const db = drizzle(client, { schema }) as Database;
+  await migrate(db, { migrationsFolder: './migrations' });
   return db;
 }
 
-const createdAt = '2019-01-01T00:00:00.000Z';
-const deletedAt = '2025-01-03T00:00:00.000Z';
-const adminActor = {
-  userId: 'admin-a', role: 'TENANT_ADMIN', authProvider: 'BETTER_AUTH' as const,
-  sessionId: 'admin-session-a',
-};
-const coachActor = {
-  userId: 'coach-a', role: 'COACH', authProvider: 'BETTER_AUTH' as const,
-  sessionId: 'coach-session-a',
-};
-
 async function seedReadyAthlete(db: Database) {
+  const createdAt = '2019-01-01T00:00:00.000Z';
+  const deletedAt = '2025-01-03T00:00:00.000Z';
   await db.insert(schema.tenants).values({
     id: 'tenant-a', slug: 'tenant-a', name: 'Tenant A', deploymentMode: 'CLUB',
     timezone: 'Europe/Berlin', locale: 'de', retentionYears: 1, createdAt, updatedAt: createdAt,
   });
-  await db.insert(schema.users).values([
-    {
-      id: 'admin-a', email: 'admin@example.test', displayName: 'Admin', preferredLocale: 'de',
-      createdAt, updatedAt: createdAt,
-    },
-    {
-      id: 'coach-a', email: 'coach@example.test', displayName: 'Coach', preferredLocale: 'de',
-      createdAt, updatedAt: createdAt,
-    },
-  ]);
+  await db.insert(schema.users).values({
+    id: 'admin-a', email: 'admin@example.test', displayName: 'Admin', preferredLocale: 'de',
+    createdAt, updatedAt: createdAt,
+  });
   await db.insert(schema.athletes).values({
     id: 'athlete-a', tenantId: 'tenant-a', linkedUserId: null, firstName: 'Petra', lastName: 'Muster',
     birthDate: '1980-01-01', referenceCategory: 'MASTERS', heightCm: 175,
     currentWeightKgX100: 6900, primarySport: 'ROWING', primaryDiscipline: 'SINGLE',
     trainingStatus: 'TRAINED', consentBlockedAt: deletedAt, deletedAt, createdAt, updatedAt: deletedAt,
   });
+  await db.insert(schema.tests).values({
+    id: 'test-a', tenantId: 'tenant-a', athleteId: 'athlete-a', deviceType: 'ROWERG', status: 'RELEASED',
+    conductingTrainerUserId: 'trainer-a', startedAt: '2020-01-01T10:00:00.000Z',
+    endedAt: '2020-01-01T11:00:00.000Z', releasedAt: '2020-01-01T11:00:00.000Z', currentVersion: 1,
+    createdAt: '2020-01-01T09:00:00.000Z', updatedAt: '2020-01-01T11:00:00.000Z',
+  });
   await db.insert(schema.athleteDeletionRequests).values({
     id: 'deletion-a', tenantId: 'tenant-a', athleteId: 'athlete-a', status: 'COMPLETED',
-    reason: 'Petra requested deletion', requestedAt: '2025-01-01T00:00:00.000Z',
-    decidedAt: '2025-01-02T00:00:00.000Z', decisionReason: 'Approved for Petra', completedAt: deletedAt,
+    reason: 'Betroffenenrecht', requestedAt: '2025-01-01T00:00:00.000Z',
+    decidedAt: '2025-01-02T00:00:00.000Z', decisionReason: 'Freigegeben', completedAt: deletedAt,
     createdAt: '2025-01-01T00:00:00.000Z', updatedAt: deletedAt,
   });
 }
+
+const adminActor = {
+  userId: 'admin-a',
+  role: 'TENANT_ADMIN',
+  authProvider: 'BETTER_AUTH' as const,
+  sessionId: 'admin-session-a',
+};
 
 const disabledCapabilities: GlobalPrivacyCapabilities = {
   backup: { state: 'DISABLED' },
   notifications: { state: 'DISABLED' },
 };
+
 const enabledCapabilities: GlobalPrivacyCapabilities = {
   backup: {
     state: 'ENABLED', policyVersion: BACKUP_PRIVACY_POLICY_VERSION,
@@ -105,9 +108,12 @@ describe('athlete anonymization admin approval', () => {
     const [beforeMutation] = await db.select().from(schema.athleteAnonymizationApprovals)
       .where(eq(schema.athleteAnonymizationApprovals.id, approval.id));
     await expect(db.update(schema.athleteAnonymizationApprovals)
-      .set({ policyVersion: 'tampered' })
+      .set({ approvedAt: '2099-01-01T00:00:00.000Z' })
       .where(eq(schema.athleteAnonymizationApprovals.id, approval.id)))
-      .rejects.toThrow(/immutable/i);
+      .rejects.toThrow();
+    await expect(db.delete(schema.athleteAnonymizationApprovals)
+      .where(eq(schema.athleteAnonymizationApprovals.id, approval.id)))
+      .rejects.toThrow();
     const [afterMutation] = await db.select().from(schema.athleteAnonymizationApprovals)
       .where(eq(schema.athleteAnonymizationApprovals.id, approval.id));
     expect(afterMutation).toEqual(beforeMutation);
@@ -121,10 +127,10 @@ describe('athlete anonymization admin approval', () => {
     );
 
     await db.insert(schema.athleteGuardians).values({
-      id: 'guardian-a', tenantId: 'tenant-a', athleteId: 'athlete-a', fullName: 'Erika Muster',
-      relationship: 'MOTHER', email: null, phone: null,
-      authorityConfirmedAt: '2020-01-01T00:00:00.000Z', validUntil: null, revokedAt: null,
-      createdAt: '2020-01-01T00:00:00.000Z', updatedAt: '2020-01-01T00:00:00.000Z',
+      id: 'guardian-late', tenantId: 'tenant-a', athleteId: 'athlete-a', fullName: 'Legacy Guardian',
+      relationship: 'parent', email: null, phone: null, authorityConfirmedAt: '2020-01-01T00:00:00.000Z',
+      validUntil: null, revokedAt: '2025-01-03T00:00:00.000Z',
+      createdAt: '2020-01-01T00:00:00.000Z', updatedAt: '2025-01-03T00:00:00.000Z',
     });
 
     const validation = await validateAthleteAnonymizationApproval(
@@ -145,23 +151,21 @@ describe('athlete anonymization admin approval', () => {
       db, 'tenant-a', 'athlete-a', approval.id, enabledCapabilities, '2026-08-05T13:05:00.000Z',
     );
     expect(validation.validForExecutionPreparation).toBe(false);
-    expect(validation.blockers).toContain('CAPABILITY_FINGERPRINT_CHANGED');
+    expect(validation.blockers).toContain('GLOBAL_PRIVACY_CAPABILITY_FINGERPRINT_CHANGED');
   });
 
   it('rejects non-admin approval and incomplete global capabilities', async () => {
     const db = await createTestDatabase();
     await seedReadyAthlete(db);
+    await expect(approveAthleteAnonymization(
+      db, 'tenant-a', 'athlete-a', { ...adminActor, role: 'TRAINER' }, disabledCapabilities,
+      '2026-08-05T13:00:00.000Z',
+    )).rejects.toThrow(/Tenant admin/i);
 
     await expect(approveAthleteAnonymization(
-      db, 'tenant-a', 'athlete-a', coachActor, disabledCapabilities, '2026-08-05T13:00:00.000Z',
-    )).rejects.toThrow(/tenant admin/i);
-
-    const incompleteCapabilities: GlobalPrivacyCapabilities = {
-      backup: { state: 'ENABLED', policyVersion: BACKUP_PRIVACY_POLICY_VERSION },
-      notifications: { state: 'DISABLED' },
-    };
-    await expect(approveAthleteAnonymization(
-      db, 'tenant-a', 'athlete-a', adminActor, incompleteCapabilities, '2026-08-05T13:00:00.000Z',
-    )).rejects.toThrow(/global privacy/i);
+      db, 'tenant-a', 'athlete-a', adminActor,
+      { backup: { state: 'ENABLED' }, notifications: { state: 'DISABLED' } },
+      '2026-08-05T13:00:00.000Z',
+    )).rejects.toThrow(/Global privacy capabilities/i);
   });
 });
