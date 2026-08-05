@@ -106,3 +106,15 @@ export const athleteAnonymizationExecutions = sqliteTable('athlete_anonymization
 }, (t) => [
   uniqueIndex('athlete_anonymization_execution_approval_uq').on(t.approvalId),
 ]);
+
+export const athleteAnonymizationExecutionArtifacts = sqliteTable('athlete_anonymization_execution_artifacts', {
+  id: id(),
+  tenantId: tenantId(),
+  executionId: text('execution_id').notNull().references(() => athleteAnonymizationExecutions.id),
+  kind: text('kind', { enum: ['REPORT', 'TENANT_EXPORT'] }).notNull(),
+  storageReference: text('storage_reference').notNull(),
+  ...timestamps,
+}, (t) => [
+  uniqueIndex('athlete_anonymization_execution_artifact_uq')
+    .on(t.executionId, t.kind, t.storageReference),
+]);
