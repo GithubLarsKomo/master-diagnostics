@@ -18,7 +18,7 @@ CREATE TABLE `athlete_data_subject_delivery_approvals` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `athlete_data_subject_delivery_approval_scope_uq`
-ON `athlete_data_subject_delivery_approvals` (`tenant_id`,`athlete_id`,`source_fingerprint`,`decisions_fingerprint`);
+ON `athlete_data_subject_delivery_approvals` (`tenant_id`,`athlete_id`,`source_fingerprint`,`decisions_fingerprint`,`approved_by_user_id`);
 --> statement-breakpoint
 CREATE TRIGGER athlete_data_subject_delivery_approvals_validate_insert
 BEFORE INSERT ON athlete_data_subject_delivery_approvals
