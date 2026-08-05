@@ -32,7 +32,7 @@ Der read-only Source umfasst:
 - Tests
 - Testplan-Snapshots
 - Sicherheitsbestätigungen und Abbruchereignisse
-- Stufen-, Ruhe- und Erholungsmessung
+- Stufen-, Ruhe- und Erholungsmessungen
 - Qualitätskennzeichen und Messwertkorrekturen
 - automatische Schwellenläufe und Ergebnisse
 - diagnostische Ergebnis-Snapshots
