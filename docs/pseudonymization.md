@@ -75,29 +75,48 @@ Deshalb benötigt der Writer eine explizite Entscheidung zwischen:
 
 ## Audit-Anforderungen
 
-SPEC §33 fordert ein append-only Audit-Log und koppelt die Audit-Aufbewahrung an die Fachdaten, mindestens für drei Jahre. Gleichzeitig können historische Audit-Payloads in `before_json` und `after_json` direkte Athletenstammdaten enthalten, beispielsweise bei Anlage oder Änderung eines Athleten.
+SPEC §33 fordert ein append-only Audit-Log und koppelt die Audit-Aufbewahrung an die Fachdaten, mindestens für drei Jahre. Gleichzeitig können historische Audit-Payloads in `before_json`, `after_json` und freien Begründungen direkte Athleten- oder Guardian-Identifikatoren enthalten.
 
 Daraus folgt eine eigene Schutzanforderung:
 
-1. **Append-only bleibt unverändert.** Ein Anonymisierungs-Writer darf Audit-Ereignisse nicht still überschreiben oder löschen.
-2. **Neue Audit-Payloads werden minimiert.** Direkte Identifikatoren werden nicht mehr automatisch in Athleten- und Löschpayloads kopiert.
-3. **Historische identifierhaltige Audit-Payloads benötigen eine definierte Retention-/Migrationsstrategie**, bevor ein produktiver irreversibler Writer freigegeben wird.
+1. **Append-only bleibt im normalen Auditpfad unverändert.** Ein Anonymisierungs-Writer darf Audit-Ereignisse nicht still überschreiben oder löschen.
+2. **Neue Audit-Payloads werden minimiert.** Direkte Identifikatoren werden nicht mehr automatisch in Athleten-, Guardian- und Löschpayloads kopiert.
+3. **Historische identifierhaltige Audit-Payloads benötigen einen eng begrenzten Privacy-Maintenance-Pfad**, bevor ein produktiver irreversibler Writer freigegeben wird.
 4. Die spätere irreversible Aktion selbst muss als eigenes Audit-Ereignis mit Tenant, Actor, Zeitpunkt, Policy-/Strategieversion, Freigabereferenz, betroffener Entität und Ergebnis protokolliert werden, ohne die entfernten direkten Identifikatoren erneut in den Audit-Payload zu kopieren.
 
 Der row-level Precheck bewertet diese globale Audit-Policy bewusst nicht. Dadurch bleibt die fachliche Datenzustandsprüfung deterministisch, während die Writer-Freigabe zusätzlich eine versionierte globale Policy verlangen kann.
 
 ### Audit-Payload-Minimierung ab Schema-Version 2
 
-Für neu erzeugte Athleten- und Löschereignisse gilt:
+Für neu erzeugte Ereignisse gilt:
 
 - `firstName`, `lastName` und `birthDate` werden im Athlete-Audit nur als `[REDACTED]` gespeichert.
 - Fachlich relevante Nicht-Direktidentifikatoren wie Referenzkategorie, Körpermaße, Sportart, Disziplin und Trainingsstatus bleiben als alter/neuer Zustand auditierbar.
 - `changedFields` hält auch Änderungen an redigierten Direktidentifikatoren nachvollziehbar, ohne deren Werte zu persistieren.
+- Guardian-Name, E-Mail und Telefonnummer werden in strukturierten Guardian-Audit-Payloads redigiert; Beziehung und Lifecycle-Zustand bleiben nachvollziehbar.
 - `linkedUserId` wird in Löschpayloads nicht gespeichert; es wird nur festgehalten, ob eine Verknüpfung vorhanden war.
-- Gründe von Löschantrag, Entscheidung und Abschluss werden ausschließlich im dafür vorgesehenen Audit-Feld `reason` gehalten und nicht zusätzlich in `before_json`/`after_json` dupliziert.
+- Gründe von Löschantrag, Entscheidung, Abschluss und Guardian-Widerruf bleiben im dafür vorgesehenen Audit-Feld `reason` und werden nicht zusätzlich in `before_json`/`after_json` dupliziert.
 - Technische `athleteId`-/Request-IDs bleiben als pseudonyme Referenzen erhalten, damit der Audit-Trail fachlich zuordenbar bleibt.
 
-Diese Änderung wirkt nur für neue Audit-Ereignisse. Bereits vorhandene Zeilen werden wegen der append-only Semantik nicht still verändert. Der Umgang mit historischem Altbestand bleibt ein explizites separates Gate.
+Diese Änderungen wirken nur für neue Audit-Ereignisse. Bereits vorhandene Zeilen werden wegen der append-only Semantik nicht still verändert.
+
+## Read-only Inventar des historischen Audit-Altbestands
+
+`inventoryAthleteAuditPrivacyMaintenance()` ermittelt tenantgebunden und vollständig read-only, welche bestehenden Audit-Ereignisse noch bekannte direkte Identifikatoren eines Athleten oder seiner Guardian-Daten enthalten können.
+
+Die Identifikatorbasis umfasst:
+
+- aktuellen Vor- und Nachnamen, Geburtsdatum und verknüpfte User-ID,
+- frühere Namen/Identifikatoren aus `athlete_snapshots.snapshot_json`,
+- Guardian-Name, E-Mail und Telefonnummer.
+
+Gescannt werden ausschließlich Audit-Ereignisse des angeforderten Tenants. Das Ergebnis enthält **keine gefundenen personenbezogenen Werte**, sondern nur:
+
+- Audit-Event-ID, Zeitpunkt, Aktion und Entität,
+- Fundstelle `REASON`, `BEFORE_JSON` oder `AFTER_JSON`,
+- abstrakte Identifikator-Klassen wie `ATHLETE_NAME`, `ATHLETE_BIRTH_DATE` oder `GUARDIAN_CONTACT`.
+
+Damit kann ein späterer Privacy-Maintenance-Pfad deterministisch planen, welche Audit-Zeilen geprüft bzw. pseudonymisiert werden müssen, ohne bereits beim Preview erneut PII auszugeben. Das Inventar ist bewusst konservativ/high-recall: Treffer sind Kandidaten für die spätere Policy, keine automatische Redaktionsfreigabe.
 
 ## Writer-Gates vor Implementierung
 
@@ -107,8 +126,9 @@ Ein produktiver Writer darf erst folgen, wenn mindestens diese Punkte geschlosse
 - [x] identifierhaltige Datenklassen und Artefakte inventarisiert
 - [x] Audit-Randbedingungen dokumentiert
 - [ ] versioniertes Anonymisierungs-/Entfernungs-Schema je Datenklasse festgelegt
-- [x] Audit-Payload-Minimierung für neue Athleten- und Löschereignisse umgesetzt
-- [ ] Umgang mit bestehenden identifierhaltigen Audit-Payloads festgelegt
+- [x] Audit-Payload-Minimierung für neue Athleten-, Guardian- und Löschereignisse umgesetzt
+- [x] read-only Kandidateninventar für identifierhaltigen Audit-Altbestand
+- [ ] kontrollierte, versionierte Privacy-Maintenance-Policy für den Audit-Altbestand
 - [ ] Bericht-/Datei-Artefakte in Preview und Ausführung einbezogen
 - [ ] Reidentifikationsrisiko für verbleibende Diagnostikdaten bewertet
 - [ ] Dry-Run/Preview mit vollständiger Maßnahmenliste implementiert
@@ -117,4 +137,4 @@ Ein produktiver Writer darf erst folgen, wenn mindestens diese Punkte geschlosse
 
 ## Nächster technischer Slice
 
-Als nächstes muss für bereits vorhandene identifierhaltige Audit-Payloads eine mit SPEC §33.3 und der append-only Semantik vereinbare Altbestand-Strategie festgelegt werden. Danach kann aus dem Precheck eine vollständige Anonymisierungs-Preview über Profil, Snapshots, Berichte/Dateiartefakte und verbleibende Diagnostikdaten abgeleitet werden.
+Als nächstes wird auf Basis des read-only Inventars der **kontrollierte Privacy-Maintenance-Vertrag** definiert: zulässige Redaktionen je Audit-Feld, Policy-Version, Autorisierung, unveränderliche Nachweis-Metadaten und atomare Fehlerstrategie. Erst danach darf ein schreibender Altbestandspfad entstehen.
