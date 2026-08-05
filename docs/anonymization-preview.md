@@ -22,7 +22,7 @@ Die Preview weist getrennt aus:
 - noch offene historische Audit-Privacy-Kandidaten und bereits vorhandene Redaktionsnachweise,
 - aktive Tenant-Exportpakete als mögliche noch erreichbare identifierhaltige Artefakte.
 
-Zusätzlich werden globale Anforderungen ausgewiesen: Report-Storage-Verifikation, Backup-Retention und Notification-Payload-Prüfung. Policy v1.3 kann den Report-Storage-Hinweis durch eine explizite Löschdisposition auflösen; Backup und Notifications bleiben globale Review-Gates.
+Zusätzlich werden globale Anforderungen ausgewiesen: Report-Storage-Verifikation, Backup-Retention und Notification-Payload-Prüfung. Die Policy übersetzt diese Hinweise in konkrete Dispositionen bzw. versionierte Runtime-Capability-Verträge.
 
 ## Dispositions statt vorweggenommener Löschregeln
 
@@ -41,7 +41,9 @@ Die Preview klassifiziert Datenklassen mit einer erforderlichen Behandlung, ohne
 
 Policy v1.2 löst das Diagnostik-Risiko konservativ durch spätere Löschung detaillierter individueller Diagnostik-/Verlaufsdaten und historischer Snapshots auf.
 
-Policy v1.3 löst zusätzlich die externen row-level Artefakte auf: Report-PDF und zugehörige Report-Datenbankzeile werden gemeinsam entfernt; aktive vollständige Tenant-Exportpakete werden vor der irreversiblen Verarbeitung tenantweit entfernt. Die Preview liefert hierfür weiterhin die konkreten Storage-Referenzen, ohne selbst Dateien oder Daten zu verändern.
+Policy v1.3 löst zusätzlich die externen row-level Artefakte auf: Report-PDF und zugehörige Report-Datenbankzeile werden gemeinsam entfernt; aktive vollständige Tenant-Exportpakete werden vor der irreversiblen Verarbeitung tenantweit entfernt.
+
+Policy v1.4 übersetzt die globalen Backup-/Notification-Hinweise in `BACKUP_PRIVACY_POLICY_V1` und `NOTIFICATION_PRIVACY_POLICY_V1`. Ob diese Verträge im konkreten Betrieb erfüllt sind, wird nicht aus der Preview geraten, sondern über `evaluateGlobalPrivacyCapabilities()` explizit attestiert. Fehlende Angaben bleiben blockierend.
 
 ## Sicherheitsgrenzen
 
@@ -51,8 +53,9 @@ Policy v1.3 löst zusätzlich die externen row-level Artefakte auf: Report-PDF u
 - keine Datei-Löschung oder Veränderung von `storage_reference`,
 - keine Audit-Redaktion; dafür bleibt ausschließlich der kontrollierte Privacy-Maintenance-Pfad zuständig,
 - keine automatische Verarbeitung aktiver Exportpakete,
+- keine implizite Annahme, dass nicht deklarierte Backup-/Notification-Funktionen deaktiviert sind,
 - `passesIrreversiblePrecheck = true` ist weiterhin nur eine notwendige Vorbedingung.
 
 ## Nächste Gates
 
-Mit Policy v1.3 sind alle derzeit bekannten row-level Scopes versioniert entschieden. Offen bleiben ausschließlich die globalen Backup-/Notification-Anforderungen und anschließend die explizite administrative Ausführungsfreigabe. Erst danach darf ein atomarer irreversibler Writer implementiert werden.
+Mit Policy v1.4 sind alle derzeit bekannten row-level und globalen Datenschutzregeln versioniert definiert. Vor einer Ausführung müssen die benötigten globalen Capabilities zur Laufzeit erfolgreich attestiert werden. Danach bleibt als eigener nächster Fachslice die explizite administrative Ausführungsfreigabe; erst anschließend darf ein atomarer irreversibler Writer implementiert werden.
