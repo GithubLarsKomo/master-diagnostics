@@ -119,12 +119,22 @@ function randomToken(): string {
   return Buffer.from(bytes).toString('base64url');
 }
 
+export async function hashDataSubjectDeliveryToken(token: string): Promise<string> {
+  return sha256(new TextEncoder().encode(token));
+}
+
 async function deriveEncryptionKey(token: string): Promise<CryptoKey> {
   const material = await globalThis.crypto.subtle.digest(
     'SHA-256',
     new TextEncoder().encode(`masters-data-subject-package-key-v1\u0000${token}`),
   );
-  return globalThis.crypto.subtle.importKey('raw', material, 'AES-GCM', false, ['encrypt']);
+  return globalThis.crypto.subtle.importKey('raw', material, 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+
+function packageAdditionalData(packageId: string, manifestFingerprint: string): Uint8Array {
+  return new TextEncoder().encode(
+    `masters-data-subject-package-v1\u0000${packageId}\u0000${manifestFingerprint}`,
+  );
 }
 
 async function encryptArchive(
@@ -135,15 +145,36 @@ async function encryptArchive(
 ): Promise<Uint8Array> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await deriveEncryptionKey(token);
-  const additionalData = new TextEncoder().encode(
-    `masters-data-subject-package-v1\u0000${packageId}\u0000${manifestFingerprint}`,
-  );
   const ciphertext = new Uint8Array(await globalThis.crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv, additionalData },
+    { name: 'AES-GCM', iv, additionalData: packageAdditionalData(packageId, manifestFingerprint) },
     key,
     archive,
   ));
   return concat([new TextEncoder().encode('MDS1'), iv, ciphertext]);
+}
+
+export async function decryptDataSubjectDeliveryArchive(
+  encrypted: Uint8Array,
+  token: string,
+  packageId: string,
+  manifestFingerprint: string,
+): Promise<Uint8Array> {
+  if (encrypted.byteLength < 32) throw new Error('Encrypted data subject package is truncated');
+  if (new TextDecoder().decode(encrypted.slice(0, 4)) !== 'MDS1') {
+    throw new Error('Unsupported encrypted data subject package format');
+  }
+  const iv = encrypted.slice(4, 16);
+  const ciphertext = encrypted.slice(16);
+  const key = await deriveEncryptionKey(token);
+  try {
+    return new Uint8Array(await globalThis.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv, additionalData: packageAdditionalData(packageId, manifestFingerprint) },
+      key,
+      ciphertext,
+    ));
+  } catch {
+    throw new Error('Data subject package authentication failed');
+  }
 }
 
 /**
@@ -176,7 +207,7 @@ export async function createDataSubjectDeliveryPackage(
   const archive = buildDeterministicDataSubjectTar(prepared.manifestJson, prepared.files);
   const packageId = crypto.randomUUID();
   const token = randomToken();
-  const tokenHash = await sha256(new TextEncoder().encode(token));
+  const tokenHash = await hashDataSubjectDeliveryToken(token);
   const encrypted = await encryptArchive(
     archive,
     token,
