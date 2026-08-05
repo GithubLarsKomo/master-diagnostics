@@ -53,16 +53,38 @@ describe('guardian workflow', () => {
       .rejects.toThrow('Active guardian required');
   });
 
-  it('does not require a guardian for an adult and audits lifecycle events', async () => {
+  it('does not require a guardian for an adult and audits lifecycle events without contact identifiers', async () => {
     await seedAthlete(db, 'tenant-a', 'athlete-adult', '1990-05-01');
     await expect(assertGuardianRequirement(db, 'tenant-a', 'athlete-adult', new Date('2026-07-29T00:00:00Z'))).resolves.toBeUndefined();
     const guardian = await registerGuardian(db, 'tenant-a', 'athlete-adult', actor, {
-      fullName: 'Max Muster', relationship: 'Bevollmächtigter',
+      fullName: 'Max Muster', relationship: 'Bevollmächtigter', email: 'max@example.test', phone: '+49 1234',
     });
     await revokeGuardian(db, 'tenant-a', 'athlete-adult', guardian.id, actor, 'Vollmacht beendet');
     const events = await db.select().from(schema.auditEvents);
     expect(events.map((event) => event.action)).toEqual(['guardian.registered', 'guardian.revoked']);
     expect(events.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
     expect(events.every((event) => event.sessionId === 'session-guardian-a')).toBe(true);
+
+    const registered = JSON.parse(events[0]!.afterJson!);
+    expect(registered).toMatchObject({
+      athleteId: 'athlete-adult',
+      relationship: 'Bevollmächtigter',
+      hasEmail: true,
+      hasPhone: true,
+      revokedAt: null,
+    });
+    const revokedBefore = JSON.parse(events[1]!.beforeJson!);
+    const revokedAfter = JSON.parse(events[1]!.afterJson!);
+    expect(revokedBefore).toMatchObject({ athleteId: 'athlete-adult', revokedAt: null });
+    expect(revokedAfter).toMatchObject({ athleteId: 'athlete-adult' });
+    expect(revokedAfter.revokedAt).toBeTruthy();
+
+    const structuredPayloads = JSON.stringify(events.map((event) => ({
+      beforeJson: event.beforeJson,
+      afterJson: event.afterJson,
+    })));
+    expect(structuredPayloads).not.toContain('Max Muster');
+    expect(structuredPayloads).not.toContain('max@example.test');
+    expect(structuredPayloads).not.toContain('+49 1234');
   });
 });
