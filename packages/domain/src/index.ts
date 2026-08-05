@@ -17,6 +17,7 @@ export * from './analysis-export';
 export * from './reidentification-risk';
 export * from './tenant-export';
 export * from './data-subject-export';
+export * from './data-subject-delivery';
 export * from './retention';
 
 export * from './authorization';
