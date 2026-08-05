@@ -158,9 +158,10 @@ export async function applyHistoricalAuditPrivacyRedactionInTransaction(
 /**
  * Applies the one-way SPEC §33.3 privacy transformation to one historical
  * athlete-related audit event previously identified by the read-only privacy
- * inventory. This standalone service keeps its existing precheck and inventory
- * semantics; the irreversible athlete writer reuses the transaction-safe helper
- * above so audit maintenance and fachdata mutation commit together.
+ * inventory. This standalone service keeps its existing precheck, duplicate
+ * detection and inventory semantics; the irreversible athlete writer reuses the
+ * transaction-safe helper above so audit maintenance and fachdata mutation
+ * commit together.
  */
 export async function redactHistoricalAuditEventForAthlete(
   db: Database,
@@ -183,6 +184,18 @@ export async function redactHistoricalAuditEventForAthlete(
   if (!precheck.passesPrecheck) {
     throw new Error(`Athlete is not ready for irreversible processing: ${precheck.blockers.join(', ')}`);
   }
+
+  // Preserve the public standalone-service contract even after a completed
+  // redaction disappears from the candidate inventory.
+  const [existing] = await db
+    .select({ id: auditEventPrivacyRedactions.id })
+    .from(auditEventPrivacyRedactions)
+    .where(and(
+      eq(auditEventPrivacyRedactions.tenantId, tenantId),
+      eq(auditEventPrivacyRedactions.auditEventId, input.auditEventId),
+    ))
+    .limit(1);
+  if (existing) throw new Error('Audit event has already been privacy redacted');
 
   const inventory = await inventoryAthleteAuditPrivacyMaintenance(
     db,
