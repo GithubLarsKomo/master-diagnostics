@@ -64,7 +64,7 @@ jobs:
           pnpm db:migrate
       - name: Verify scheduled retention summary
         run: |
-          RETENTION_JOB_OUTPUT=summary pnpm retention:scan > /tmp/retention-summary.json
+          RETENTION_JOB_OUTPUT=summary pnpm --silent --filter @masters/db retention:scan > /tmp/retention-summary.json
           python3 - <<'PY'
           import json
 
@@ -144,7 +144,7 @@ jobs:
           assert retention["environment"]["RETENTION_JOB_OUTPUT"] == "summary"
           retention_command = retention.get("command", [])
           retention_text = " ".join(retention_command) if isinstance(retention_command, list) else str(retention_command)
-          assert "retention:scan" in retention_text
+          assert "--silent --filter @masters/db retention:scan" in retention_text
           assert "sleep 86400" in retention_text
           assert retention["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
           PY
