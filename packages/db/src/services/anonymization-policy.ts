@@ -1,4 +1,9 @@
-import type { AnonymizationPreviewScope } from './anonymization-preview';
+import type { Database } from '../client';
+import {
+  getAthleteAnonymizationPreview,
+  type AnonymizationPreviewScope,
+  type AthleteAnonymizationPreview,
+} from './anonymization-preview';
 
 export const ANONYMIZATION_POLICY_VERSION = '1.0.0' as const;
 
@@ -35,6 +40,11 @@ export interface AthleteAnonymizationPolicyEvaluation {
     | 'EXTERNAL_ARTIFACT_VERIFICATION_REQUIRED'
     | 'GLOBAL_RETENTION_AND_NOTIFICATION_REVIEW_REQUIRED'
   >;
+}
+
+export interface AthleteAnonymizationPolicyPreview {
+  preview: Readonly<AthleteAnonymizationPreview>;
+  policy: Readonly<AthleteAnonymizationPolicyEvaluation>;
 }
 
 const rules: Readonly<Record<string, Readonly<{
@@ -137,4 +147,20 @@ export function evaluateAnonymizationPolicy(
     unresolvedScopes: Object.freeze(unresolvedScopes),
     blockers: Object.freeze([...blockers].sort()),
   });
+}
+
+/**
+ * Single fail-closed entrypoint for callers that need both the current read-only
+ * scope inventory and its versioned policy evaluation. It cannot authorize or
+ * execute irreversible processing.
+ */
+export async function getAthleteAnonymizationPolicyPreview(
+  db: Database,
+  tenantId: string,
+  athleteId: string,
+  assessedAt = new Date().toISOString(),
+): Promise<Readonly<AthleteAnonymizationPolicyPreview>> {
+  const preview = await getAthleteAnonymizationPreview(db, tenantId, athleteId, assessedAt);
+  const policy = evaluateAnonymizationPolicy(preview.scopes, preview.globalRequirements);
+  return Object.freeze({ preview, policy });
 }
