@@ -68,12 +68,41 @@ Die Bewertung liefert:
 
 Damit bedeutet `ELIGIBLE` weiterhin ausschließlich: Die Retention-Frist steht einer späteren irreversiblen Aktion nicht mehr entgegen. Es ist keine Löschfreigabe.
 
+## Read-only Retention-Job
+
+`buildRetentionJobPlan()` führt die Worklist tenantweise zu einem deterministischen Job-Plan zusammen. Der Plan enthält:
+
+- den Modus `READ_ONLY`,
+- einen gemeinsamen Bewertungszeitpunkt,
+- stabile Tenant-Reihenfolge,
+- Kandidaten-, `ELIGIBLE`- und `MANUAL_REVIEW`-Zähler,
+- die unveränderte Kandidatenliste je Tenant.
+
+Der Runner verändert weder Athleten- noch Test- oder Löschdaten. Ein unbekannter gezielt angeforderter Tenant beendet den Lauf fail-closed mit Fehler.
+
+Der ausführbare Einstiegspunkt ist:
+
+```bash
+pnpm retention:scan
+```
+
+Er verwendet `DATABASE_URL` und optional `DATABASE_AUTH_TOKEN` wie die übrigen DB-Werkzeuge. Für gezielte oder reproduzierbare Läufe können gesetzt werden:
+
+```bash
+RETENTION_JOB_TENANT_ID=<tenant-id> pnpm retention:scan
+RETENTION_JOB_ASSESSED_AT=2027-07-31T00:00:00.000Z pnpm retention:scan
+```
+
+Die Ausgabe erfolgt als JSON auf `stdout` und kann dadurch von Cron, systemd timer oder einer späteren Betriebssteuerung aufgenommen werden. Die konkrete produktive Zeitplanung gehört zum Deployment-/Betriebskonzept; der fachliche Job selbst bleibt davon entkoppelt.
+
+Wichtig: Auch ein im Job als `ELIGIBLE` geführter Datensatz wird **nicht** verändert. Vor einem späteren irreversiblen Writer müssen mindestens Löschworkflow/Freigabe, Schutzbedingungen, Pseudonymisierungsstrategie und Audit-Semantik separat geprüft werden.
+
 ## UI-Vorschau
 
 Die Athletenansicht zeigt den Assessment-Status im Abschnitt „Löschantrag“ read-only an. Eine aktive Frist blockiert dort ausdrücklich nur eine spätere irreversible Verarbeitung; Löschantrag, Nutzungssperre und Soft-Delete bleiben davon getrennt. Eine abgelaufene Frist erzeugt keinen Ausführungsbutton und keine automatische Freigabe.
 
 ## Nächste Schritte
 
-1. Geplanten Retention-Job auf Basis der read-only Worklist ergänzen, zunächst ohne irreversible Datenänderung.
-2. Pseudonymisierungsstrategie und Audit-Anforderungen definieren.
+1. Pseudonymisierungsstrategie und Audit-Anforderungen definieren.
+2. Read-only Freigabe-/Schutzprüfung für einen späteren irreversiblen Writer ergänzen.
 3. Erst danach einen irreversiblen Writer implementieren.
