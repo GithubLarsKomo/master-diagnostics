@@ -32,6 +32,7 @@ export interface AthleteAnonymizationPreview {
   totalScopedRows: number;
   reportArtifactReferences: ReadonlyArray<string>;
   activeTenantExportPackageReferences: ReadonlyArray<string>;
+  dataSubjectDeliveryPackageReferences: ReadonlyArray<string>;
   auditPrivacyCandidateEventIds: ReadonlyArray<string>;
   globalRequirements: ReadonlyArray<
     | 'REPORT_STORAGE_VERIFICATION'
@@ -80,9 +81,7 @@ const athleteTestSubquery = 'SELECT id FROM tests WHERE tenant_id = ? AND athlet
 
 /**
  * Produces a comprehensive, deterministic and completely read-only inventory of
- * data classes that a future irreversible athlete anonymization writer must
- * address. It intentionally does not decide whether diagnostic data should be
- * deleted, generalized or retained under a non-reversible technical linkage.
+ * data classes that an irreversible athlete anonymization writer must address.
  */
 export async function getAthleteAnonymizationPreview(
   db: Database,
@@ -152,7 +151,11 @@ export async function getAthleteAnonymizationPreview(
     count(db, 'SELECT count(*) AS count FROM audit_event_privacy_redactions WHERE tenant_id = ? AND subject_athlete_id = ?', [tenantId, athleteId]),
   ]);
 
-  const [reportArtifactReferences, activeTenantExportPackageReferences] = await Promise.all([
+  const [
+    reportArtifactReferences,
+    activeTenantExportPackageReferences,
+    dataSubjectDeliveryPackageReferences,
+  ] = await Promise.all([
     stringColumn(
       db,
       `SELECT storage_reference FROM report_versions WHERE tenant_id = ? AND test_id IN (${athleteTestSubquery}) ORDER BY storage_reference`,
@@ -163,6 +166,12 @@ export async function getAthleteAnonymizationPreview(
       db,
       'SELECT storage_reference FROM tenant_export_packages WHERE tenant_id = ? AND expires_at > ? ORDER BY storage_reference',
       [tenantId, assessedAt],
+      'storage_reference',
+    ),
+    stringColumn(
+      db,
+      'SELECT storage_reference FROM athlete_data_subject_delivery_packages WHERE tenant_id = ? AND athlete_id = ? ORDER BY storage_reference',
+      [tenantId, athleteId],
       'storage_reference',
     ),
   ]);
@@ -200,6 +209,7 @@ export async function getAthleteAnonymizationPreview(
     scope('AUDIT_PRIVACY_CANDIDATES', 'AUDIT_PRIVACY_REDACTION_REQUIRED', auditCandidateIds.length, auditCandidateIds),
     scope('PRIOR_AUDIT_REDACTION_PROOFS', 'AUDIT_PRIVACY_REDACTION_REQUIRED', priorAuditRedactions),
     scope('ACTIVE_TENANT_EXPORT_PACKAGES', 'EPHEMERAL_EXPORT_CLEANUP_REQUIRED', activeTenantExportPackageReferences.length, activeTenantExportPackageReferences),
+    scope('DATA_SUBJECT_DELIVERY_PACKAGES', 'EPHEMERAL_EXPORT_CLEANUP_REQUIRED', dataSubjectDeliveryPackageReferences.length, dataSubjectDeliveryPackageReferences),
   ];
 
   return Object.freeze({
@@ -213,6 +223,7 @@ export async function getAthleteAnonymizationPreview(
     totalScopedRows: scopes.reduce((sum, item) => sum + item.rowCount, 0),
     reportArtifactReferences: Object.freeze(reportArtifactReferences),
     activeTenantExportPackageReferences: Object.freeze(activeTenantExportPackageReferences),
+    dataSubjectDeliveryPackageReferences: Object.freeze(dataSubjectDeliveryPackageReferences),
     auditPrivacyCandidateEventIds: Object.freeze(auditCandidateIds),
     globalRequirements: Object.freeze([
       'REPORT_STORAGE_VERIFICATION' as const,
