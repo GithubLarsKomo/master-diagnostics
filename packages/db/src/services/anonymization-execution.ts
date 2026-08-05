@@ -18,7 +18,10 @@ export type AthleteAnonymizationExecutionStatus =
   | 'COMPLETED'
   | 'ABORTED';
 
-export type AthleteAnonymizationExecutionArtifactKind = 'REPORT' | 'TENANT_EXPORT';
+export type AthleteAnonymizationExecutionArtifactKind =
+  | 'REPORT'
+  | 'TENANT_EXPORT'
+  | 'DATA_SUBJECT_EXPORT';
 
 export interface StoredAthleteAnonymizationExecution {
   id: string;
@@ -291,6 +294,10 @@ export async function prepareAthleteAnonymizationExecution(
       id: crypto.randomUUID(), tenantId, executionId: row.id, kind: 'TENANT_EXPORT' as const,
       storageReference, createdAt: preparedAt, updatedAt: preparedAt,
     })),
+    ...policyPreview.preview.dataSubjectDeliveryPackageReferences.map((storageReference) => ({
+      id: crypto.randomUUID(), tenantId, executionId: row.id, kind: 'DATA_SUBJECT_EXPORT' as const,
+      storageReference, createdAt: preparedAt, updatedAt: preparedAt,
+    })),
   ].sort((left, right) => left.kind.localeCompare(right.kind)
     || left.storageReference.localeCompare(right.storageReference));
 
@@ -305,9 +312,13 @@ export async function prepareAthleteAnonymizationExecution(
       entityId: row.id,
       source: 'SYSTEM',
       after: {
-        executionVersion: row.executionVersion, approvalId, athleteId, status: row.status,
+        executionVersion: row.executionVersion,
+        approvalId,
+        athleteId,
+        status: row.status,
         reportArtifactCount: policyPreview.preview.reportArtifactReferences.length,
         tenantExportArtifactCount: policyPreview.preview.activeTenantExportPackageReferences.length,
+        dataSubjectExportArtifactCount: policyPreview.preview.dataSubjectDeliveryPackageReferences.length,
       },
       occurredAt: preparedAt,
     });
