@@ -159,7 +159,8 @@
   - [x] kontrollierter, versionierter Privacy-Maintenance-Pfad für Audit-Altbestand
   - [x] versionierte Regeln für Profil, Snapshots, Beziehungs-/Privacy- und Diagnostikdaten
   - [x] versionierte Regeln für Report- und aktive Exportartefakte
-  - [ ] globale Backup-/Notification-Regeln
+  - [x] globale Backup-/Notification-Privacy-Verträge versioniert definiert
+  - [ ] produktive Backup-/Notification-Capabilities gegen die Verträge attestieren
 - [ ] Betroffenenexport
 - [ ] Löschung/Anonymisierung mit Vorschau
   - [x] vollständige read-only Scope-Preview über Profil, Snapshots, Beziehungsdaten, Diagnostik, Reports, Audit und aktive Exportartefakte
@@ -167,7 +168,8 @@
   - [x] Beziehungs-/Privacy-Policy für Coach-Zuordnungen, Einwilligungen, Guardians und Löschworkflow
   - [x] Diagnostik-Policy: detaillierte individuelle Diagnostik-/Verlaufsdaten nach Retention entfernen
   - [x] Report-/Exportartefakt-Policy: Storage-Artefakte und referenzierende Datensätze entfernen
-  - [ ] Backup-/Notification-Policy-Gates schließen
+  - [x] Backup-/Notification-Policy in Runtime-Capability-Verträge überführt
+  - [ ] Runtime-Capability-Attestation im produktiven Betrieb bereitstellen
   - [ ] explizite administrative Freigabe
   - [ ] atomare irreversible Ausführung
 

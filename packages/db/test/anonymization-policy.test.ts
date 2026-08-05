@@ -16,45 +16,50 @@ const scopes = [
   { scope: 'ACTIVE_TENANT_EXPORT_PACKAGES', disposition: 'EPHEMERAL_EXPORT_CLEANUP_REQUIRED', rowCount: 1, references: ['exports/current.zip'] },
 ] as const;
 
-describe('anonymization disposition policy v1.3', () => {
-  it('resolves all row-level scopes and leaves only backup/notification plus admin gates', () => {
-    const result = evaluateAnonymizationPolicy(scopes, [
-      'REPORT_STORAGE_VERIFICATION',
-      'BACKUP_RETENTION_POLICY_REVIEW',
-      'NOTIFICATION_PAYLOAD_REVIEW',
-    ]);
+const globalRequirements = [
+  'REPORT_STORAGE_VERIFICATION',
+  'BACKUP_RETENTION_POLICY_REVIEW',
+  'NOTIFICATION_PAYLOAD_REVIEW',
+] as const;
 
-    expect(result.policyVersion).toBe('1.3.0');
+describe('anonymization disposition policy v1.4', () => {
+  it('translates known global requirements into versioned runtime capability attestations', () => {
+    const result = evaluateAnonymizationPolicy(scopes, globalRequirements);
+
+    expect(result.policyVersion).toBe('1.4.0');
     expect(result.executionAllowed).toBe(false);
     expect(result.unresolvedScopes).toEqual([]);
-    expect(result.unresolvedGlobalRequirements).toEqual([
-      'BACKUP_RETENTION_POLICY_REVIEW',
-      'NOTIFICATION_PAYLOAD_REVIEW',
+    expect(result.unresolvedGlobalRequirements).toEqual([]);
+    expect(result.requiredGlobalCapabilities).toEqual([
+      'BACKUP_PRIVACY_POLICY_V1',
+      'NOTIFICATION_PRIVACY_POLICY_V1',
     ]);
     expect(result.blockers).toEqual([
       'ADMINISTRATIVE_APPROVAL_REQUIRED',
-      'GLOBAL_RETENTION_AND_NOTIFICATION_REVIEW_REQUIRED',
+      'GLOBAL_PRIVACY_CAPABILITY_ATTESTATION_REQUIRED',
     ]);
-    expect(result.decisions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ scope: 'ATHLETE_PROFILE', disposition: 'REDACT_DIRECT_IDENTIFIERS', gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL' }),
-      expect.objectContaining({ scope: 'ATHLETE_SNAPSHOTS', disposition: 'REMOVE_ATHLETE_SNAPSHOTS', gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL' }),
-      expect.objectContaining({ scope: 'TEST_PLAN_SNAPSHOTS', disposition: 'REMOVE_TEST_PLAN_SNAPSHOTS', gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL' }),
-      expect.objectContaining({ scope: 'DIAGNOSTIC_AND_OPERATIONAL_RECORDS', disposition: 'REMOVE_DIAGNOSTIC_AND_OPERATIONAL_RECORDS', gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL' }),
-      expect.objectContaining({ scope: 'REPORT_DATABASE_RECORDS', disposition: 'REMOVE_REPORT_ARTIFACTS_AND_RECORDS', gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL' }),
-      expect.objectContaining({ scope: 'ACTIVE_TENANT_EXPORT_PACKAGES', disposition: 'REMOVE_ACTIVE_TENANT_EXPORT_PACKAGES', gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL' }),
-      expect.objectContaining({ scope: 'AUDIT_PRIVACY_CANDIDATES', disposition: 'USE_CONTROLLED_AUDIT_PRIVACY_PATH', gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL' }),
-      expect.objectContaining({ scope: 'PRIOR_AUDIT_REDACTION_PROOFS', disposition: 'PRESERVE_AUDIT_REDACTION_PROOF', gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL' }),
-    ]));
   });
 
-  it('fails closed for unknown future scopes', () => {
+  it('removes the capability blocker only after explicit runtime attestation succeeds', () => {
+    const result = evaluateAnonymizationPolicy(scopes, globalRequirements, true);
+    expect(result.executionAllowed).toBe(false);
+    expect(result.unresolvedGlobalRequirements).toEqual([]);
+    expect(result.blockers).toEqual(['ADMINISTRATIVE_APPROVAL_REQUIRED']);
+  });
+
+  it('fails closed for unknown future row-level and global requirements', () => {
     const result = evaluateAnonymizationPolicy([
       { scope: 'FUTURE_NEW_SCOPE', disposition: 'REIDENTIFICATION_RISK_REVIEW_REQUIRED', rowCount: 1, references: [] },
-    ], []);
+    ], ['FUTURE_GLOBAL_REQUIREMENT'], true);
 
     expect(result.executionAllowed).toBe(false);
     expect(result.unresolvedScopes).toEqual(['FUTURE_NEW_SCOPE']);
-    expect(result.unresolvedGlobalRequirements).toEqual([]);
+    expect(result.unresolvedGlobalRequirements).toEqual(['FUTURE_GLOBAL_REQUIREMENT']);
+    expect(result.requiredGlobalCapabilities).toEqual([]);
+    expect(result.blockers).toEqual([
+      'ADMINISTRATIVE_APPROVAL_REQUIRED',
+      'UNRESOLVED_GLOBAL_POLICY_REQUIREMENT',
+    ]);
     expect(result.decisions[0]).toMatchObject({
       disposition: 'REVIEW_DIAGNOSTIC_REIDENTIFICATION_RISK',
       gate: 'POLICY_REVIEW_REQUIRED',

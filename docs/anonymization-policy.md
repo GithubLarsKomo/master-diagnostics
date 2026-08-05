@@ -2,7 +2,7 @@
 
 ## Status
 
-Aktuelle Policy-Version: `1.3.0`.
+Aktuelle Policy-Version: `1.4.0`.
 
 Die Policy ist ausschließlich ein **fail-closed Entscheidungsvertrag** für die read-only Anonymisierungs-Preview. Sie erteilt keine Ausführungsfreigabe: `executionAllowed` bleibt typseitig `false`.
 
@@ -68,9 +68,7 @@ Die Mindestaufbewahrung des Audit-Trails wird separat erfüllt. Audit-Datensätz
 
 Disposition: `REMOVE_REPORT_ARTIFACTS_AND_RECORDS`.
 
-Persistierte Reports enthalten Namen und detaillierte individuelle Diagnostikergebnisse. Policy v1.3 verlangt deshalb, dass bei der späteren atomaren Ausführung **zuerst das externe PDF-Artefakt über seine `storage_reference` entfernt und anschließend der zugehörige `report_versions`-Datensatz gelöscht wird**. Der vorhandene Report-Storage stellt dafür bereits eine idempotente `remove()`-Operation bereit.
-
-Die Preview liefert sämtliche betroffenen `storage_reference`-Werte vorab. Ein fehlgeschlagener Artifact-Delete darf in einem späteren Writer nicht still ignoriert werden; die Datenbanklöschung darf erst nach bestätigter Storage-Behandlung fortgesetzt werden.
+Persistierte Reports enthalten Namen und detaillierte individuelle Diagnostikergebnisse. Bei der späteren atomaren Ausführung muss zuerst das externe PDF-Artefakt über seine `storage_reference` entfernt und anschließend der zugehörige `report_versions`-Datensatz gelöscht werden. Der vorhandene Report-Storage stellt dafür bereits eine idempotente `remove()`-Operation bereit.
 
 ### Aktive Tenant-Exportpakete
 
@@ -78,24 +76,45 @@ Disposition: `REMOVE_ACTIVE_TENANT_EXPORT_PACKAGES`.
 
 Ein vollständiges Tenant-Exportpaket kann eine noch identifierhaltige Kopie des Athletenbestands enthalten. Vor irreversibler Verarbeitung müssen deshalb alle noch aktiven Exportpakete des Tenants entfernt werden. Der bestehende Export-Lifecycle besitzt bereits die benötigte Reihenfolge: Storage-Datei löschen, danach den Paketdatensatz entfernen.
 
-Die Policy behandelt dies konservativ tenantweit, weil ein vollständiges Exportpaket nicht zuverlässig auf einen einzelnen Athleten reduziert werden kann. Abgelaufene Pakete unterliegen ohnehin dem vorhandenen Cleanup-Pfad.
+## Globale Privacy-Capabilities
 
-`REPORT_STORAGE_VERIFICATION` bleibt als Preview-Hinweis sichtbar, ist in Policy v1.3 aber kein offenes Review-Gate mehr: Die explizite Löschdisposition definiert die erforderliche Storage-Behandlung.
+Policy v1.4 löst die bisherigen Backup-/Notification-Review-Punkte nicht durch Annahmen, sondern durch zwei explizite versionierte Laufzeitverträge auf:
 
-## Weiterhin offene globale Policy-Gates
+- `BACKUP_PRIVACY_POLICY_V1`,
+- `NOTIFICATION_PRIVACY_POLICY_V1`.
 
-Alle aktuell bekannten row-level Scopes sind mit Policy v1.3 versioniert aufgelöst. Offen bleiben ausschließlich:
+Die semantische Policy ist damit für alle aktuell bekannten globalen Anforderungen definiert. Ob sie im konkreten Betrieb tatsächlich erfüllt sind, muss separat über `evaluateGlobalPrivacyCapabilities()` attestiert werden.
 
-- `BACKUP_RETENTION_POLICY_REVIEW`,
-- `NOTIFICATION_PAYLOAD_REVIEW`,
-- die separate explizite administrative Ausführungsfreigabe.
+### Backup
 
-Backups und Notification-Payloads werden bewusst nicht durch Annahmen über ihre spätere Implementierung freigegeben. Solange diese globalen Gates offen sind, bleibt ein irreversibler Writer gesperrt.
+Ein Backup-System darf nur als erfüllt gelten, wenn es explizit `DISABLED` ist oder bei `ENABLED` mindestens Verschlüsselung im Ruhezustand, begrenzte Aufbewahrung und Privacy-Reconciliation bei Restore unter Policy-Version `1.0.0` nachweist. Fehlende Angaben bleiben blockierend.
+
+### Notifications
+
+Notifications dürfen nur als erfüllt gelten, wenn sie explizit `DISABLED` sind oder bei `ENABLED` einen athletenbezogenen Subject-Scope, Verbot direkter Identifikatoren und gezielten Subject-Cleanup unter Policy-Version `1.0.0` technisch unterstützen.
+
+Die derzeit vorhandene generische `notifications.payload_json`-Tabelle allein reicht dafür ausdrücklich nicht aus. Eine spätere Notification-Implementierung darf die Capability erst nach technischer Durchsetzung dieses Vertrags als `ENABLED` deklarieren.
+
+### Fail-closed Attestation
+
+Ohne explizite Capability-Deklaration bleibt `GLOBAL_PRIVACY_CAPABILITY_ATTESTATION_REQUIRED` aktiv. Bei erfolgreicher Attestation entfällt nur dieser Blocker; die separate administrative Freigabe bleibt zwingend bestehen.
+
+Die Details stehen in `docs/global-privacy-policy.md`.
+
+## Verbleibende Ausführungs-Gates
+
+Mit Policy v1.4 sind alle derzeit bekannten row-level und globalen Datenschutzregeln versioniert definiert. Vor einem irreversiblen Writer bleiben jedoch weiterhin zwingend:
+
+- erfolgreiche Laufzeit-Attestation der benötigten globalen Privacy-Capabilities,
+- explizite administrative Ausführungsfreigabe,
+- atomare Ausführung mit überprüfbarer Fehlerstrategie und eigenem Audit-Ereignis.
 
 ## Fail-closed-Regeln
 
 - unbekannte zukünftige Preview-Scopes werden automatisch `POLICY_REVIEW_REQUIRED`,
-- administrative Freigabe bleibt auch für vollständig definierte Scopes separat erforderlich,
+- unbekannte zukünftige globale Anforderungen bleiben `UNRESOLVED_GLOBAL_POLICY_REQUIREMENT`,
+- fehlende Runtime-Capability-Deklarationen sind blockierend und nicht gleichbedeutend mit `DISABLED`,
+- administrative Freigabe bleibt auch für vollständig definierte und attestierte Scopes separat erforderlich,
 - die Policy selbst mutiert keine Daten und löscht keine Dateien,
 - Audit-Altbestand darf ausschließlich über den kontrollierten Privacy-Maintenance-Pfad behandelt werden,
 - vorhandene Audit-Redaktionsnachweise müssen erhalten bleiben,
