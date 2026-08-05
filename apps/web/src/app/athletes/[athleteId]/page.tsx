@@ -2,6 +2,7 @@ import { authorize, deriveAthleteDashboardSummary } from '@masters/domain';
 import {
   athleteIsMinor,
   getAthlete,
+  getAthleteRetentionAssessment,
   getRecentAthleteLactateCurves,
   listActiveTrainers,
   listAthleteDiagnosticResultHistory,
@@ -33,7 +34,7 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
   const athlete = await getAthlete(db, context.tenantId, athleteId);
   if (!athlete) notFound();
 
-  const [trainers, assignments, snapshots, consentRows, guardians, deletionRequests, deletionPreview, tenantTests, resultHistory, recentCurves] = await Promise.all([
+  const [trainers, assignments, snapshots, consentRows, guardians, deletionRequests, deletionPreview, retentionAssessment, tenantTests, resultHistory, recentCurves] = await Promise.all([
     listActiveTrainers(db, context.tenantId),
     listCoachAssignments(db, context.tenantId, athlete.id),
     listAthleteSnapshots(db, context.tenantId, athlete.id),
@@ -41,6 +42,7 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
     listGuardians(db, context.tenantId, athlete.id),
     listDeletionRequests(db, context.tenantId, athlete.id),
     previewAthleteDeletion(db, context.tenantId, athlete.id),
+    getAthleteRetentionAssessment(db, context.tenantId, athlete.id),
     listTestsForExecution(db, context.tenantId),
     listAthleteDiagnosticResultHistory(db, context.tenantId, athlete.id),
     getRecentAthleteLactateCurves(db, context.tenantId, athlete.id, 5),
@@ -73,6 +75,11 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
   const minor = athleteIsMinor(athlete.birthDate);
   const activeGuardian = guardians.some((guardian) => !guardian.revokedAt && (!guardian.validUntil || guardian.validUntil >= new Date().toISOString().slice(0, 10)));
   const openDeletionRequest = deletionRequests.find((request) => request.status === 'REQUESTED');
+  const retentionBasisLabel = retentionAssessment.basis === 'LAST_TEST'
+    ? `letzter durchgeführter Test · Tenant-Frist ${retentionAssessment.tenantRetentionYears} Jahr(e)`
+    : retentionAssessment.basis === 'MANAGED_PROFILE_NO_TEST'
+      ? 'verwaltetes Profil ohne Test · 12 Monate ab Anlage'
+      : 'verknüpftes Profil ohne Test · manuelle Prüfung';
 
   return (
     <main>
@@ -205,6 +212,16 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
       <section className="card">
         <h2>Löschantrag</h2>
         <p>Vorschau: {deletionPreview.relatedRecords.snapshots} Snapshots, {deletionPreview.relatedRecords.coachAssignments} Trainerzuordnungen, {deletionPreview.relatedRecords.consents} Einwilligungen und {deletionPreview.relatedRecords.guardians} Guardian-Einträge. Auditdaten bleiben erhalten.</p>
+        <p><strong>Aufbewahrungsprüfung:</strong> {retentionBasisLabel}.</p>
+        {retentionAssessment.reason === 'RETENTION_ACTIVE' && retentionAssessment.retainUntil && (
+          <p role="status">Irreversible Pseudonymisierung oder Entfernung bleibt bis {new Date(retentionAssessment.retainUntil).toLocaleString('de-DE')} gesperrt. Soft-Delete und Nutzungssperre bleiben davon unberührt.</p>
+        )}
+        {retentionAssessment.reason === 'RETENTION_EXPIRED' && (
+          <p role="status">Die Aufbewahrungsfrist ist abgelaufen. Eine irreversible Verarbeitung ist damit nur fristseitig zulässig und benötigt weiterhin eine separate, auditierte Freigabe.</p>
+        )}
+        {retentionAssessment.reason === 'MANUAL_REVIEW_REQUIRED' && (
+          <p role="status">Für dieses verknüpfte Profil ohne Test existiert keine automatische Fristfreigabe. Vor einer irreversiblen Verarbeitung ist eine manuelle Aufbewahrungsprüfung erforderlich.</p>
+        )}
         {!openDeletionRequest && !deletionRequests.some((request) => request.status === 'APPROVED') && <form action={deletionAction} className="setup-form"><label>Begründung<input name="reason" required minLength={3} /></label><button type="submit">Löschantrag stellen und Nutzung sperren</button></form>}
         {deletionRequests.length === 0 ? <p>Noch kein Löschantrag vorhanden.</p> : <ol>{deletionRequests.map((request) => {
           const decisionAction = decideDeletionRequest.bind(null, athlete.id);
