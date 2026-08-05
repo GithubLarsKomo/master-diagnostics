@@ -41,10 +41,11 @@ export async function serveDataSubjectDeliveryDownload(
 ): Promise<Response> {
   const authorization = request.headers.get('authorization')?.trim() ?? '';
   const match = BEARER_TOKEN.exec(authorization);
-  if (!match) return unavailable();
+  const bearerToken = match?.[1];
+  if (!bearerToken) return unavailable();
 
   try {
-    const download = await deps.consume(match[1]);
+    const download = await deps.consume(bearerToken);
     if (!download) return unavailable();
     if (!/^masters-data-subject-export-[0-9a-f-]{36}\.tar$/i.test(download.fileName)) {
       return internalFailure();
