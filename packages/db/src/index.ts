@@ -14,6 +14,7 @@ export * from './services/global-privacy-policy';
 export * from './services/data-subject-export';
 export * from './services/data-subject-delivery-approval';
 export * from './services/data-subject-reviewed-delivery';
+export * from './services/data-subject-delivery-packages';
 export * from './services/club-bootstrap';
 export * from './services/factory-protocol-templates';
 export * from './services/protocol-templates';

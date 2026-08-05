@@ -59,3 +59,22 @@ export const tenantExportPackages = sqliteTable('tenant_export_packages', {
   uniqueIndex('tenant_export_package_token_hash_uq').on(t.tokenHash),
   uniqueIndex('tenant_export_package_storage_reference_uq').on(t.storageReference),
 ]);
+
+export const athleteDataSubjectDeliveryPackages = sqliteTable('athlete_data_subject_delivery_packages', {
+  id: id(),
+  tenantId: tenantId(),
+  athleteId: text('athlete_id').notNull(),
+  approvalId: text('approval_id').notNull(),
+  packageVersion: integer('package_version').notNull(),
+  manifestFingerprint: text('manifest_fingerprint').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  storageReference: text('storage_reference').notNull(),
+  packageSha256: text('package_sha256').notNull(),
+  createdByUserId: text('created_by_user_id').notNull(),
+  expiresAt: text('expires_at').notNull(),
+  downloadedAt: text('downloaded_at'),
+  ...timestamps,
+}, (t) => [
+  uniqueIndex('athlete_data_subject_delivery_package_token_hash_uq').on(t.tokenHash),
+  uniqueIndex('athlete_data_subject_delivery_package_storage_reference_uq').on(t.storageReference),
+]);
