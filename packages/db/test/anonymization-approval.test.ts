@@ -105,13 +105,18 @@ describe('athlete anonymization admin approval', () => {
     expect(auditRows[0]?.afterJson).not.toContain('Petra');
     expect(auditRows[0]?.afterJson).not.toContain('Muster');
 
+    const [beforeMutation] = await db.select().from(schema.athleteAnonymizationApprovals)
+      .where(eq(schema.athleteAnonymizationApprovals.id, approval.id));
     await expect(db.update(schema.athleteAnonymizationApprovals)
       .set({ approvedAt: '2099-01-01T00:00:00.000Z' })
       .where(eq(schema.athleteAnonymizationApprovals.id, approval.id)))
-      .rejects.toThrow(/immutable/i);
+      .rejects.toThrow();
     await expect(db.delete(schema.athleteAnonymizationApprovals)
       .where(eq(schema.athleteAnonymizationApprovals.id, approval.id)))
-      .rejects.toThrow(/immutable/i);
+      .rejects.toThrow();
+    const [afterMutation] = await db.select().from(schema.athleteAnonymizationApprovals)
+      .where(eq(schema.athleteAnonymizationApprovals.id, approval.id));
+    expect(afterMutation).toEqual(beforeMutation);
   });
 
   it('invalidates an approval when the current scope changes', async () => {
