@@ -55,14 +55,25 @@ describe('tenant portability roundtrip', () => {
       primarySport: 'ROWING', primaryDiscipline: 'SINGLE', trainingStatus: 'TRAINED', createdAt, updatedAt,
     });
     await sourceDb.insert(schema.auditEvents).values({
-      id: 'audit-source', tenantId: 'tenant-source', occurredAt: createdAt, actorUserId: 'user-source',
+      id: 'audit-source', tenantId: 'tenant-source', occurredAt: createdAt, actorUserId: null,
       actorRole: 'TENANT_ADMIN', action: 'roundtrip.fixture.created', entityType: 'athlete', entityId: 'athlete-source',
-      source: 'TEST', correlationId: 'corr-source', createdAt, updatedAt,
+      source: 'TEST', correlationId: 'corr-source', reason: '[REDACTED]',
+      beforeJson: '{"auditSchemaVersion":3,"privacyRedacted":true}',
+      afterJson: '{"auditSchemaVersion":3,"privacyRedacted":true}', createdAt, updatedAt,
+    });
+    await sourceDb.insert(schema.auditEventPrivacyRedactions).values({
+      id: 'redaction-source', tenantId: 'tenant-source', auditEventId: 'audit-source',
+      subjectAthleteId: 'athlete-source', redactionVersion: 1,
+      redactActorUserId: true, redactSessionId: false, redactReason: true,
+      redactBeforeJson: true, redactAfterJson: true, requestedByUserId: 'user-source',
+      maintenanceReference: 'PRIVACY/ROUNDTRIP-1', redactedAt: updatedAt,
+      createdAt: updatedAt, updatedAt,
     });
 
     const exported = await getTenantPortabilityExportSource(sourceDb, 'tenant-source');
     expect(exported).not.toBeNull();
     if (!exported) throw new Error('source export unavailable');
+    expect(exported.tables.audit_event_privacy_redactions).toHaveLength(1);
 
     const document: TenantPortabilityExportDocument = {
       schemaVersion: 'masters-tenant-export-v1',
