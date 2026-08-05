@@ -121,9 +121,16 @@ describe('data subject delivery review approval', () => {
 
     await expect(db.update(schema.athleteDataSubjectDeliveryApprovals)
       .set({ assessedAt: '2026-08-06T00:00:00.000Z' })
-      .where(eq(schema.athleteDataSubjectDeliveryApprovals.id, approval.id))).rejects.toThrow(/immutable/i);
+      .where(eq(schema.athleteDataSubjectDeliveryApprovals.id, approval.id))).rejects.toThrow();
+    const [afterRejectedUpdate] = await db.select().from(schema.athleteDataSubjectDeliveryApprovals)
+      .where(eq(schema.athleteDataSubjectDeliveryApprovals.id, approval.id));
+    expect(afterRejectedUpdate?.assessedAt).toBe(approval.assessedAt);
+
     await expect(db.delete(schema.athleteDataSubjectDeliveryApprovals)
-      .where(eq(schema.athleteDataSubjectDeliveryApprovals.id, approval.id))).rejects.toThrow(/immutable/i);
+      .where(eq(schema.athleteDataSubjectDeliveryApprovals.id, approval.id))).rejects.toThrow();
+    const afterRejectedDelete = await db.select().from(schema.athleteDataSubjectDeliveryApprovals)
+      .where(eq(schema.athleteDataSubjectDeliveryApprovals.id, approval.id));
+    expect(afterRejectedDelete).toHaveLength(1);
   });
 
   it('is idempotent per reviewer while allowing a second admin to independently approve', async () => {
