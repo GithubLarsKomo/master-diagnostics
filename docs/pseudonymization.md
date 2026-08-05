@@ -75,16 +75,28 @@ Deshalb benötigt der Writer eine explizite Entscheidung zwischen:
 
 ## Audit-Anforderungen
 
-SPEC §33 fordert ein append-only Audit-Log und koppelt die Audit-Aufbewahrung an die Fachdaten, mindestens für drei Jahre. Gleichzeitig können heutige Audit-Payloads in `before_json` und `after_json` direkte Athletenstammdaten enthalten, beispielsweise bei Anlage oder Änderung eines Athleten.
+SPEC §33 fordert ein append-only Audit-Log und koppelt die Audit-Aufbewahrung an die Fachdaten, mindestens für drei Jahre. SPEC §33.3 verlangt zusätzlich, direkte Identifikatoren im Audit nach Athletenlöschung zu pseudonymisieren. Historische Audit-Payloads können heute in `before_json`, `after_json` oder Freitext-Begründungen noch direkte Identifikatoren enthalten.
 
 Daraus folgt eine eigene Schutzanforderung:
 
-1. **Append-only bleibt unverändert.** Ein Anonymisierungs-Writer darf Audit-Ereignisse nicht still überschreiben oder löschen.
-2. **Neue Audit-Payloads müssen minimiert werden.** Direkte Identifikatoren sollen nur gespeichert werden, wenn sie für den Audit-Zweck tatsächlich erforderlich sind.
-3. **Historische identifierhaltige Audit-Payloads benötigen eine definierte Retention-/Migrationsstrategie**, bevor ein produktiver irreversibler Writer freigegeben wird.
+1. **Normale Audit-Ereignisse bleiben append-only.** Ein Anonymisierungs-Writer darf Historie nicht beliebig überschreiben oder löschen.
+2. **Neue Audit-Payloads werden minimiert.** Direkte Identifikatoren werden nur gespeichert, wenn sie für den Audit-Zweck tatsächlich erforderlich sind.
+3. **Historische identifierhaltige Audit-Payloads benötigen einen eng begrenzten Privacy-Maintenance-Pfad**, der SPEC §33.3 erfüllt, ohne allgemeine Audit-Editierbarkeit zu eröffnen.
 4. Die spätere irreversible Aktion selbst muss als eigenes Audit-Ereignis mit Tenant, Actor, Zeitpunkt, Policy-/Strategieversion, Freigabereferenz, betroffener Entität und Ergebnis protokolliert werden, ohne die entfernten direkten Identifikatoren erneut in den Audit-Payload zu kopieren.
 
 Der row-level Precheck bewertet diese globale Audit-Policy bewusst nicht. Dadurch bleibt die fachliche Datenzustandsprüfung deterministisch, während die Writer-Freigabe zusätzlich eine versionierte globale Policy verlangen kann.
+
+### Minimierung neuer Audit-Payloads
+
+Für neu erzeugte Ereignisse gelten jetzt folgende Regeln:
+
+- `athlete.created` speichert nur Zustand und Feldnamen, keine Feldwerte.
+- `athlete.updated` speichert nur die Namen tatsächlich geänderter Felder, keine Vorher-/Nachher-Werte.
+- `guardian.registered` und `guardian.revoked` speichern Beziehung, Zeit-/Statusdaten und nur boolesche Kontakt-Präsenz; Name, E-Mail und Telefonnummer werden nicht strukturiert dupliziert.
+- Löschantrag und Löschentscheidung speichern nur Request-/Athleten-ID, Status und Zeitpunkte; die bereits in `athlete_deletion_requests` vorhandenen freien Begründungstexte werden nicht zusätzlich ins Audit kopiert.
+- `athlete.deletion_completed` speichert keinen vollständigen Athleten-Snapshot mehr, sondern nur pseudonyme Zustandsmetadaten.
+
+Freitext, der ausschließlich als Audit-Begründung existiert (z. B. Guardian-Widerruf oder Löschabschluss), bleibt vorerst erhalten, weil sein ersatzloses Entfernen die Nachvollziehbarkeit verschlechtern würde. Solche Freitexte müssen beim späteren SPEC-§33.3-Privacy-Maintenance-Pfad mitbehandelt werden.
 
 ## Writer-Gates vor Implementierung
 
@@ -94,7 +106,7 @@ Ein produktiver Writer darf erst folgen, wenn mindestens diese Punkte geschlosse
 - [x] identifierhaltige Datenklassen und Artefakte inventarisiert
 - [x] Audit-Randbedingungen dokumentiert
 - [ ] versioniertes Anonymisierungs-/Entfernungs-Schema je Datenklasse festgelegt
-- [ ] Audit-Payload-Minimierung für neue Ereignisse umgesetzt
+- [x] Audit-Payload-Minimierung für neue Athleten-, Guardian- und Löschereignisse umgesetzt
 - [ ] Umgang mit bestehenden identifierhaltigen Audit-Payloads festgelegt
 - [ ] Bericht-/Datei-Artefakte in Preview und Ausführung einbezogen
 - [ ] Reidentifikationsrisiko für verbleibende Diagnostikdaten bewertet
@@ -104,4 +116,4 @@ Ein produktiver Writer darf erst folgen, wenn mindestens diese Punkte geschlosse
 
 ## Nächster technischer Slice
 
-Als nächstes sollte die **Audit-Payload-Minimierung** für Athleten- und Löschereignisse umgesetzt werden. Erst danach ist es sinnvoll, aus dem Precheck eine vollständige Anonymisierungs-Preview über alle betroffenen Tabellen und Artefakte abzuleiten.
+Als nächstes ist der **kontrollierte Privacy-Maintenance-Pfad für identifierhaltigen Audit-Altbestand** zu spezifizieren und DB-seitig abzusichern. Erst danach sollte aus dem Precheck eine vollständige Anonymisierungs-Preview über Profil, Snapshots, Bericht-/Datei-Artefakte und verbleibende Diagnostikdaten abgeleitet werden.
