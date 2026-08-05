@@ -4,7 +4,7 @@ import {
   protocolTemplates,
   protocolTemplateVersions,
 } from '../schema';
-import { appendAuditEvent } from './audit';
+import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 
 export type ProtocolTemplateDeviceType = 'BIKEERG' | 'ROWERG' | 'RP3';
 
@@ -28,10 +28,7 @@ export const PROTOCOL_OPTIONAL_INPUT_FIELDS = [
 
 export type ProtocolOptionalInputField = typeof PROTOCOL_OPTIONAL_INPUT_FIELDS[number];
 
-export interface ProtocolTemplateActor {
-  userId: string;
-  role: string;
-}
+export type ProtocolTemplateActor = AuditActorContext;
 
 export interface ProtocolTemplateVersionInput {
   name: string;
@@ -223,8 +220,7 @@ export async function createTenantProtocolTemplate(
     await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'protocol_template.created',
       entityType: 'protocol_template',
       entityId: templateId,
@@ -288,8 +284,7 @@ export async function createProtocolTemplateVersion(
     await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'protocol_template.version_created',
       entityType: 'protocol_template_version',
       entityId: versionValues.id,

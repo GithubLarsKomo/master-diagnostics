@@ -92,6 +92,14 @@ describe('factory protocol template bootstrap', () => {
     }
 
     const [auditEvent] = await db.select().from(schema.auditEvents);
+    expect(auditEvent).toMatchObject({
+      actorUserId: userId,
+      actorRole: 'TENANT_ADMIN',
+      authProvider: 'BETTER_AUTH',
+      sessionId: null,
+      action: 'club.bootstrap.completed',
+      source: 'SETUP_WIZARD',
+    });
     expect(JSON.parse(auditEvent.afterJson ?? '{}')).toMatchObject({
       factoryProtocolTemplateCount: 3,
     });

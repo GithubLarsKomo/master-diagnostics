@@ -149,7 +149,7 @@ export async function POST(request: Request) {
       tokenHash: sha256(downloadToken),
       storageReference,
       packageSha256,
-      createdByUserId: context.userId,
+      actor: context,
       expiresAt,
     });
   } catch {

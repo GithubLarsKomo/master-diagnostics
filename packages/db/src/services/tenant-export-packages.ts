@@ -1,7 +1,7 @@
 import { and, eq, gt, isNull, lte } from 'drizzle-orm';
 import type { Database } from '../client';
 import { tenantExportPackages } from '../schema';
-import { appendAuditEvent } from './audit';
+import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 
 export interface TenantExportPackageInput {
   id: string;
@@ -9,7 +9,7 @@ export interface TenantExportPackageInput {
   tokenHash: string;
   storageReference: string;
   packageSha256: string;
-  createdByUserId: string;
+  actor: AuditActorContext;
   expiresAt: string;
 }
 
@@ -20,7 +20,13 @@ export async function createTenantExportPackage(
   const now = new Date().toISOString();
   await db.transaction(async (tx) => {
     await tx.insert(tenantExportPackages).values({
-      ...input,
+      id: input.id,
+      tenantId: input.tenantId,
+      tokenHash: input.tokenHash,
+      storageReference: input.storageReference,
+      packageSha256: input.packageSha256,
+      createdByUserId: input.actor.userId,
+      expiresAt: input.expiresAt,
       downloadedAt: null,
       createdAt: now,
       updatedAt: now,
@@ -28,8 +34,7 @@ export async function createTenantExportPackage(
     await appendAuditEvent(tx, {
       tenantId: input.tenantId,
       occurredAt: now,
-      actorUserId: input.createdByUserId,
-      actorRole: 'TENANT_ADMIN',
+      ...auditActorFields(input.actor),
       action: 'tenant_export.created',
       entityType: 'tenant_export_package',
       entityId: input.id,
@@ -80,12 +85,14 @@ export async function consumeTenantExportPackage(
     await appendAuditEvent(tx, {
       tenantId: row.tenantId,
       occurredAt: now,
-      actorUserId: row.createdByUserId,
-      actorRole: 'TENANT_ADMIN',
       action: 'tenant_export.downloaded',
       entityType: 'tenant_export_package',
       entityId: row.id,
       source: 'DOWNLOAD_LINK',
+      after: {
+        createdByUserId: row.createdByUserId,
+        packageSha256: row.packageSha256,
+      },
     });
     return row;
   });

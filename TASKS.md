@@ -136,8 +136,11 @@
 
 ## Epic 10 — Datenschutz und Audit
 
-- [ ] append-only Audit-Service
+- [x] append-only Audit-Service
 - [ ] Audit-Abdeckung aller spezifizierten Ereignisse
+  - [x] Actor-/Session-Kontext für implementierte Kernwriter vereinheitlicht
+  - [x] Coverage-Matrix gegen SPEC §33.1 dokumentiert
+  - [ ] offene Auth-, Freigabe-, Diagnostik-, Bluetooth- und Betriebsereignisse schließen
 - [ ] Aufbewahrungsjob 1–10 Jahre
 - [ ] Lösch-/Anonymisierungsanträge und Aufbewahrungsprüfung
 - [ ] Pseudonymisierung nach Löschung

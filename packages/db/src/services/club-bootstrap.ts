@@ -1,7 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import type { Database } from '../client';
 import {
-  auditEvents,
   authUsers,
   protocolTemplates,
   protocolTemplateVersions,
@@ -10,6 +9,7 @@ import {
   userIdentities,
   users,
 } from '../schema';
+import { appendAuditEvent, auditActorFields } from './audit';
 import { buildFactoryProtocolTemplateSeed } from './factory-protocol-templates';
 
 export interface ClubBootstrapInput {
@@ -100,14 +100,24 @@ export async function bootstrapClub(db: Database, input: ClubBootstrapInput): Pr
     await tx
       .insert(protocolTemplateVersions)
       .values(factoryProtocolTemplateSeed.map(({ version }) => version));
-    await tx.insert(auditEvents).values({
-      id: crypto.randomUUID(), tenantId, occurredAt: now, actorUserId: userId, actorRole: 'TENANT_ADMIN',
-      action: 'club.bootstrap.completed', entityType: 'tenant', entityId: tenantId, source: 'SETUP_WIZARD',
-      correlationId, afterJson: JSON.stringify({
+    await appendAuditEvent(tx, {
+      tenantId,
+      occurredAt: now,
+      ...auditActorFields({
+        userId,
+        role: 'TENANT_ADMIN',
+        authProvider: 'BETTER_AUTH',
+      }),
+      action: 'club.bootstrap.completed',
+      entityType: 'tenant',
+      entityId: tenantId,
+      source: 'SETUP_WIZARD',
+      correlationId,
+      after: {
         clubName: input.clubName,
         slug: input.slug,
         factoryProtocolTemplateCount: factoryProtocolTemplateSeed.length,
-      }), createdAt: now, updatedAt: now,
+      },
     });
   });
 

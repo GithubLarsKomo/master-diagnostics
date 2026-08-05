@@ -24,7 +24,12 @@ async function createTestDatabase(): Promise<Database> {
   return drizzle(client, { schema }) as Database;
 }
 
-const admin = { userId: 'admin-a', role: 'TENANT_ADMIN' };
+const admin = {
+  userId: 'admin-a',
+  role: 'TENANT_ADMIN',
+  authProvider: 'BETTER_AUTH' as const,
+  sessionId: 'session-protocol-a',
+};
 const trainer = { userId: 'trainer-a', role: 'TRAINER' };
 const versionOne: ProtocolTemplateVersionInput = {
   name: 'BikeErg Masters',
@@ -88,6 +93,8 @@ describe('versioned tenant protocol templates', () => {
       'protocol_template.created',
       'protocol_template.version_created',
     ]);
+    expect(audit.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
+    expect(audit.every((event) => event.sessionId === 'session-protocol-a')).toBe(true);
   });
 
   it('enforces tenant isolation and tenant-admin authorization', async () => {
