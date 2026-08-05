@@ -180,4 +180,14 @@ describe('read-only retention job plan', () => {
       assessedAt: '2027-07-31T00:00:00.000Z',
     })).rejects.toThrow('Tenant not found');
   });
+
+  it('rejects an invalid assessment time even for an empty tenant', async () => {
+    const db = await createTestDatabase();
+    await seedTenant(db, 'tenant-a', 2);
+
+    await expect(buildRetentionJobPlan(db, {
+      tenantId: 'tenant-a',
+      assessedAt: 'not-a-timestamp',
+    })).rejects.toThrow('Assessment time');
+  });
 });
