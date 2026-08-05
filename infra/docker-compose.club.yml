@@ -33,9 +33,11 @@ services:
     environment:
       DATABASE_URL: http://libsql:8080
       TENANT_EXPORT_STORAGE_DIR: /var/lib/masters/exports
-    command: ["sh", "-c", "while true; do pnpm --filter @masters/db tenant-exports:cleanup; sleep 3600; done"]
+      DATA_SUBJECT_DELIVERY_PACKAGE_ROOT: /var/lib/masters/data-subject-delivery-packages
+    command: ["sh", "-c", "set -e; while true; do pnpm --filter @masters/db tenant-exports:cleanup; pnpm --filter @masters/db data-subject-delivery:cleanup; sleep 3600; done"]
     volumes:
       - export-data:/var/lib/masters/exports
+      - data-subject-delivery-data:/var/lib/masters/data-subject-delivery-packages
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -54,9 +56,11 @@ services:
       BETTER_AUTH_URL: https://${APP_HOST}
       REPORT_STORAGE_DIR: /var/lib/masters/reports
       TENANT_EXPORT_STORAGE_DIR: /var/lib/masters/exports
+      DATA_SUBJECT_DELIVERY_PACKAGE_ROOT: /var/lib/masters/data-subject-delivery-packages
     volumes:
       - report-data:/var/lib/masters/reports
       - export-data:/var/lib/masters/exports
+      - data-subject-delivery-data:/var/lib/masters/data-subject-delivery-packages
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -105,5 +109,6 @@ volumes:
   libsql-data:
   report-data:
   export-data:
+  data-subject-delivery-data:
   caddy-data:
   caddy-config:

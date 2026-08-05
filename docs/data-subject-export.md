@@ -345,7 +345,7 @@ Der Maintenance-Befehl lautet:
 pnpm data-subject-delivery:cleanup
 ```
 
-`DATA_SUBJECT_DELIVERY_PACKAGE_ROOT` setzt den Storage-Root. Für reproduzierbare Tests oder kontrollierte Betriebsaufrufe kann `DATA_SUBJECT_DELIVERY_CLEANUP_NOW` einen ISO-8601-Prüfzeitpunkt vorgeben. Der produktive Scheduler für wiederkehrende Maintenance-Aufrufe bleibt Teil der allgemeinen Deployment-/Betriebsplanung.
+`DATA_SUBJECT_DELIVERY_PACKAGE_ROOT` setzt den Storage-Root. Für reproduzierbare Tests oder kontrollierte Betriebsaufrufe kann `DATA_SUBJECT_DELIVERY_CLEANUP_NOW` einen ISO-8601-Prüfzeitpunkt vorgeben. Im Club-Deployment ruft der persistente `export-cleanup`-Service den Betroffenenexport-Cleanup stündlich auf demselben `.mdse`-Volume wie die App auf; andere Deployment-Modi müssen einen äquivalenten wiederkehrenden Maintenance-Aufruf bereitstellen.
 
 ## Sicherheitsinvarianten
 
