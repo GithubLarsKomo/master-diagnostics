@@ -154,8 +154,9 @@
   - [ ] irreversible Verarbeitung nur nach versionierter Policy und expliziter Freigabe
 - [ ] Pseudonymisierung nach Löschung
   - [x] Daten-Scope und Audit-Randbedingungen für irreversible Anonymisierung dokumentiert
-  - [x] Audit-Payload-Minimierung für neue Athleten- und Löschereignisse
-  - [ ] Strategie für bereits vorhandenen identifierhaltigen Audit-Altbestand
+  - [x] Audit-Payload-Minimierung für neue Athleten-, Guardian- und Löschereignisse
+  - [x] read-only Kandidateninventar für identifierhaltigen Audit-Altbestand
+  - [ ] kontrollierte, versionierte Privacy-Maintenance-Policy für Audit-Altbestand
   - [ ] versionierte Regeln für Profil, Snapshots, Berichte/Artefakte und verbleibende Diagnostikdaten
 - [ ] Betroffenenexport
 - [ ] Löschung/Anonymisierung mit Vorschau
