@@ -2,6 +2,11 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../client';
 import { athletes } from '../schema';
 import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
+import {
+  allAthleteMutableFields,
+  changedAthleteFields,
+  projectAthleteForAudit,
+} from './audit-projections';
 
 export interface AthleteInput {
   firstName: string;
@@ -96,7 +101,10 @@ export async function createAthlete(
       entityId: athleteId,
       source: 'WEB',
       correlationId,
-      after: values,
+      after: {
+        ...projectAthleteForAudit(values),
+        changedFields: allAthleteMutableFields(),
+      },
     });
   });
 
@@ -114,6 +122,7 @@ export async function updateAthlete(
   if (!before) throw new Error('Athlete not found');
 
   const values = normalizeInput(input);
+  const changedFields = changedAthleteFields(before, values);
   const now = new Date().toISOString();
   const correlationId = crypto.randomUUID();
 
@@ -132,8 +141,14 @@ export async function updateAthlete(
       entityId: athleteId,
       source: 'WEB',
       correlationId,
-      before,
-      after: values,
+      before: {
+        ...projectAthleteForAudit(before),
+        changedFields,
+      },
+      after: {
+        ...projectAthleteForAudit(values),
+        changedFields,
+      },
     });
   });
 

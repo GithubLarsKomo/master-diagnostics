@@ -9,6 +9,10 @@ import {
   consents,
 } from '../schema';
 import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
+import {
+  projectAthleteDeletionStateForAudit,
+  projectDeletionRequestForAudit,
+} from './audit-projections';
 
 export type DeletionActor = AuditActorContext;
 
@@ -86,7 +90,7 @@ export async function requestAthleteDeletion(
       entityId: request.id,
       source: 'WEB',
       reason: normalizedReason,
-      after: request,
+      after: projectDeletionRequestForAudit(request),
       occurredAt: now,
     });
   });
@@ -111,6 +115,12 @@ export async function decideAthleteDeletion(
   )).limit(1);
   if (!request) throw new Error('Open deletion request not found');
   const now = new Date().toISOString();
+  const decidedRequest = {
+    ...request,
+    status: decision,
+    decidedAt: now,
+    decisionReason: normalizedReason,
+  };
   await db.transaction(async (tx) => {
     await tx.update(athleteDeletionRequests).set({ status: decision, decidedAt: now, decisionReason: normalizedReason, updatedAt: now })
       .where(eq(athleteDeletionRequests.id, requestId));
@@ -125,8 +135,8 @@ export async function decideAthleteDeletion(
       entityId: requestId,
       source: 'WEB',
       reason: normalizedReason,
-      before: request,
-      after: { ...request, status: decision, decidedAt: now, decisionReason: normalizedReason },
+      before: projectDeletionRequestForAudit(request),
+      after: projectDeletionRequestForAudit(decidedRequest),
       occurredAt: now,
     });
   });
@@ -162,8 +172,12 @@ export async function completeAthleteDeletion(
       entityId: athleteId,
       source: 'WEB',
       reason: normalizedReason,
-      before: athlete,
-      after: { id: athleteId, deletedAt: now, retainedAudit: true },
+      before: projectAthleteDeletionStateForAudit(athlete),
+      after: projectAthleteDeletionStateForAudit({
+        ...athlete,
+        consentBlockedAt: now,
+        deletedAt: now,
+      }),
       occurredAt: now,
     });
   });
