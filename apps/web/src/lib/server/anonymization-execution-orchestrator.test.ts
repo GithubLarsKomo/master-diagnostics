@@ -15,12 +15,12 @@ import {
   FileSystemReportArtifactStorage,
   type QuarantinableReportArtifactStorage,
   type StagedReportArtifact,
-} from '@/lib/report-artifact-storage';
+} from '../report-artifact-storage';
 import {
   FileSystemTenantExportPackageStorage,
   type QuarantinableTenantExportPackageStorage,
   type StagedTenantExportPackage,
-} from '@/lib/tenant-export-package-storage';
+} from '../tenant-export-package-storage';
 import {
   executeAthleteAnonymization,
   recoverCommittedAthleteAnonymization,
