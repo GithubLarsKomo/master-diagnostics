@@ -60,6 +60,38 @@ export function allAthleteMutableFields(): ReadonlyArray<AthleteMutableField> {
   return athleteMutableFields;
 }
 
+export interface GuardianAuditSource {
+  athleteId: string;
+  fullName: string;
+  relationship: string;
+  email: string | null;
+  phone: string | null;
+  authorityConfirmedAt: string;
+  validUntil: string | null;
+  revokedAt: string | null;
+}
+
+/**
+ * Guardian contact details are direct identifiers of a third party and are not
+ * required in the structured audit state. Relationship and lifecycle metadata
+ * remain available for accountability; revocation reasons stay in the
+ * dedicated audit `reason` field.
+ */
+export function projectGuardianForAudit(source: GuardianAuditSource) {
+  return Object.freeze({
+    auditSchemaVersion: 2,
+    directIdentifiersRedacted: true,
+    athleteId: source.athleteId,
+    fullName: REDACTED,
+    relationship: source.relationship,
+    email: source.email === null ? null : REDACTED,
+    phone: source.phone === null ? null : REDACTED,
+    authorityConfirmedAt: source.authorityConfirmedAt,
+    validUntil: source.validUntil,
+    revokedAt: source.revokedAt,
+  });
+}
+
 export interface DeletionRequestAuditSource {
   id: string;
   athleteId: string;
