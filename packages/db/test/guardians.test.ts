@@ -53,16 +53,49 @@ describe('guardian workflow', () => {
       .rejects.toThrow('Active guardian required');
   });
 
-  it('does not require a guardian for an adult and audits lifecycle events', async () => {
+  it('redacts guardian contact identifiers in new audit payloads', async () => {
     await seedAthlete(db, 'tenant-a', 'athlete-adult', '1990-05-01');
     await expect(assertGuardianRequirement(db, 'tenant-a', 'athlete-adult', new Date('2026-07-29T00:00:00Z'))).resolves.toBeUndefined();
     const guardian = await registerGuardian(db, 'tenant-a', 'athlete-adult', actor, {
-      fullName: 'Max Muster', relationship: 'Bevollmächtigter',
+      fullName: 'Max Muster',
+      relationship: 'Bevollmächtigter',
+      email: 'max@example.test',
+      phone: '+49 1234',
     });
     await revokeGuardian(db, 'tenant-a', 'athlete-adult', guardian.id, actor, 'Vollmacht beendet');
+
     const events = await db.select().from(schema.auditEvents);
     expect(events.map((event) => event.action)).toEqual(['guardian.registered', 'guardian.revoked']);
     expect(events.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
     expect(events.every((event) => event.sessionId === 'session-guardian-a')).toBe(true);
+
+    const registered = JSON.parse(events[0]!.afterJson!);
+    expect(registered).toMatchObject({
+      auditSchemaVersion: 2,
+      directIdentifiersRedacted: true,
+      athleteId: 'athlete-adult',
+      fullName: '[REDACTED]',
+      relationship: 'Bevollmächtigter',
+      email: '[REDACTED]',
+      phone: '[REDACTED]',
+      revokedAt: null,
+    });
+    expect(JSON.parse(events[1]!.beforeJson!)).toMatchObject({
+      fullName: '[REDACTED]',
+      email: '[REDACTED]',
+      phone: '[REDACTED]',
+      revokedAt: null,
+    });
+    expect(JSON.parse(events[1]!.afterJson!)).toMatchObject({
+      fullName: '[REDACTED]',
+      email: '[REDACTED]',
+      phone: '[REDACTED]',
+      revokedAt: expect.any(String),
+    });
+
+    const serializedAudit = JSON.stringify(events);
+    expect(serializedAudit).not.toContain('Max Muster');
+    expect(serializedAudit).not.toContain('max@example.test');
+    expect(serializedAudit).not.toContain('+49 1234');
   });
 });
