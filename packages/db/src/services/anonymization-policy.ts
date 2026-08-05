@@ -4,8 +4,13 @@ import {
   type AnonymizationPreviewScope,
   type AthleteAnonymizationPreview,
 } from './anonymization-preview';
+import {
+  evaluateGlobalPrivacyCapabilities,
+  type GlobalPrivacyCapabilities,
+  type GlobalPrivacyCapabilityEvaluation,
+} from './global-privacy-policy';
 
-export const ANONYMIZATION_POLICY_VERSION = '1.3.0' as const;
+export const ANONYMIZATION_POLICY_VERSION = '1.4.0' as const;
 
 export type AnonymizationPolicyDisposition =
   | 'REDACT_DIRECT_IDENTIFIERS'
@@ -26,6 +31,10 @@ export type AnonymizationPolicyGate =
   | 'AUTOMATABLE_AFTER_ADMIN_APPROVAL'
   | 'POLICY_REVIEW_REQUIRED';
 
+export type RequiredGlobalPrivacyCapability =
+  | 'BACKUP_PRIVACY_POLICY_V1'
+  | 'NOTIFICATION_PRIVACY_POLICY_V1';
+
 export interface AnonymizationPolicyScopeDecision {
   scope: string;
   disposition: AnonymizationPolicyDisposition;
@@ -39,15 +48,18 @@ export interface AthleteAnonymizationPolicyEvaluation {
   decisions: ReadonlyArray<Readonly<AnonymizationPolicyScopeDecision>>;
   unresolvedScopes: ReadonlyArray<string>;
   unresolvedGlobalRequirements: ReadonlyArray<string>;
+  requiredGlobalCapabilities: ReadonlyArray<RequiredGlobalPrivacyCapability>;
   blockers: ReadonlyArray<
     | 'ADMINISTRATIVE_APPROVAL_REQUIRED'
-    | 'GLOBAL_RETENTION_AND_NOTIFICATION_REVIEW_REQUIRED'
+    | 'GLOBAL_PRIVACY_CAPABILITY_ATTESTATION_REQUIRED'
+    | 'UNRESOLVED_GLOBAL_POLICY_REQUIREMENT'
   >;
 }
 
 export interface AthleteAnonymizationPolicyPreview {
   preview: Readonly<AthleteAnonymizationPreview>;
   policy: Readonly<AthleteAnonymizationPolicyEvaluation>;
+  globalPrivacy: Readonly<GlobalPrivacyCapabilityEvaluation>;
 }
 
 const rules: Readonly<Record<string, Readonly<{
@@ -104,18 +116,26 @@ const rules: Readonly<Record<string, Readonly<{
   }),
 });
 
+const knownGlobalRequirements = new Set([
+  'REPORT_STORAGE_VERIFICATION',
+  'BACKUP_RETENTION_POLICY_REVIEW',
+  'NOTIFICATION_PAYLOAD_REVIEW',
+]);
+
 /**
- * Evaluates the read-only preview against versioned disposition rules. This is
- * intentionally fail-closed and never authorizes execution.
+ * Evaluates the read-only preview against versioned disposition rules. Policy
+ * v1.4 has a defined contract for every currently known row-level and global
+ * privacy surface, but it still cannot authorize execution.
  *
- * Policy v1.3 resolves row-level report/export artifacts by deletion. The
- * preview's REPORT_STORAGE_VERIFICATION requirement is thereby satisfied by the
- * explicit remove-artifact disposition, while backup and notification handling
- * remain global policy gates.
+ * Global backup/notification contracts are capability-based because their
+ * runtime state cannot be proven from one athlete's database rows. Missing
+ * capability attestation is therefore fail-closed rather than treated as
+ * equivalent to a disabled feature.
  */
 export function evaluateAnonymizationPolicy(
   scopes: ReadonlyArray<Readonly<AnonymizationPreviewScope>>,
   globalRequirements: ReadonlyArray<string>,
+  globalPrivacyReady = false,
 ): Readonly<AthleteAnonymizationPolicyEvaluation> {
   const decisions = scopes.map((item) => {
     const rule = rules[item.scope];
@@ -141,14 +161,24 @@ export function evaluateAnonymizationPolicy(
     .sort();
 
   const unresolvedGlobalRequirements = globalRequirements
-    .filter((requirement) => requirement === 'BACKUP_RETENTION_POLICY_REVIEW'
-      || requirement === 'NOTIFICATION_PAYLOAD_REVIEW')
+    .filter((requirement) => !knownGlobalRequirements.has(requirement))
     .sort();
+
+  const requiredGlobalCapabilities: RequiredGlobalPrivacyCapability[] = [];
+  if (globalRequirements.includes('BACKUP_RETENTION_POLICY_REVIEW')) {
+    requiredGlobalCapabilities.push('BACKUP_PRIVACY_POLICY_V1');
+  }
+  if (globalRequirements.includes('NOTIFICATION_PAYLOAD_REVIEW')) {
+    requiredGlobalCapabilities.push('NOTIFICATION_PRIVACY_POLICY_V1');
+  }
 
   const blockers = new Set<AthleteAnonymizationPolicyEvaluation['blockers'][number]>();
   blockers.add('ADMINISTRATIVE_APPROVAL_REQUIRED');
+  if (requiredGlobalCapabilities.length > 0 && !globalPrivacyReady) {
+    blockers.add('GLOBAL_PRIVACY_CAPABILITY_ATTESTATION_REQUIRED');
+  }
   if (unresolvedGlobalRequirements.length > 0) {
-    blockers.add('GLOBAL_RETENTION_AND_NOTIFICATION_REVIEW_REQUIRED');
+    blockers.add('UNRESOLVED_GLOBAL_POLICY_REQUIREMENT');
   }
 
   return Object.freeze({
@@ -157,22 +187,29 @@ export function evaluateAnonymizationPolicy(
     decisions: Object.freeze(decisions),
     unresolvedScopes: Object.freeze(unresolvedScopes),
     unresolvedGlobalRequirements: Object.freeze(unresolvedGlobalRequirements),
+    requiredGlobalCapabilities: Object.freeze(requiredGlobalCapabilities.sort()),
     blockers: Object.freeze([...blockers].sort()),
   });
 }
 
 /**
- * Single fail-closed entrypoint for callers that need both the current read-only
- * scope inventory and its versioned policy evaluation. It cannot authorize or
- * execute irreversible processing.
+ * Single fail-closed entrypoint for the scope inventory, versioned policy and
+ * explicit runtime capability attestation. It still cannot authorize or execute
+ * irreversible processing; administrative approval remains a separate gate.
  */
 export async function getAthleteAnonymizationPolicyPreview(
   db: Database,
   tenantId: string,
   athleteId: string,
   assessedAt = new Date().toISOString(),
+  globalCapabilities?: Readonly<GlobalPrivacyCapabilities>,
 ): Promise<Readonly<AthleteAnonymizationPolicyPreview>> {
   const preview = await getAthleteAnonymizationPreview(db, tenantId, athleteId, assessedAt);
-  const policy = evaluateAnonymizationPolicy(preview.scopes, preview.globalRequirements);
-  return Object.freeze({ preview, policy });
+  const globalPrivacy = evaluateGlobalPrivacyCapabilities(globalCapabilities);
+  const policy = evaluateAnonymizationPolicy(
+    preview.scopes,
+    preview.globalRequirements,
+    globalPrivacy.readyForIrreversibleProcessing,
+  );
+  return Object.freeze({ preview, policy, globalPrivacy });
 }
