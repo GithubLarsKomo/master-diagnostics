@@ -4,7 +4,7 @@
 
 `getAthleteAnonymizationPreview()` erzeugt vor jeder späteren irreversiblen Verarbeitung eine tenantgebundene, deterministische und vollständig read-only Übersicht der Datenklassen, die für einen Athleten behandelt werden müssen.
 
-Die Preview ist **keine Ausführungsfreigabe**. Sie kombiniert den bestehenden irreversiblen Precheck mit einem Scope-Inventar und trifft insbesondere für verbleibende Diagnostikdaten bewusst noch keine Löschentscheidung.
+Die Preview ist **keine Ausführungsfreigabe**. Sie kombiniert den bestehenden irreversiblen Precheck mit einem Scope-Inventar. Die Preview selbst bleibt neutral und kennzeichnet detaillierte Diagnostikdaten weiterhin als Reidentifikationsrisiko; die versionierte Policy legt fest, wie dieses Risiko behandelt wird.
 
 ## Erfasste Datenklassen
 
@@ -41,7 +41,7 @@ Die Preview klassifiziert Datenklassen mit einer erforderlichen Behandlung, ohne
 
 Die Aufteilung der früher zusammengefassten Beziehungs-/Privacy-Daten verhindert, dass unterschiedliche Datenschutzanforderungen in einer einzigen Sammelentscheidung verborgen werden. Coach-Zuordnungen, Einwilligungsnachweise, Guardian-Daten und Löschworkflow werden deshalb als eigene Scopes ausgewiesen.
 
-Insbesondere `REIDENTIFICATION_RISK_REVIEW_REQUIRED` bedeutet, dass diagnostische Daten nicht allein durch Entfernung von Name und Geburtsdatum automatisch als anonym gelten. Ob solche Daten entfernt, generalisiert oder unter einem nicht rückführbaren technischen Bezug erhalten werden dürfen, bleibt ein eigenes versioniertes Policy-Gate.
+`REIDENTIFICATION_RISK_REVIEW_REQUIRED` bedeutet weiterhin, dass diagnostische Daten nicht allein durch Entfernung von Name und Geburtsdatum automatisch als anonym gelten. Policy v1.2.0 löst dieses Review-Gate konservativ auf: detaillierte individuelle Diagnostik-/Verlaufsdaten sowie Athlete-/Testplan-Snapshots werden nach erfüllter Retention und späterer expliziter Freigabe entfernt statt unter einer nur pseudonymen technischen Verknüpfung weitergeführt.
 
 ## Sicherheitsgrenzen
 
@@ -55,4 +55,4 @@ Insbesondere `REIDENTIFICATION_RISK_REVIEW_REQUIRED` bedeutet, dass diagnostisch
 
 ## Nächste Gates
 
-Die Policy v1.1.0 schließt die Beziehungs-/Privacy-Entscheidungen. Offen bleiben die Reidentifikationsentscheidung für Diagnostikdaten, Report-/Datei-/Exportartefakte sowie globale Backup-/Notification-Anforderungen. Erst nach deren versionierter Auflösung kann eine explizite administrative Ausführungsfreigabe und schließlich ein atomarer irreversibler Writer implementiert werden.
+Policy v1.2.0 schließt sowohl die Beziehungs-/Privacy-Entscheidungen als auch das Reidentifikations-Gate für detaillierte Diagnostikdaten. Offen bleiben Report-/Datei-/Exportartefakte sowie globale Backup-/Notification-Anforderungen. Erst nach deren versionierter Auflösung kann eine explizite administrative Ausführungsfreigabe und schließlich ein atomarer irreversibler Writer implementiert werden.
