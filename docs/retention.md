@@ -97,12 +97,28 @@ Die Ausgabe erfolgt als JSON auf `stdout` und kann dadurch von Cron, systemd tim
 
 Wichtig: Auch ein im Job als `ELIGIBLE` geführter Datensatz wird **nicht** verändert. Vor einem späteren irreversiblen Writer müssen mindestens Löschworkflow/Freigabe, Schutzbedingungen, Pseudonymisierungsstrategie und Audit-Semantik separat geprüft werden.
 
+## Read-only Schutzprüfung vor irreversibler Verarbeitung
+
+`getAthleteIrreversibleProcessingPrecheck()` kombiniert die Retention-Bewertung mit dem tatsächlichen Löschworkflow und arbeitet weiterhin vollständig read-only.
+
+Der Precheck ist nur bestanden, wenn zum gemeinsamen Bewertungszeitpunkt:
+
+- die Retention-Frist abgelaufen ist,
+- keine manuelle Retention-Prüfung offen ist,
+- die Nutzungssperre bereits wirksam ist,
+- der Soft-Delete bereits wirksam ist,
+- und ein `COMPLETED`-Löschantrag mit wirksamem `completedAt` existiert.
+
+Spätere Ereignisse dürfen einen historischen Assessment-Zeitpunkt nicht rückwirkend freigeben. Die Prüfung liefert deshalb strukturierte Blocker und berücksichtigt nur Zustände, die spätestens zu `assessedAt` wirksam waren.
+
+`passesPrecheck = true` ist erneut nur eine notwendige Vorbedingung. Ein Writer bleibt gesperrt, bis die globale Anonymisierungs-/Pseudonymisierungsstrategie und die Audit-Regeln versioniert umgesetzt sind. Der fachliche Scope und die offenen Writer-Gates sind in `docs/pseudonymization.md` beschrieben.
+
 ## UI-Vorschau
 
 Die Athletenansicht zeigt den Assessment-Status im Abschnitt „Löschantrag“ read-only an. Eine aktive Frist blockiert dort ausdrücklich nur eine spätere irreversible Verarbeitung; Löschantrag, Nutzungssperre und Soft-Delete bleiben davon getrennt. Eine abgelaufene Frist erzeugt keinen Ausführungsbutton und keine automatische Freigabe.
 
 ## Nächste Schritte
 
-1. Pseudonymisierungsstrategie und Audit-Anforderungen definieren.
-2. Read-only Freigabe-/Schutzprüfung für einen späteren irreversiblen Writer ergänzen.
-3. Erst danach einen irreversiblen Writer implementieren.
+1. Audit-Payloads bei Athleten- und Löschereignissen minimieren und die Behandlung historischer identifierhaltiger Audit-Daten festlegen.
+2. Vollständige read-only Anonymisierungs-Preview über Profil, Snapshots, Bericht-/Datei-Artefakte und verbleibende Diagnostikdaten ergänzen.
+3. Erst nach versionierter Policy und expliziter Freigabe einen irreversiblen Writer implementieren.
