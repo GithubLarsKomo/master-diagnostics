@@ -19,6 +19,13 @@ async function createTestDatabase(): Promise<Database> {
   return db;
 }
 
+const admin = {
+  userId: 'admin-a',
+  role: 'TENANT_ADMIN',
+  authProvider: 'BETTER_AUTH' as const,
+  sessionId: 'session-export-a',
+};
+
 describe('tenant export package service', () => {
   it('allows a valid token hash to be consumed exactly once and audits both events', async () => {
     const db = await createTestDatabase();
@@ -29,7 +36,7 @@ describe('tenant export package service', () => {
       tokenHash: 'hash-a',
       storageReference: 'package-a.mde',
       packageSha256: 'sha-a',
-      createdByUserId: 'admin-a',
+      actor: admin,
       expiresAt,
     });
 
@@ -43,6 +50,24 @@ describe('tenant export package service', () => {
       'tenant_export.created',
       'tenant_export.downloaded',
     ]);
+    expect(audit[0]).toMatchObject({
+      actorUserId: 'admin-a',
+      actorRole: 'TENANT_ADMIN',
+      authProvider: 'BETTER_AUTH',
+      sessionId: 'session-export-a',
+      source: 'WEB',
+    });
+    expect(audit[1]).toMatchObject({
+      actorUserId: null,
+      actorRole: null,
+      authProvider: null,
+      sessionId: null,
+      source: 'DOWNLOAD_LINK',
+    });
+    expect(JSON.parse(audit[1]!.afterJson ?? '{}')).toMatchObject({
+      createdByUserId: 'admin-a',
+      packageSha256: 'sha-a',
+    });
   });
 
   it('rejects expired packages and exposes them for cleanup', async () => {
@@ -53,7 +78,7 @@ describe('tenant export package service', () => {
       tokenHash: 'hash-expired',
       storageReference: 'package-expired.mde',
       packageSha256: 'sha-expired',
-      createdByUserId: 'admin-a',
+      actor: admin,
       expiresAt: '2030-01-01T00:00:00.000Z',
     });
 
