@@ -9,6 +9,7 @@
 - automatische Datenbankmigration vor dem App-Start
 - fail-closed Privacy-Capability-Preflight vor dem App-Start
 - stündlicher Cleanup ephemerer Tenant-/Betroffenenexportpakete
+- täglicher read-only Retention-Scan mit minimierter Betriebslog-Ausgabe
 - Docker Compose und Caddy mit automatischem TLS
 - Betrieb der Anwendung ohne externe Datenbank
 
@@ -68,7 +69,8 @@ Die Startreihenfolge ist fest definiert:
 3. Der einmalige `privacy-check`-Container validiert die globale Backup-/Notification-Attestation aus `.env`.
 4. Die Web-App startet erst, wenn Migration und Privacy-Preflight erfolgreich beendet sind, und beantwortet `/api/health`.
 5. Der `export-cleanup`-Container startet nach erfolgreicher Migration und pflegt Tenant- sowie Betroffenenexportpakete stündlich.
-6. Caddy veröffentlicht die Anwendung und beschafft das TLS-Zertifikat.
+6. Der `retention-scan`-Container startet nach erfolgreicher Migration, erzeugt sofort einen read-only Retention-Plan und wiederholt den Scan danach alle 24 Stunden.
+7. Caddy veröffentlicht die Anwendung und beschafft das TLS-Zertifikat.
 
 Ein Upgrade von einem älteren Stand benötigt deshalb vor `up -d --build` mindestens die beiden expliziten `PRIVACY_*_STATE`-Deklarationen. Fehlen sie, ist ein blockierter App-Start das beabsichtigte Verhalten.
 
@@ -85,14 +87,30 @@ App und Maintenance-Container verwenden für `.mdse` denselben Pfad `/var/lib/ma
 
 Bei regulären Updates dürfen diese Volumes nicht mit `docker compose down -v` entfernt werden.
 
+## Retention-Scheduler
+
+`retention-scan` führt ausschließlich `pnpm retention:scan` aus. Der fachliche Job bleibt `mode = READ_ONLY`: Er schreibt weder Löschstatus noch Athleten-, Test- oder Anonymisierungsdaten und startet keinen irreversiblen Writer.
+
+Für den dauerhaften Scheduler ist `RETENTION_JOB_OUTPUT=summary` gesetzt. Docker-Logs enthalten deshalb nur:
+
+- gemeinsamen Bewertungszeitpunkt,
+- Tenant-Anzahl,
+- Kandidatenanzahl,
+- Anzahl `ELIGIBLE`,
+- Anzahl `MANUAL_REVIEW`.
+
+Tenant-, Athleten- und verknüpfte User-IDs werden nicht in die periodische Summary-Ausgabe übernommen. Für eine explizite administrative Analyse bleibt `pnpm retention:scan` außerhalb des Scheduler-Containers standardmäßig im Vollmodus verfügbar.
+
+Ein Fehler beendet den Container wegen `set -e`; `restart: unless-stopped` startet ihn erneut. Damit wird ein fehlgeschlagener Scan nicht als erfolgreicher Tageszyklus verschluckt. Die 24-Stunden-Kadenz ist relativ zum letzten erfolgreichen Containerlauf; sie ist bewusst kein kalendergenauer Mitternachts-Cron.
+
 ## Verifikation
 
 ```bash
 curl --fail https://diagnostics.example.org/api/health
-docker compose -f infra/docker-compose.club.yml logs --tail=100 migrate privacy-check export-cleanup app caddy
+docker compose -f infra/docker-compose.club.yml logs --tail=100 migrate privacy-check export-cleanup retention-scan app caddy
 ```
 
-Erwartet werden eine erfolgreiche Health-Antwort, mit Status `0` beendete `migrate`- und `privacy-check`-Container sowie ein laufender `export-cleanup`-Container.
+Erwartet werden eine erfolgreiche Health-Antwort, mit Status `0` beendete `migrate`- und `privacy-check`-Container sowie laufende `export-cleanup`- und `retention-scan`-Container.
 
 ## Betrieb
 
@@ -108,6 +126,12 @@ docker compose -f infra/docker-compose.club.yml run --rm privacy-check
 
 # Export-Maintenance beobachten
 docker compose -f infra/docker-compose.club.yml logs -f export-cleanup
+
+# Read-only Retention-Scheduler beobachten
+docker compose -f infra/docker-compose.club.yml logs -f retention-scan
+
+# Manuellen vollständigen Retention-Plan erzeugen
+docker compose -f infra/docker-compose.club.yml run --rm -e RETENTION_JOB_OUTPUT=full retention-scan pnpm --filter @masters/db retention:scan
 
 # Aktualisierung
 git pull --ff-only

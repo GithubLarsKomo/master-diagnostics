@@ -141,11 +141,11 @@
   - [x] Actor-/Session-Kontext für implementierte Kernwriter vereinheitlicht
   - [x] Coverage-Matrix gegen SPEC §33.1 dokumentiert
   - [ ] offene Auth-, Freigabe-, Diagnostik-, Bluetooth- und Betriebsereignisse schließen
-- [ ] Aufbewahrungsjob 1–10 Jahre
+- [x] Aufbewahrungsjob 1–10 Jahre
   - [x] deterministische Fristberechnung und tenantgebundene Athletenbewertung
   - [x] tenantweite read-only Kandidatenermittlung
   - [x] ausführbarer read-only Retention-Job mit tenantweiser Planung und JSON-Ausgabe
-  - [ ] produktive Zeitplanung im Deployment/Betrieb
+  - [x] tägliche read-only Zeitplanung im Club-Deployment mit minimierter Scheduler-Ausgabe
 - [x] Lösch-/Anonymisierungsanträge und Aufbewahrungsprüfung
   - [x] Antrag, Entscheidung und sofortiger Soft-Delete/Nutzungsschutz
   - [x] read-only Aufbewahrungsprüfung für irreversible Verarbeitung

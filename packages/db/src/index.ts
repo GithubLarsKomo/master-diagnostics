@@ -26,6 +26,7 @@ export * from './services/consents';
 export * from './services/guardians';
 export * from './services/deletion-requests';
 export * from './services/retention';
+export * from './services/retention-job-output';
 export * from './services/irreversible-processing';
 export * from './services/test-plans';
 export * from './services/test-safety';

@@ -62,6 +62,27 @@ jobs:
         run: |
           rm -f "${{ github.workspace }}/ci.db"
           pnpm db:migrate
+      - name: Verify scheduled retention summary
+        run: |
+          RETENTION_JOB_OUTPUT=summary pnpm --silent --filter @masters/db retention:scan > /tmp/retention-summary.json
+          python3 - <<'PY'
+          import json
+
+          with open('/tmp/retention-summary.json', encoding='utf-8') as handle:
+              summary = json.load(handle)
+          assert summary == {
+              'mode': 'READ_ONLY',
+              'assessedAt': summary['assessedAt'],
+              'tenantCount': 0,
+              'candidateCount': 0,
+              'eligibleCount': 0,
+              'manualReviewCount': 0,
+          }
+          assert set(summary) == {
+              'mode', 'assessedAt', 'tenantCount', 'candidateCount',
+              'eligibleCount', 'manualReviewCount',
+          }
+          PY
       - name: Run Playwright E2E
         run: |
           set -o pipefail
@@ -88,7 +109,7 @@ jobs:
           sed -i 's/replace-with-at-least-32-random-bytes/ci-only-secret-with-at-least-32-characters/' .env
       - name: Validate Docker Compose configuration
         run: docker compose -f infra/docker-compose.club.yml config --quiet
-      - name: Verify subject package storage wiring
+      - name: Verify maintenance wiring
         run: |
           docker compose -f infra/docker-compose.club.yml config --format json > /tmp/club-compose.json
           python3 - <<'PY'
@@ -100,6 +121,7 @@ jobs:
 
           app = config["services"]["app"]
           cleanup = config["services"]["export-cleanup"]
+          retention = config["services"]["retention-scan"]
           assert app["environment"]["DATA_SUBJECT_DELIVERY_PACKAGE_ROOT"] == path
           assert cleanup["environment"]["DATA_SUBJECT_DELIVERY_PACKAGE_ROOT"] == path
 
@@ -113,10 +135,18 @@ jobs:
               return matches[0]
 
           assert source_for(app) == source_for(cleanup)
-          command = cleanup.get("command", [])
-          command_text = " ".join(command) if isinstance(command, list) else str(command)
-          assert "tenant-exports:cleanup" in command_text
-          assert "data-subject-delivery:cleanup" in command_text
+          cleanup_command = cleanup.get("command", [])
+          cleanup_text = " ".join(cleanup_command) if isinstance(cleanup_command, list) else str(cleanup_command)
+          assert "tenant-exports:cleanup" in cleanup_text
+          assert "data-subject-delivery:cleanup" in cleanup_text
+
+          assert retention["environment"]["DATABASE_URL"] == "http://libsql:8080"
+          assert retention["environment"]["RETENTION_JOB_OUTPUT"] == "summary"
+          retention_command = retention.get("command", [])
+          retention_text = " ".join(retention_command) if isinstance(retention_command, list) else str(retention_command)
+          assert "--silent --filter @masters/db retention:scan" in retention_text
+          assert "sleep 86400" in retention_text
+          assert retention["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
           PY
       - name: Build migration image
         run: docker build --target migrator -f apps/web/Dockerfile -t master-diagnostics-migrator:ci .
