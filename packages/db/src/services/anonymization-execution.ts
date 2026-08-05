@@ -1,8 +1,12 @@
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import type { Database } from '../client';
-import { athleteAnonymizationExecutions } from '../schema';
+import {
+  athleteAnonymizationExecutionArtifacts,
+  athleteAnonymizationExecutions,
+} from '../schema';
 import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 import { validateAthleteAnonymizationApproval } from './anonymization-approval';
+import { getAthleteAnonymizationPolicyPreview } from './anonymization-policy';
 import type { GlobalPrivacyCapabilities } from './global-privacy-policy';
 
 export const ANONYMIZATION_EXECUTION_VERSION = 1 as const;
@@ -13,6 +17,8 @@ export type AthleteAnonymizationExecutionStatus =
   | 'DB_COMMITTED'
   | 'COMPLETED'
   | 'ABORTED';
+
+export type AthleteAnonymizationExecutionArtifactKind = 'REPORT' | 'TENANT_EXPORT';
 
 export interface StoredAthleteAnonymizationExecution {
   id: string;
@@ -27,6 +33,15 @@ export interface StoredAthleteAnonymizationExecution {
   dbCommittedAt: string | null;
   completedAt: string | null;
   abortedAt: string | null;
+}
+
+export interface StoredAthleteAnonymizationExecutionArtifact {
+  id: string;
+  tenantId: string;
+  executionId: string;
+  kind: AthleteAnonymizationExecutionArtifactKind;
+  storageReference: string;
+  createdAt: string;
 }
 
 function stored(
@@ -48,6 +63,19 @@ function stored(
   });
 }
 
+function storedArtifact(
+  row: typeof athleteAnonymizationExecutionArtifacts.$inferSelect,
+): Readonly<StoredAthleteAnonymizationExecutionArtifact> {
+  return Object.freeze({
+    id: row.id,
+    tenantId: row.tenantId,
+    executionId: row.executionId,
+    kind: row.kind,
+    storageReference: row.storageReference,
+    createdAt: row.createdAt,
+  });
+}
+
 export async function getAthleteAnonymizationExecution(
   db: Database,
   tenantId: string,
@@ -62,10 +90,26 @@ export async function getAthleteAnonymizationExecution(
   return row ? stored(row) : null;
 }
 
+export async function listAthleteAnonymizationExecutionArtifacts(
+  db: Database,
+  tenantId: string,
+  executionId: string,
+): Promise<ReadonlyArray<Readonly<StoredAthleteAnonymizationExecutionArtifact>>> {
+  const rows = await db.select().from(athleteAnonymizationExecutionArtifacts).where(and(
+    eq(athleteAnonymizationExecutionArtifacts.tenantId, tenantId),
+    eq(athleteAnonymizationExecutionArtifacts.executionId, executionId),
+  )).orderBy(
+    asc(athleteAnonymizationExecutionArtifacts.kind),
+    asc(athleteAnonymizationExecutionArtifacts.storageReference),
+  );
+  return Object.freeze(rows.map(storedArtifact));
+}
+
 /**
- * Creates the durable preparation record for one approved irreversible run.
- * This is deliberately still non-destructive. A later writer must revalidate
- * the approval immediately before staging the first external artifact.
+ * Creates the durable preparation record and its immutable external-artifact
+ * manifest for one approved irreversible run. This is still non-destructive.
+ * The manifest survives deletion of the source report/export rows so a process
+ * restart after DB_COMMITTED can deterministically resume quarantine purge.
  */
 export async function prepareAthleteAnonymizationExecution(
   db: Database,
@@ -101,6 +145,19 @@ export async function prepareAthleteAnonymizationExecution(
     return stored(existing);
   }
 
+  const policyPreview = await getAthleteAnonymizationPolicyPreview(
+    db,
+    tenantId,
+    athleteId,
+    preparedAt,
+    globalCapabilities,
+  );
+  if (!policyPreview.globalPrivacy.readyForIrreversibleProcessing
+    || policyPreview.policy.unresolvedScopes.length > 0
+    || policyPreview.policy.unresolvedGlobalRequirements.length > 0) {
+    throw new Error('Anonymization policy changed during execution preparation');
+  }
+
   const row = {
     id: crypto.randomUUID(),
     tenantId,
@@ -118,8 +175,33 @@ export async function prepareAthleteAnonymizationExecution(
     updatedAt: preparedAt,
   };
 
+  const manifest = [
+    ...policyPreview.preview.reportArtifactReferences.map((storageReference) => ({
+      id: crypto.randomUUID(),
+      tenantId,
+      executionId: row.id,
+      kind: 'REPORT' as const,
+      storageReference,
+      createdAt: preparedAt,
+      updatedAt: preparedAt,
+    })),
+    ...policyPreview.preview.activeTenantExportPackageReferences.map((storageReference) => ({
+      id: crypto.randomUUID(),
+      tenantId,
+      executionId: row.id,
+      kind: 'TENANT_EXPORT' as const,
+      storageReference,
+      createdAt: preparedAt,
+      updatedAt: preparedAt,
+    })),
+  ].sort((left, right) => left.kind.localeCompare(right.kind)
+    || left.storageReference.localeCompare(right.storageReference));
+
   await db.transaction(async (tx) => {
     await tx.insert(athleteAnonymizationExecutions).values(row);
+    if (manifest.length > 0) {
+      await tx.insert(athleteAnonymizationExecutionArtifacts).values(manifest);
+    }
     await appendAuditEvent(tx, {
       tenantId,
       ...auditActorFields(actor),
@@ -132,6 +214,8 @@ export async function prepareAthleteAnonymizationExecution(
         approvalId,
         athleteId,
         status: row.status,
+        reportArtifactCount: policyPreview.preview.reportArtifactReferences.length,
+        tenantExportArtifactCount: policyPreview.preview.activeTenantExportPackageReferences.length,
       },
       occurredAt: preparedAt,
     });
