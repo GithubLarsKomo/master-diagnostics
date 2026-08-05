@@ -7,7 +7,7 @@ import {
   testStages,
   tests,
 } from '../schema';
-import { appendAuditEvent } from './audit';
+import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 
 export type ReviewMeasurementKind = 'REST' | 'STAGE' | 'RECOVERY';
 export type ReviewQualityStatus =
@@ -17,10 +17,7 @@ export type ReviewQualityStatus =
   | 'MISSING'
   | 'MANUALLY_CORRECTED';
 
-export interface TestReviewActor {
-  userId: string;
-  role: string;
-}
+export type TestReviewActor = AuditActorContext;
 
 export interface TestReviewRow {
   kind: ReviewMeasurementKind;
@@ -485,8 +482,7 @@ export async function correctTestMeasurement(
     await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'test.measurement.corrected',
       entityType: `test_measurement.${input.kind.toLowerCase()}`,
       entityId: after.entityId,

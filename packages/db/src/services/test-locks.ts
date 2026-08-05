@@ -6,14 +6,11 @@ import {
   testLocks,
   tests,
 } from '../schema';
-import { appendAuditEvent } from './audit';
+import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 
 export const TEST_LOCK_TTL_MS = 60_000;
 
-export interface TestLockActor {
-  userId: string;
-  role: string;
-}
+export type TestLockActor = AuditActorContext;
 
 export type TestLockResult =
   | {
@@ -134,8 +131,7 @@ export async function acquireTestLock(
     await appendAuditEvent(tx, {
       tenantId,
       occurredAt: lease.acquiredAt,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'test.lock.acquired',
       entityType: 'test_lock',
       entityId: testId,
@@ -271,8 +267,7 @@ export async function takeOverTestLock(
     await appendAuditEvent(tx, {
       tenantId,
       occurredAt: lease.acquiredAt,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'test.lock.taken_over',
       entityType: 'test_lock',
       entityId: testId,
@@ -320,8 +315,7 @@ export async function releaseTestLock(
     await appendAuditEvent(tx, {
       tenantId,
       occurredAt: now,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+      ...auditActorFields(actor),
       action: 'test.lock.released',
       entityType: 'test_lock',
       entityId: testId,

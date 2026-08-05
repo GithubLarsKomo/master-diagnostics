@@ -29,13 +29,12 @@ export async function POST(
     authorize(context, 'test.run');
     const { testId } = await params;
     const input = requestSchema.parse(await request.json());
-    const actor = { userId: context.userId, role: context.role };
 
     if (input.action === 'acquire') {
       const result = await acquireTestLock(
         db,
         context.tenantId,
-        actor,
+        context,
         testId,
       );
       return NextResponse.json(result, {
@@ -46,7 +45,7 @@ export async function POST(
       return NextResponse.json(await renewTestLock(
         db,
         context.tenantId,
-        actor,
+        context,
         testId,
         input.token,
       ));
@@ -55,7 +54,7 @@ export async function POST(
       return NextResponse.json(await takeOverTestLock(
         db,
         context.tenantId,
-        actor,
+        context,
         testId,
         input.reason,
       ));
@@ -64,7 +63,7 @@ export async function POST(
     await releaseTestLock(
       db,
       context.tenantId,
-      actor,
+      context,
       testId,
       input.token,
     );
