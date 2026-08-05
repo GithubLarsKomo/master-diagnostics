@@ -82,3 +82,39 @@ export const athleteAnonymizationApprovals = sqliteTable('athlete_anonymization_
   uniqueIndex('athlete_anonymization_approval_scope_uq')
     .on(t.tenantId, t.athleteId, t.scopeFingerprint, t.capabilityFingerprint),
 ]);
+
+export const athleteAnonymizationExecutions = sqliteTable('athlete_anonymization_executions', {
+  id: id(),
+  tenantId: tenantId(),
+  athleteId: text('athlete_id').notNull().references(() => athletes.id),
+  approvalId: text('approval_id').notNull().references(() => athleteAnonymizationApprovals.id),
+  executionVersion: integer('execution_version').notNull(),
+  status: text('status', { enum: [
+    'PREPARING',
+    'ARTIFACTS_STAGED',
+    'DB_COMMITTED',
+    'COMPLETED',
+    'ABORTED',
+  ] }).notNull(),
+  preparedByUserId: text('prepared_by_user_id').notNull().references(() => users.id),
+  preparedAt: text('prepared_at').notNull(),
+  artifactsStagedAt: text('artifacts_staged_at'),
+  dbCommittedAt: text('db_committed_at'),
+  completedAt: text('completed_at'),
+  abortedAt: text('aborted_at'),
+  ...timestamps,
+}, (t) => [
+  uniqueIndex('athlete_anonymization_execution_approval_uq').on(t.approvalId),
+]);
+
+export const athleteAnonymizationExecutionArtifacts = sqliteTable('athlete_anonymization_execution_artifacts', {
+  id: id(),
+  tenantId: tenantId(),
+  executionId: text('execution_id').notNull().references(() => athleteAnonymizationExecutions.id),
+  kind: text('kind', { enum: ['REPORT', 'TENANT_EXPORT'] }).notNull(),
+  storageReference: text('storage_reference').notNull(),
+  ...timestamps,
+}, (t) => [
+  uniqueIndex('athlete_anonymization_execution_artifact_uq')
+    .on(t.executionId, t.kind, t.storageReference),
+]);

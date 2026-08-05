@@ -7,6 +7,7 @@ export * from './services/audit-privacy-redaction';
 export * from './services/anonymization-preview';
 export * from './services/anonymization-policy';
 export * from './services/anonymization-approval';
+export * from './services/anonymization-execution';
 export * from './services/global-privacy-policy';
 export * from './services/club-bootstrap';
 export * from './services/factory-protocol-templates';
