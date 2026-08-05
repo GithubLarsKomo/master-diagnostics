@@ -92,7 +92,8 @@ describe('athlete anonymization execution contract', () => {
     const auditRows = await db.select().from(schema.auditEvents)
       .where(eq(schema.auditEvents.action, 'athlete.anonymization_execution_prepared'));
     expect(auditRows).toHaveLength(1);
-    expect(auditRows[0]?.afterJson).toContain(first.id);
+    expect(auditRows[0]).toMatchObject({ entityId: first.id });
+    expect(auditRows[0]?.afterJson).toContain(approval.id);
     expect(auditRows[0]?.afterJson).not.toContain('Petra');
     expect(auditRows[0]?.afterJson).not.toContain('Muster');
   });
