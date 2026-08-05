@@ -2,7 +2,10 @@ import { createClient } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import { describe, expect, it } from 'vitest';
-import type { TenantPortabilityExportDocument } from '@masters/domain';
+import {
+  TENANT_EXPORT_SCHEMA_VERSION,
+  type TenantPortabilityExportDocument,
+} from '@masters/domain';
 import type { Database } from '../src/client';
 import * as schema from '../src/schema';
 import { getTenantPortabilityExportSource, type PortableRow } from '../src/services/tenant-export';
@@ -76,9 +79,9 @@ describe('tenant portability roundtrip', () => {
     expect(exported.tables.audit_event_privacy_redactions).toHaveLength(1);
 
     const document: TenantPortabilityExportDocument = {
-      schemaVersion: 'masters-tenant-export-v1',
+      schemaVersion: TENANT_EXPORT_SCHEMA_VERSION,
       manifest: {
-        schemaVersion: 'masters-tenant-export-v1',
+        schemaVersion: TENANT_EXPORT_SCHEMA_VERSION,
         exportedAt: '2026-08-03T15:00:00.000Z',
         tenantId: 'tenant-source',
         sections: {},
