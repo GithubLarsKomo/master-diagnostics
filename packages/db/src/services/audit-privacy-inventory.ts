@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import type { Database } from '../client';
 import {
   athleteGuardians,
@@ -171,9 +171,12 @@ export async function inventoryAthleteAuditPrivacyMaintenance(
   const [athlete] = await db
     .select()
     .from(athletes)
-    .where(eq(athletes.id, athleteId))
+    .where(and(
+      eq(athletes.id, athleteId),
+      eq(athletes.tenantId, tenantId),
+    ))
     .limit(1);
-  if (!athlete || athlete.tenantId !== tenantId) {
+  if (!athlete) {
     throw new Error('Athlete not found');
   }
 
@@ -181,7 +184,10 @@ export async function inventoryAthleteAuditPrivacyMaintenance(
     db
       .select({ snapshotJson: athleteSnapshots.snapshotJson })
       .from(athleteSnapshots)
-      .where(eq(athleteSnapshots.athleteId, athleteId)),
+      .where(and(
+        eq(athleteSnapshots.tenantId, tenantId),
+        eq(athleteSnapshots.athleteId, athleteId),
+      )),
     db
       .select({
         fullName: athleteGuardians.fullName,
@@ -189,7 +195,10 @@ export async function inventoryAthleteAuditPrivacyMaintenance(
         phone: athleteGuardians.phone,
       })
       .from(athleteGuardians)
-      .where(eq(athleteGuardians.athleteId, athleteId)),
+      .where(and(
+        eq(athleteGuardians.tenantId, tenantId),
+        eq(athleteGuardians.athleteId, athleteId),
+      )),
     db
       .select({
         id: auditEvents.id,
