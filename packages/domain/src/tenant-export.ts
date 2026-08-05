@@ -1,4 +1,18 @@
-export const TENANT_EXPORT_SCHEMA_VERSION = 'masters-tenant-export-v1' as const;
+export const TENANT_EXPORT_SCHEMA_VERSION = 'masters-tenant-export-v2' as const;
+export const TENANT_EXPORT_LEGACY_SCHEMA_VERSIONS = [
+  'masters-tenant-export-v1',
+] as const;
+
+export type TenantExportSchemaVersion =
+  | typeof TENANT_EXPORT_SCHEMA_VERSION
+  | (typeof TENANT_EXPORT_LEGACY_SCHEMA_VERSIONS)[number];
+
+export function isSupportedTenantExportSchemaVersion(
+  value: unknown,
+): value is TenantExportSchemaVersion {
+  return value === TENANT_EXPORT_SCHEMA_VERSION
+    || TENANT_EXPORT_LEGACY_SCHEMA_VERSIONS.some((version) => version === value);
+}
 
 export interface TenantExportSectionManifest {
   rowCount: number;
@@ -14,7 +28,7 @@ export interface TenantExportReportArtifact {
 }
 
 export interface TenantExportManifest {
-  schemaVersion: typeof TENANT_EXPORT_SCHEMA_VERSION;
+  schemaVersion: TenantExportSchemaVersion;
   exportedAt: string;
   tenantId: string;
   sections: Record<string, TenantExportSectionManifest>;
@@ -22,7 +36,7 @@ export interface TenantExportManifest {
 }
 
 export interface TenantPortabilityExportDocument {
-  schemaVersion: typeof TENANT_EXPORT_SCHEMA_VERSION;
+  schemaVersion: TenantExportSchemaVersion;
   manifest: TenantExportManifest;
   tenant: Record<string, unknown>;
   users: Record<string, unknown>[];
