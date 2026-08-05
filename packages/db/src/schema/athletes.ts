@@ -111,7 +111,7 @@ export const athleteAnonymizationExecutionArtifacts = sqliteTable('athlete_anony
   id: id(),
   tenantId: tenantId(),
   executionId: text('execution_id').notNull().references(() => athleteAnonymizationExecutions.id),
-  kind: text('kind', { enum: ['REPORT', 'TENANT_EXPORT'] }).notNull(),
+  kind: text('kind', { enum: ['REPORT', 'TENANT_EXPORT', 'DATA_SUBJECT_EXPORT'] }).notNull(),
   storageReference: text('storage_reference').notNull(),
   ...timestamps,
 }, (t) => [
