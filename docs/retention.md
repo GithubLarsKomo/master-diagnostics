@@ -56,12 +56,24 @@ Die Bewertung liefert:
 
 `eligibleForIrreversibleAction = true` ist nur eine notwendige Vorbedingung. Ein späterer Pseudonymisierungs-/Löschservice muss zusätzlich einen freigegebenen Löschworkflow und weitere Schutzbedingungen prüfen.
 
+## Tenantweite Retention-Worklist
+
+`listTenantRetentionCandidates()` baut eine deterministische, tenantgebundene und vollständig read-only Worklist für einen späteren Retention-Job:
+
+- Athleten mit noch aktiver Aufbewahrungsfrist werden nicht aufgenommen.
+- Abgelaufene Assessments erhalten `disposition = ELIGIBLE`.
+- Fail-closed-Fälle erhalten `disposition = MANUAL_REVIEW` und bleiben für automatisierte irreversible Verarbeitung gesperrt.
+- Die Ausgabe ist nach `athleteId` stabil sortiert und enthält zusätzlich `consentBlockedAt` und `deletedAt`, damit ein späterer Writer seine weiteren Schutzbedingungen prüfen kann.
+- Die Worklist selbst prüft **keine** Freigabe eines Löschantrags und führt keine Datenänderung aus.
+
+Damit bedeutet `ELIGIBLE` weiterhin ausschließlich: Die Retention-Frist steht einer späteren irreversiblen Aktion nicht mehr entgegen. Es ist keine Löschfreigabe.
+
 ## UI-Vorschau
 
 Die Athletenansicht zeigt den Assessment-Status im Abschnitt „Löschantrag“ read-only an. Eine aktive Frist blockiert dort ausdrücklich nur eine spätere irreversible Verarbeitung; Löschantrag, Nutzungssperre und Soft-Delete bleiben davon getrennt. Eine abgelaufene Frist erzeugt keinen Ausführungsbutton und keine automatische Freigabe.
 
 ## Nächste Schritte
 
-1. Tenantweite Kandidatenermittlung als read-only Job ergänzen.
+1. Geplanten Retention-Job auf Basis der read-only Worklist ergänzen, zunächst ohne irreversible Datenänderung.
 2. Pseudonymisierungsstrategie und Audit-Anforderungen definieren.
 3. Erst danach einen irreversiblen Writer implementieren.
