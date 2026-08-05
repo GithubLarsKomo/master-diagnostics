@@ -7,6 +7,7 @@ import {
   createDatabaseFromConfig,
   getAthleteAnonymizationExecutionByApproval,
   migrateDatabase,
+  prepareAthleteAnonymizationExecution,
   type Database,
   type GlobalPrivacyCapabilities,
 } from '@masters/db';
@@ -246,6 +247,36 @@ describe('athlete anonymization end-to-end orchestrator', () => {
     expect(actions.filter((action) => action === 'athlete.anonymization_artifacts_staged')).toHaveLength(1);
     expect(actions.filter((action) => action === 'athlete.anonymization_db_committed')).toHaveLength(1);
     expect(actions.filter((action) => action === 'athlete.anonymization_completed')).toHaveLength(1);
+  });
+
+  it('aborts a PREPARING execution when subject-package scope drifts before first staging', async () => {
+    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, deps } = await setup();
+    const prepared = await prepareAthleteAnonymizationExecution(
+      db,
+      'tenant-a',
+      'athlete-a',
+      approval.id,
+      actor,
+      capabilities,
+      '2026-08-05T13:01:00.000Z',
+    );
+    expect(prepared.status).toBe('PREPARING');
+
+    await dataSubjectExportStorage.remove(subjectReference);
+    await db.delete(schema.athleteDataSubjectDeliveryPackages);
+
+    await expect(executeAthleteAnonymization(deps, {
+      tenantId: 'tenant-a', athleteId: 'athlete-a', approvalId: approval.id,
+      actor, globalCapabilities: capabilities,
+    })).rejects.toThrow();
+
+    const execution = await getAthleteAnonymizationExecutionByApproval(db, 'tenant-a', 'athlete-a', approval.id);
+    expect(execution?.status).toBe('ABORTED');
+    expect(new TextDecoder().decode(await reportStorage.get(reportReference))).toBe('report-pdf');
+    expect(new TextDecoder().decode(await exportStorage.get(exportReference))).toBe('encrypted-export');
+    const actions = (await db.select().from(schema.auditEvents)).map((row) => row.action);
+    expect(actions.filter((action) => action === 'athlete.anonymization_artifacts_staged')).toHaveLength(0);
+    expect(actions.filter((action) => action === 'athlete.anonymization_execution_aborted')).toHaveLength(1);
   });
 
   it('restores staged artifacts and aborts when DB scope drifts after staging', async () => {
