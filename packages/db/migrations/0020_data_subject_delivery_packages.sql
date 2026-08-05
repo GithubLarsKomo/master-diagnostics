@@ -41,3 +41,25 @@ BEGIN
       AND approval.athlete_id = NEW.athlete_id
   ) THEN RAISE(ABORT, 'data subject delivery approval tenant athlete boundary required') END;
 END;
+--> statement-breakpoint
+CREATE TRIGGER athlete_data_subject_delivery_packages_protect_update
+BEFORE UPDATE ON athlete_data_subject_delivery_packages
+BEGIN
+  SELECT CASE WHEN OLD.id IS NOT NEW.id
+    OR OLD.tenant_id IS NOT NEW.tenant_id
+    OR OLD.athlete_id IS NOT NEW.athlete_id
+    OR OLD.approval_id IS NOT NEW.approval_id
+    OR OLD.package_version IS NOT NEW.package_version
+    OR OLD.manifest_fingerprint IS NOT NEW.manifest_fingerprint
+    OR OLD.token_hash IS NOT NEW.token_hash
+    OR OLD.storage_reference IS NOT NEW.storage_reference
+    OR OLD.package_sha256 IS NOT NEW.package_sha256
+    OR OLD.created_by_user_id IS NOT NEW.created_by_user_id
+    OR OLD.expires_at IS NOT NEW.expires_at
+    OR OLD.created_at IS NOT NEW.created_at
+    THEN RAISE(ABORT, 'data subject delivery package metadata is immutable') END;
+  SELECT CASE WHEN OLD.downloaded_at IS NOT NULL OR NEW.downloaded_at IS NULL
+    THEN RAISE(ABORT, 'data subject delivery package may only be consumed once') END;
+  SELECT CASE WHEN NEW.updated_at <> NEW.downloaded_at
+    THEN RAISE(ABORT, 'data subject delivery package update time must equal download time') END;
+END;
