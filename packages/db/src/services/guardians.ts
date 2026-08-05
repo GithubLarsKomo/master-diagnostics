@@ -33,6 +33,18 @@ function normalize(input: GuardianInput): GuardianInput {
   };
 }
 
+function guardianAuditState(guardian: typeof athleteGuardians.$inferSelect) {
+  return {
+    athleteId: guardian.athleteId,
+    relationship: guardian.relationship,
+    hasEmail: guardian.email !== null,
+    hasPhone: guardian.phone !== null,
+    authorityConfirmedAt: guardian.authorityConfirmedAt,
+    validUntil: guardian.validUntil,
+    revokedAt: guardian.revokedAt,
+  };
+}
+
 async function requireAthlete(db: Database, tenantId: string, athleteId: string) {
   const [athlete] = await db.select().from(athletes).where(and(
     eq(athletes.id, athleteId),
@@ -84,7 +96,7 @@ export async function registerGuardian(
       entityType: 'athlete_guardian',
       entityId: guardian.id,
       source: 'WEB',
-      after: guardian,
+      after: guardianAuditState(guardian),
       occurredAt: now,
     });
   });
@@ -120,7 +132,11 @@ export async function revokeGuardian(
       entityId: guardianId,
       source: 'WEB',
       reason: normalizedReason,
-      before: guardian,
+      before: guardianAuditState(guardian),
+      after: {
+        ...guardianAuditState(guardian),
+        revokedAt: now,
+      },
       occurredAt: now,
     });
   });
