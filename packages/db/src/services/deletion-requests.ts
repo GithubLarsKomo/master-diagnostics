@@ -9,30 +9,12 @@ import {
   consents,
 } from '../schema';
 import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
+import {
+  projectAthleteDeletionStateForAudit,
+  projectDeletionRequestForAudit,
+} from './audit-projections';
 
 export type DeletionActor = AuditActorContext;
-
-function deletionRequestAuditState(
-  request: typeof athleteDeletionRequests.$inferSelect | typeof athleteDeletionRequests.$inferInsert,
-) {
-  return {
-    id: request.id,
-    athleteId: request.athleteId,
-    status: request.status,
-    requestedAt: request.requestedAt,
-    decidedAt: request.decidedAt ?? null,
-    completedAt: request.completedAt ?? null,
-  };
-}
-
-function athleteDeletionAuditState(athlete: typeof athletes.$inferSelect) {
-  return {
-    athleteId: athlete.id,
-    usageBlockedAt: athlete.consentBlockedAt,
-    deletedAt: athlete.deletedAt,
-    linkedToUser: athlete.linkedUserId !== null,
-  };
-}
 
 async function requireAthlete(db: Database, tenantId: string, athleteId: string) {
   const [athlete] = await db.select().from(athletes).where(and(
@@ -107,7 +89,8 @@ export async function requestAthleteDeletion(
       entityType: 'athlete_deletion_request',
       entityId: request.id,
       source: 'WEB',
-      after: deletionRequestAuditState(request),
+      reason: normalizedReason,
+      after: projectDeletionRequestForAudit(request),
       occurredAt: now,
     });
   });
@@ -151,8 +134,9 @@ export async function decideAthleteDeletion(
       entityType: 'athlete_deletion_request',
       entityId: requestId,
       source: 'WEB',
-      before: deletionRequestAuditState(request),
-      after: deletionRequestAuditState(decidedRequest),
+      reason: normalizedReason,
+      before: projectDeletionRequestForAudit(request),
+      after: projectDeletionRequestForAudit(decidedRequest),
       occurredAt: now,
     });
   });
@@ -188,14 +172,12 @@ export async function completeAthleteDeletion(
       entityId: athleteId,
       source: 'WEB',
       reason: normalizedReason,
-      before: athleteDeletionAuditState(athlete),
-      after: {
-        athleteId,
-        usageBlockedAt: now,
+      before: projectAthleteDeletionStateForAudit(athlete),
+      after: projectAthleteDeletionStateForAudit({
+        ...athlete,
+        consentBlockedAt: now,
         deletedAt: now,
-        linkedToUser: athlete.linkedUserId !== null,
-        retainedAudit: true,
-      },
+      }),
       occurredAt: now,
     });
   });
