@@ -158,7 +158,7 @@
   - [x] read-only Kandidateninventar für identifierhaltigen Audit-Altbestand
   - [x] kontrollierter, versionierter Privacy-Maintenance-Pfad für Audit-Altbestand
   - [x] versionierte Regeln für Profil, Snapshots, Beziehungs-/Privacy- und Diagnostikdaten
-  - [x] versionierte Regeln für Report- und aktive Exportartefakte
+  - [x] versionierte Regeln für Report-, Tenant-Export- und Betroffenenexportartefakte
   - [x] globale Backup-/Notification-Privacy-Verträge versioniert definiert
   - [ ] produktive Backup-/Notification-Capabilities gegen die Verträge attestieren
 - [ ] Betroffenenexport
@@ -170,14 +170,17 @@
   - [x] immutable, fingerprintgebundene administrative Review-/Freigabe für alle aktuellen Freitext-Review-Punkte implementieren
   - [x] freigegebene Review-Entscheidungen in eine deterministische, erneut fingerprintgeprüfte reviewed Delivery-Projection anwenden
   - [x] Report-PDF-Integrität gegen immutable Content-Hashes prüfen und deterministisches Paketmanifest vorbereiten
-  - [ ] verifiziertes `manifest.json`/`data.json`/PDF-Dateiset als auslieferbares Paket oder Archiv persistieren
-  - [ ] administrative Erzeugung/Auslieferung mit Export-Audit implementieren
+  - [x] verifiziertes `manifest.json`/`data.json`/PDF-Dateiset als verschlüsseltes `.mdse`-Paket persistieren
+  - [x] administrative Erzeugung mit Tenant-Admin-Reauthentisierung und Export-Audit implementieren
+  - [x] tokenfreien Download-Endpunkt mit atomarem One-Time-Bearer-Consume und Download-Audit implementieren
+  - [x] verbliebene `.mdse`-Pakete in Policy 1.6 / irreversiblen Athleten-Scope integrieren
+  - [ ] normalen Lifecycle-Cleanup für konsumierte/abgelaufene `.mdse`-Pakete implementieren
 - [ ] Löschung/Anonymisierung mit Vorschau
-  - [x] vollständige read-only Scope-Preview über Profil, Snapshots, Beziehungsdaten, Diagnostik, Reports, Audit und aktive Exportartefakte
+  - [x] vollständige read-only Scope-Preview über Profil, Snapshots, Beziehungsdaten, Diagnostik, Reports, Audit und Exportartefakte
   - [x] versionierte fail-closed Dispositionsregeln für bekannte Scopes
   - [x] Beziehungs-/Privacy-Policy für Coach-Zuordnungen, Einwilligungen, Guardians und Löschworkflow
   - [x] Diagnostik-Policy: detaillierte individuelle Diagnostik-/Verlaufsdaten nach Retention entfernen
-  - [x] Report-/Exportartefakt-Policy: Storage-Artefakte und referenzierende Datensätze entfernen
+  - [x] Report-/Exportartefakt-Policy: Report-, Tenant-Export- und Betroffenenexport-Storage-Artefakte und referenzierende Datensätze entfernen
   - [x] Backup-/Notification-Policy in Runtime-Capability-Verträge überführt
   - [ ] Runtime-Capability-Attestation im produktiven Betrieb bereitstellen
   - [x] explizite administrative Freigabe als immutable, fingerprintgebundener Vertrag
