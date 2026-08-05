@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   TENANT_EXPORT_SCHEMA_VERSION,
+  isSupportedTenantExportSchemaVersion,
   type TenantExportReportArtifact,
   type TenantPortabilityExportDocument,
 } from '@masters/domain';
@@ -38,8 +39,12 @@ function parseDocument(value: unknown, issues: TenantImportDryRunIssue[]): Tenan
     issues.push(issue('INVALID_DOCUMENT', '$', 'Export document must be an object.'));
     return null;
   }
-  if (value.schemaVersion !== TENANT_EXPORT_SCHEMA_VERSION) {
-    issues.push(issue('UNSUPPORTED_SCHEMA_VERSION', '$.schemaVersion', `Expected ${TENANT_EXPORT_SCHEMA_VERSION}.`));
+  if (!isSupportedTenantExportSchemaVersion(value.schemaVersion)) {
+    issues.push(issue(
+      'UNSUPPORTED_SCHEMA_VERSION',
+      '$.schemaVersion',
+      `Unsupported tenant export schema version. Current version is ${TENANT_EXPORT_SCHEMA_VERSION}.`,
+    ));
   }
   if (!isRecord(value.manifest)) {
     issues.push(issue('INVALID_MANIFEST', '$.manifest', 'Manifest must be an object.'));
@@ -89,8 +94,10 @@ export function validateTenantImportDryRun(value: unknown): TenantImportDryRunPr
   }
 
   const manifest = document.manifest;
-  if (manifest.schemaVersion !== TENANT_EXPORT_SCHEMA_VERSION) {
-    issues.push(issue('MANIFEST_SCHEMA_VERSION_MISMATCH', '$.manifest.schemaVersion', 'Manifest schema version does not match.'));
+  if (!isSupportedTenantExportSchemaVersion(manifest.schemaVersion)) {
+    issues.push(issue('UNSUPPORTED_MANIFEST_SCHEMA_VERSION', '$.manifest.schemaVersion', 'Manifest schema version is not supported.'));
+  } else if (manifest.schemaVersion !== document.schemaVersion) {
+    issues.push(issue('MANIFEST_SCHEMA_VERSION_MISMATCH', '$.manifest.schemaVersion', 'Manifest schema version does not match the document.'));
   }
   const tenantId = typeof document.tenant.id === 'string' ? document.tenant.id : null;
   if (!tenantId || tenantId !== manifest.tenantId) {
