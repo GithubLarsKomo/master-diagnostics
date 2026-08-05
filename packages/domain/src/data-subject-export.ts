@@ -25,7 +25,7 @@ export const DATA_SUBJECT_EXPORT_SECTIONS = [
 ] as const;
 
 export type DataSubjectExportSection = (typeof DATA_SUBJECT_EXPORT_SECTIONS)[number];
-export type DataSubjectExportRow = Record<string, unknown>;
+export type DataSubjectExportRow = Readonly<Record<string, unknown>>;
 
 export interface DataSubjectExportReportArtifactReference {
   reportVersionId: string;
@@ -36,8 +36,8 @@ export interface DataSubjectExportReportArtifactReference {
 export interface AthleteDataSubjectExportSource {
   tenantId: string;
   athleteId: string;
-  data: Record<DataSubjectExportSection, DataSubjectExportRow[]>;
-  reportArtifacts: DataSubjectExportReportArtifactReference[];
+  data: Readonly<Record<DataSubjectExportSection, readonly DataSubjectExportRow[]>>;
+  reportArtifacts: readonly Readonly<DataSubjectExportReportArtifactReference>[];
 }
 
 export interface AthleteDataSubjectExportDocument extends AthleteDataSubjectExportSource {
@@ -45,8 +45,8 @@ export interface AthleteDataSubjectExportDocument extends AthleteDataSubjectExpo
   exportedAt: string;
 }
 
-function copyRows(rows: readonly DataSubjectExportRow[]): DataSubjectExportRow[] {
-  return rows.map((row) => Object.freeze({ ...row }));
+function copyRows(rows: readonly DataSubjectExportRow[]): readonly DataSubjectExportRow[] {
+  return Object.freeze(rows.map((row) => Object.freeze({ ...row })));
 }
 
 export function createAthleteDataSubjectExportDocument(
@@ -59,8 +59,8 @@ export function createAthleteDataSubjectExportDocument(
 
   const data = Object.fromEntries(DATA_SUBJECT_EXPORT_SECTIONS.map((section) => [
     section,
-    Object.freeze(copyRows(source.data[section] ?? [])),
-  ])) as Record<DataSubjectExportSection, DataSubjectExportRow[]>;
+    copyRows(source.data[section] ?? []),
+  ])) as Record<DataSubjectExportSection, readonly DataSubjectExportRow[]>;
 
   return Object.freeze({
     schemaVersion: DATA_SUBJECT_EXPORT_SCHEMA_VERSION,
