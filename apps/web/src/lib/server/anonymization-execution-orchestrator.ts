@@ -14,15 +14,15 @@ import {
   type GlobalPrivacyCapabilities,
   type StoredAthleteAnonymizationExecution,
 } from '@masters/db';
-import { db as configuredDb } from '@/lib/db';
+import { db as configuredDb } from '../db';
 import {
   createReportArtifactStorage,
   type QuarantinableReportArtifactStorage,
-} from '@/lib/report-artifact-storage';
+} from '../report-artifact-storage';
 import {
   createTenantExportPackageStorage,
   type QuarantinableTenantExportPackageStorage,
-} from '@/lib/tenant-export-package-storage';
+} from '../tenant-export-package-storage';
 import {
   purgeAnonymizationArtifacts,
   restoreAnonymizationArtifacts,
@@ -219,9 +219,6 @@ export async function executeAthleteAnonymization(
         deps.exportStorage,
       );
     } catch (stageError) {
-      // stageAnonymizationArtifacts restores successfully before throwing a
-      // normal error. AggregateError means rollback itself was incomplete and
-      // the execution must remain recoverable instead of being marked ABORTED.
       if (stageError instanceof AggregateError) throw stageError;
       return abortAfterSuccessfulRestore(deps, input, execution.id, stageError);
     }
@@ -249,9 +246,6 @@ export async function executeAthleteAnonymization(
       }
     }
   } else {
-    // A process may have stopped after the durable staged transition. Re-running
-    // stage is idempotent and verifies that every manifest file is still either
-    // correctly quarantined or recoverably active.
     const handles = await artifactHandles(deps, input.tenantId, execution.id);
     try {
       staged = await stageAnonymizationArtifacts(
@@ -307,10 +301,6 @@ export async function executeAthleteAnonymization(
   return finalizeCommittedExecution(deps, { ...input, executionId: execution.id });
 }
 
-/**
- * Recovery entrypoint for a process restart after the irreversible DB commit.
- * It never validates/replays the old approval and never re-runs the DB mutation.
- */
 export async function recoverCommittedAthleteAnonymization(
   deps: AthleteAnonymizationOrchestratorDependencies,
   input: AthleteAnonymizationRecoveryInput,
