@@ -1,5 +1,6 @@
 import {
   abortAthleteAnonymizationExecution,
+  attestGlobalPrivacyCapabilitiesFromEnvironment,
   commitStagedAthleteAnonymizationDatabase,
   completeAthleteAnonymizationExecution,
   getAthleteAnonymizationExecution,
@@ -41,6 +42,11 @@ export interface AthleteAnonymizationExecutionInput {
   actor: AuditActorContext;
   globalCapabilities: Readonly<GlobalPrivacyCapabilities>;
 }
+
+export type ConfiguredAthleteAnonymizationExecutionInput = Omit<
+  AthleteAnonymizationExecutionInput,
+  'globalCapabilities'
+>;
 
 export interface AthleteAnonymizationRecoveryInput {
   tenantId: string;
@@ -384,4 +390,24 @@ export function configuredAnonymizationOrchestratorDependencies(): AthleteAnonym
     exportStorage: createTenantExportPackageStorage(),
     dataSubjectExportStorage: createDataSubjectDeliveryPackageStorage(),
   };
+}
+
+/**
+ * Production-oriented entrypoint. Runtime global privacy capabilities are read
+ * from the same explicit environment contract as the deployment preflight.
+ * Missing or incomplete attestation fails before any athlete DB/file mutation.
+ */
+export async function executeConfiguredAthleteAnonymization(
+  input: ConfiguredAthleteAnonymizationExecutionInput,
+): Promise<Readonly<StoredAthleteAnonymizationExecution>> {
+  const attestation = attestGlobalPrivacyCapabilitiesFromEnvironment(process.env);
+  if (!attestation.evaluation.readyForIrreversibleProcessing) {
+    throw new Error(
+      `Global privacy runtime attestation is not ready: ${attestation.evaluation.blockers.join(', ')}`,
+    );
+  }
+  return executeAthleteAnonymization(
+    configuredAnonymizationOrchestratorDependencies(),
+    { ...input, globalCapabilities: attestation.capabilities },
+  );
 }
