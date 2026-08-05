@@ -64,3 +64,21 @@ export const athleteDeletionRequests = sqliteTable('athlete_deletion_requests', 
   completedAt: text('completed_at'),
   ...timestamps,
 }, (t) => [uniqueIndex('athlete_deletion_request_version_uq').on(t.tenantId, t.athleteId, t.requestedAt)]);
+
+export const athleteAnonymizationApprovals = sqliteTable('athlete_anonymization_approvals', {
+  id: id(),
+  tenantId: tenantId(),
+  athleteId: text('athlete_id').notNull().references(() => athletes.id),
+  deletionRequestId: text('deletion_request_id').notNull().references(() => athleteDeletionRequests.id),
+  approvalVersion: integer('approval_version').notNull(),
+  policyVersion: text('policy_version').notNull(),
+  assessedAt: text('assessed_at').notNull(),
+  scopeFingerprint: text('scope_fingerprint').notNull(),
+  capabilityFingerprint: text('capability_fingerprint').notNull(),
+  approvedByUserId: text('approved_by_user_id').notNull().references(() => users.id),
+  approvedAt: text('approved_at').notNull(),
+  ...timestamps,
+}, (t) => [
+  uniqueIndex('athlete_anonymization_approval_scope_uq')
+    .on(t.tenantId, t.athleteId, t.scopeFingerprint, t.capabilityFingerprint),
+]);
