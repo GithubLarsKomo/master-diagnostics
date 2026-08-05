@@ -141,16 +141,43 @@ Der Decision-Fingerprint bindet die normalisierte Entscheidungsliste. Jede Ände
 - Ein zweiter Tenant-Admin kann denselben Scope unabhängig freigeben.
 - Das Audit `athlete.data_subject_delivery_review_approved` enthält nur Versionen, Fingerprints und technische Zähler, keinen Roh-Freitext oder Guardian-Kontaktdaten.
 
+## Reviewed Delivery-Snapshot
+
+`buildAthleteDataSubjectReviewedDeliverySnapshot()` erzeugt nach einer gültigen Approval die versionierte In-Memory-Stufe `masters-data-subject-reviewed-delivery-v1`.
+
+Der Ablauf ist bewusst zweifach fail-closed:
+
+1. Die Approval wird vollständig gegen den aktuellen Source und die aktuelle Policy revalidiert.
+2. Anschließend wird genau der Source, aus dem der Snapshot tatsächlich gebaut wird, **noch einmal** mit demselben Source-Fingerprint-Vertrag gehasht und gegen die Approval geprüft.
+
+Damit kann ein Source-Wechsel zwischen Approval-Validierung und Snapshot-Bildung nicht unbemerkt einen anderen Freitext in eine `INCLUDE_ORIGINAL`-Entscheidung einschleusen.
+
+Für jeden freigegebenen Review-Punkt gilt:
+
+- `INCLUDE_ORIGINAL`: der aktuelle Rohwert des exakt gebundenen Section-/Row-/Feld-Schlüssels wird übernommen,
+- `REDACT`: der Wert wird deterministisch durch `[REVIEW_REDACTED]` ersetzt.
+
+Die bereits automatisch erzeugten `[THIRD_PARTY_REDACTED]`-Redaktionen bleiben unverändert bestehen. Im reviewed Snapshot darf kein offener `[REVIEW_REQUIRED]`-Punkt verbleiben.
+
+Der Snapshot enthält zusätzlich:
+
+- Approval-ID,
+- Source-Fingerprint,
+- Decision-Fingerprint,
+- einen eigenen SHA-256-`reviewedFingerprint` über den vollständigen reviewed Source.
+
+Wiederholte Erzeugung aus identischem Source und identischer Approval liefert denselben reviewed Fingerprint. Die Snapshot-Erzeugung ist read-only und erzeugt bewusst noch kein weiteres Audit-Ereignis.
+
 ## Noch keine Auslieferung
 
-Source, Delivery-Projection und Review-Approval zusammen:
+Source, Delivery-Projection, Review-Approval und reviewed Snapshot zusammen:
 
 - erzeugen noch kein Downloadpaket,
 - lesen noch keine Report-PDF-Dateiinhalte,
 - schreiben noch keinen finalen Export-/Download-Audit,
 - veröffentlichen keine Web- oder Download-Route.
 
-Der nächste Schritt ist eine deterministische reviewed Delivery-Projection, die eine frisch validierte Approval auf den aktuellen Source anwendet. Erst danach folgen PDF-Integrität/Paketierung und die tatsächliche auditierte Auslieferung.
+Der nächste Schritt ist die Integritätsprüfung der referenzierten Report-PDFs gegen die gespeicherten Report-Hashes und ein deterministisches Paketmanifest. Erst danach folgt die tatsächliche auditierte Auslieferung.
 
 ## Sicherheitsinvarianten
 
@@ -179,3 +206,12 @@ Der nächste Schritt ist eine deterministische reviewed Delivery-Projection, die
 - sind pro Reviewer idempotent,
 - bleiben DB-seitig immutable,
 - invalidieren bei Source-/Review-/Vertragsdrift fail-closed.
+
+`buildAthleteDataSubjectReviewedDeliverySnapshot()`:
+
+- nutzt nur frisch validierte Approvals,
+- re-fingerprintet den tatsächlich verwendeten Source,
+- kann ausschließlich exakt freigegebene Freitextfelder wiederherstellen,
+- ersetzt `REDACT` deterministisch,
+- bewahrt strukturierte Drittpersonenredaktionen,
+- ist read-only und liefert einen eigenen deterministischen Snapshot-Fingerprint.

@@ -6,8 +6,10 @@ import {
 } from './data-subject-export';
 
 export const DATA_SUBJECT_DELIVERY_POLICY_VERSION = 'masters-data-subject-delivery-v1' as const;
+export const DATA_SUBJECT_REVIEWED_DELIVERY_VERSION = 'masters-data-subject-reviewed-delivery-v1' as const;
 export const DATA_SUBJECT_THIRD_PARTY_REDACTION = '[THIRD_PARTY_REDACTED]' as const;
 export const DATA_SUBJECT_REVIEW_REQUIRED = '[REVIEW_REQUIRED]' as const;
+export const DATA_SUBJECT_REVIEW_REDACTION = '[REVIEW_REDACTED]' as const;
 
 export type DataSubjectDeliveryReviewReason = 'FREE_TEXT_REVIEW_REQUIRED';
 export type DataSubjectDeliveryRedactionReason = 'THIRD_PARTY_IDENTIFIER';
@@ -40,6 +42,15 @@ export interface AthleteDataSubjectDeliveryProjection {
   projectedSource: Readonly<AthleteDataSubjectExportSource>;
   automaticRedactions: readonly Readonly<DataSubjectDeliveryRedaction>[];
   reviewItems: readonly Readonly<DataSubjectDeliveryReviewItem>[];
+}
+
+export interface AthleteDataSubjectReviewedDeliverySnapshot {
+  version: typeof DATA_SUBJECT_REVIEWED_DELIVERY_VERSION;
+  approvalId: string;
+  sourceFingerprint: string;
+  decisionsFingerprint: string;
+  reviewedFingerprint: string;
+  reviewedSource: Readonly<AthleteDataSubjectExportSource>;
 }
 
 const FREE_TEXT_FIELDS = new Set([
