@@ -165,7 +165,9 @@
   - [x] versionierten JSON-Vertrag und feste fachliche Datenabschnitte definieren
   - [x] tenant-isolierten read-only Athleten-Source über Profil, Beziehungen, Privacy-, Test-, Diagnostik- und Report-Metadaten implementieren
   - [x] Report-PDFs als externe Artefaktreferenzen inventarisieren
-  - [ ] Drittpersonen-/Guardian-Daten für Auslieferung explizit reviewen/redigieren
+  - [x] strukturierte Drittpersonen-/Guardian-Identifikatoren in der Delivery-Projection deterministisch redigieren
+  - [x] Freitextfelder fail-closed ausblenden und als PII-freie Review-Punkte inventarisieren
+  - [ ] administrative Review-/Freigabe für Freitext-Review-Punkte implementieren
   - [ ] Report-PDFs in ein auslieferbares Paket integrieren
   - [ ] administrative Erzeugung/Auslieferung mit Export-Audit implementieren
 - [ ] Löschung/Anonymisierung mit Vorschau
