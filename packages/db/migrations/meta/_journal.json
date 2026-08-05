@@ -134,6 +134,13 @@
       "when": 1785941400000,
       "tag": "0018_test_event_privacy_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1785942000000,
+      "tag": "0019_data_subject_delivery_approvals",
+      "breakpoints": true
     }
   ]
 }

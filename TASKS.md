@@ -167,7 +167,8 @@
   - [x] Report-PDFs als externe Artefaktreferenzen inventarisieren
   - [x] strukturierte Drittpersonen-/Guardian-Identifikatoren in der Delivery-Projection deterministisch redigieren
   - [x] Freitextfelder fail-closed ausblenden und als PII-freie Review-Punkte inventarisieren
-  - [ ] administrative Review-/Freigabe für Freitext-Review-Punkte implementieren
+  - [x] immutable, fingerprintgebundene administrative Review-/Freigabe für alle aktuellen Freitext-Review-Punkte implementieren
+  - [ ] freigegebene Review-Entscheidungen in eine deterministische reviewed Delivery-Projection anwenden
   - [ ] Report-PDFs in ein auslieferbares Paket integrieren
   - [ ] administrative Erzeugung/Auslieferung mit Export-Audit implementieren
 - [ ] Löschung/Anonymisierung mit Vorschau

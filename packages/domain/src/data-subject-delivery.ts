@@ -11,12 +11,20 @@ export const DATA_SUBJECT_REVIEW_REQUIRED = '[REVIEW_REQUIRED]' as const;
 
 export type DataSubjectDeliveryReviewReason = 'FREE_TEXT_REVIEW_REQUIRED';
 export type DataSubjectDeliveryRedactionReason = 'THIRD_PARTY_IDENTIFIER';
+export type DataSubjectDeliveryReviewDecision = 'INCLUDE_ORIGINAL' | 'REDACT';
 
 export interface DataSubjectDeliveryReviewItem {
   section: DataSubjectExportSection;
   rowId: string;
   field: string;
   reason: DataSubjectDeliveryReviewReason;
+}
+
+export interface DataSubjectDeliveryReviewDecisionInput {
+  section: DataSubjectExportSection;
+  rowId: string;
+  field: string;
+  decision: DataSubjectDeliveryReviewDecision;
 }
 
 export interface DataSubjectDeliveryRedaction {
