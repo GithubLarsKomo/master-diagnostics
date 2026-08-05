@@ -1,9 +1,11 @@
 import {
-  DATA_SUBJECT_REVIEWED_DELIVERY_VERSION,
   buildAthleteDataSubjectReviewedDeliverySnapshot,
-  type AthleteDataSubjectReviewedDeliverySnapshot,
   type Database,
 } from '@masters/db';
+import {
+  DATA_SUBJECT_REVIEWED_DELIVERY_VERSION,
+  type AthleteDataSubjectReviewedDeliverySnapshot,
+} from '@masters/domain';
 import type { ReportArtifactStorage } from '../report-artifact-storage';
 
 export const DATA_SUBJECT_PACKAGE_MANIFEST_VERSION = 'masters-data-subject-package-manifest-v1' as const;
