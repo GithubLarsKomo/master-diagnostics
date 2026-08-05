@@ -216,6 +216,9 @@ export async function buildRetentionJobPlan(
   options: RetentionJobPlanOptions = {},
 ): Promise<Readonly<RetentionJobPlan>> {
   const assessedAt = options.assessedAt ?? new Date().toISOString();
+  if (!Number.isFinite(Date.parse(assessedAt))) {
+    throw new Error('Assessment time must be a valid ISO-8601 timestamp');
+  }
   const tenantRows = options.tenantId
     ? await db
       .select({ id: tenants.id, retentionYears: tenants.retentionYears })
