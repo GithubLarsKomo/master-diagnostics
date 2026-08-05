@@ -168,16 +168,62 @@ Der Snapshot enthält zusätzlich:
 
 Wiederholte Erzeugung aus identischem Source und identischer Approval liefert denselben reviewed Fingerprint. Die Snapshot-Erzeugung ist read-only und erzeugt bewusst noch kein weiteres Audit-Ereignis.
 
+## Verifiziertes Paketmanifest
+
+`prepareAthleteDataSubjectDeliveryPackage()` bildet den letzten read-only Vorbau vor einer tatsächlichen Auslieferung. Der Service erzeugt einen in-memory Paketkandidaten aus dem frisch validierten reviewed Snapshot und den zugehörigen Report-PDFs.
+
+Version des Manifests: `masters-data-subject-package-manifest-v1`.
+
+### `data.json`
+
+Der vollständige reviewed Snapshot wird deterministisch als `data.json` mit abschließendem Newline serialisiert und SHA-256-gehasht. Das Manifest bindet Hash und Byte-Länge dieser Datei.
+
+### Report-PDF-Integrität
+
+Für jede im reviewed Snapshot gebundene Report-Artefaktreferenz gilt fail-closed:
+
+- genau eine passende `report_versions`-Zeile muss vorhanden sein,
+- Report-Version-ID und `storage_reference` müssen exakt übereinstimmen,
+- `content_hash` muss ein gültiger `sha256:<64 hex>`-Wert sein,
+- die tatsächlich aus dem Report-Storage gelesenen PDF-Bytes werden SHA-256-gehasht,
+- der tatsächliche Hash muss bytegenau dem unveränderlichen `report_versions.content_hash` entsprechen.
+
+Eine fehlende Datei, ein ungültiger gespeicherter Hash oder eine Hash-Abweichung bricht die Vorbereitung vollständig ab.
+
+Die bereits verifizierten PDF-Bytes werden im vorbereiteten Paketkandidaten gehalten. Ein späterer Writer darf die Reports nicht nach der Verifikation erneut aus dem Storage lesen, weil dies die Bindung zwischen geprüften und tatsächlich ausgelieferten Bytes aufbrechen würde.
+
+### Paketpfade und Manifest-Bindung
+
+Interne Storage-Referenzen werden nicht als Paketpfade verwendet. Reports erhalten nach stabiler Sortierung deterministische Namen:
+
+- `reports/0001.pdf`
+- `reports/0002.pdf`
+- usw.
+
+Das Manifest bindet:
+
+- Approval-ID,
+- Source-Fingerprint,
+- Decision-Fingerprint,
+- reviewed Fingerprint,
+- `data.json`,
+- jede Report-Version-ID,
+- Paketpfad und Medientyp,
+- SHA-256 und Byte-Länge jeder Datei.
+
+Über diesen Manifest-Core wird zusätzlich ein eigener deterministischer `manifestFingerprint` gebildet. `manifest.json` wird aus dem vollständigen Manifest vorbereitet.
+
+Die Paketvorbereitung bleibt read-only und schreibt bewusst noch keinen Export-Audit, weil weder ein dauerhaftes Paket erzeugt noch eine Datei an einen Betroffenen ausgeliefert wurde.
+
 ## Noch keine Auslieferung
 
-Source, Delivery-Projection, Review-Approval und reviewed Snapshot zusammen:
+Source, Delivery-Projection, Review-Approval, reviewed Snapshot und Paketmanifest zusammen:
 
-- erzeugen noch kein Downloadpaket,
-- lesen noch keine Report-PDF-Dateiinhalte,
-- schreiben noch keinen finalen Export-/Download-Audit,
-- veröffentlichen keine Web- oder Download-Route.
+- erzeugen noch kein dauerhaftes Downloadpaket oder Archiv,
+- veröffentlichen keine Web- oder Download-Route,
+- schreiben noch keinen finalen Export-/Download-Audit.
 
-Der nächste Schritt ist die Integritätsprüfung der referenzierten Report-PDFs gegen die gespeicherten Report-Hashes und ein deterministisches Paketmanifest. Erst danach folgt die tatsächliche auditierte Auslieferung.
+Der nächste und abschließende Betroffenenexport-Slice muss aus `manifest.json`, `data.json` und den **bereits verifizierten** PDF-Bytes ein persistiertes, tenantgebundenes Auslieferungspaket erzeugen und administrative Erzeugung sowie Download mit den spezifizierten Export-/Download-Audits absichern.
 
 ## Sicherheitsinvarianten
 
@@ -215,3 +261,12 @@ Der nächste Schritt ist die Integritätsprüfung der referenzierten Report-PDFs
 - ersetzt `REDACT` deterministisch,
 - bewahrt strukturierte Drittpersonenredaktionen,
 - ist read-only und liefert einen eigenen deterministischen Snapshot-Fingerprint.
+
+`prepareAthleteDataSubjectDeliveryPackage()`:
+
+- verwendet nur frisch validierte reviewed Snapshots,
+- nimmt nur Reports mit exakt passender Report-Version und Storage-Referenz auf,
+- verifiziert die tatsächlichen PDF-Bytes gegen den unveränderlichen Content-Hash,
+- hält exakt die verifizierten Bytes für den späteren Writer fest,
+- erzeugt deterministische Paketpfade, Datei-Hashes und einen Manifest-Fingerprint,
+- mutiert weder Fachdaten noch Audit-Log und stellt selbst noch nichts aus.
