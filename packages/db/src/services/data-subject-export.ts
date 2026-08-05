@@ -150,10 +150,9 @@ export async function getAthleteDataSubjectExportSource(
   ];
 
   const entries = await Promise.all(queries.map((query) => queryRows(db, query)));
-  const data = Object.fromEntries(DATA_SUBJECT_EXPORT_SECTIONS.map((section) => [section, []])) as Record<
-    DataSubjectExportSection,
-    DataSubjectExportRow[]
-  >;
+  const data = Object.fromEntries(
+    DATA_SUBJECT_EXPORT_SECTIONS.map((section) => [section, []]),
+  ) as unknown as Record<DataSubjectExportSection, DataSubjectExportRow[]>;
   data.athletes = [{ ...athlete }];
   for (const [section, rows] of entries) data[section] = rows;
 
