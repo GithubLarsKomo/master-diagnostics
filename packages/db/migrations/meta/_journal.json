@@ -99,6 +99,13 @@
       "when": 1785937200000,
       "tag": "0013_anonymization_approvals",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1785938400000,
+      "tag": "0014_anonymization_execution_state",
+      "breakpoints": true
     }
   ]
 }
