@@ -7,24 +7,34 @@ import {
   type AthleteDataSubjectExportSource,
 } from '../src/data-subject-export';
 
+function emptyData(): AthleteDataSubjectExportSource['data'] {
+  return Object.fromEntries(DATA_SUBJECT_EXPORT_SECTIONS.map((section) => [section, []])) as unknown as AthleteDataSubjectExportSource['data'];
+}
+
 function emptySource(): AthleteDataSubjectExportSource {
   return {
     tenantId: 'tenant-a',
     athleteId: 'athlete-a',
-    data: Object.fromEntries(DATA_SUBJECT_EXPORT_SECTIONS.map((section) => [section, []])) as AthleteDataSubjectExportSource['data'],
+    data: emptyData(),
     reportArtifacts: [],
   };
 }
 
 describe('data subject export contract', () => {
   it('creates a deterministic versioned document without dropping empty sections', () => {
-    const source = emptySource();
-    source.data.athletes.push({ id: 'athlete-a', first_name: 'Petra' });
-    source.reportArtifacts.push({
-      reportVersionId: 'report-a',
-      storageReference: 'tenant-a/test-a/de/report-a.pdf',
-      mediaType: 'application/pdf',
-    });
+    const source: AthleteDataSubjectExportSource = {
+      tenantId: 'tenant-a',
+      athleteId: 'athlete-a',
+      data: {
+        ...emptyData(),
+        athletes: [{ id: 'athlete-a', first_name: 'Petra' }],
+      },
+      reportArtifacts: [{
+        reportVersionId: 'report-a',
+        storageReference: 'tenant-a/test-a/de/report-a.pdf',
+        mediaType: 'application/pdf',
+      }],
+    };
 
     const document = createAthleteDataSubjectExportDocument(
       source,
