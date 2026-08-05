@@ -5,7 +5,7 @@ import {
   type AthleteAnonymizationPreview,
 } from './anonymization-preview';
 
-export const ANONYMIZATION_POLICY_VERSION = '1.2.0' as const;
+export const ANONYMIZATION_POLICY_VERSION = '1.3.0' as const;
 
 export type AnonymizationPolicyDisposition =
   | 'REDACT_DIRECT_IDENTIFIERS'
@@ -17,10 +17,10 @@ export type AnonymizationPolicyDisposition =
   | 'REDACT_DELETION_REQUEST_FREE_TEXT'
   | 'REMOVE_DIAGNOSTIC_AND_OPERATIONAL_RECORDS'
   | 'REVIEW_DIAGNOSTIC_REIDENTIFICATION_RISK'
-  | 'VERIFY_AND_HANDLE_EXTERNAL_ARTIFACT'
+  | 'REMOVE_REPORT_ARTIFACTS_AND_RECORDS'
   | 'USE_CONTROLLED_AUDIT_PRIVACY_PATH'
   | 'PRESERVE_AUDIT_REDACTION_PROOF'
-  | 'CLEAN_UP_EPHEMERAL_EXPORT';
+  | 'REMOVE_ACTIVE_TENANT_EXPORT_PACKAGES';
 
 export type AnonymizationPolicyGate =
   | 'AUTOMATABLE_AFTER_ADMIN_APPROVAL'
@@ -38,9 +38,9 @@ export interface AthleteAnonymizationPolicyEvaluation {
   executionAllowed: false;
   decisions: ReadonlyArray<Readonly<AnonymizationPolicyScopeDecision>>;
   unresolvedScopes: ReadonlyArray<string>;
+  unresolvedGlobalRequirements: ReadonlyArray<string>;
   blockers: ReadonlyArray<
     | 'ADMINISTRATIVE_APPROVAL_REQUIRED'
-    | 'EXTERNAL_ARTIFACT_VERIFICATION_REQUIRED'
     | 'GLOBAL_RETENTION_AND_NOTIFICATION_REVIEW_REQUIRED'
   >;
 }
@@ -87,8 +87,8 @@ const rules: Readonly<Record<string, Readonly<{
     gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
   }),
   REPORT_DATABASE_RECORDS: Object.freeze({
-    disposition: 'VERIFY_AND_HANDLE_EXTERNAL_ARTIFACT',
-    gate: 'POLICY_REVIEW_REQUIRED',
+    disposition: 'REMOVE_REPORT_ARTIFACTS_AND_RECORDS',
+    gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
   }),
   AUDIT_PRIVACY_CANDIDATES: Object.freeze({
     disposition: 'USE_CONTROLLED_AUDIT_PRIVACY_PATH',
@@ -99,20 +99,19 @@ const rules: Readonly<Record<string, Readonly<{
     gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
   }),
   ACTIVE_TENANT_EXPORT_PACKAGES: Object.freeze({
-    disposition: 'CLEAN_UP_EPHEMERAL_EXPORT',
-    gate: 'POLICY_REVIEW_REQUIRED',
+    disposition: 'REMOVE_ACTIVE_TENANT_EXPORT_PACKAGES',
+    gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
   }),
 });
 
 /**
  * Evaluates the read-only preview against versioned disposition rules. This is
- * intentionally fail-closed: it never authorizes execution and only identifies
- * which scopes may become automatable after explicit administrative approval
- * versus which scopes still need a policy decision or external verification.
+ * intentionally fail-closed and never authorizes execution.
  *
- * Policy v1.2 deliberately chooses deletion for individualized diagnostic and
- * operational records instead of claiming that removal of direct identifiers
- * alone makes detailed physiological time series irreversibly anonymous.
+ * Policy v1.3 resolves row-level report/export artifacts by deletion. The
+ * preview's REPORT_STORAGE_VERIFICATION requirement is thereby satisfied by the
+ * explicit remove-artifact disposition, while backup and notification handling
+ * remain global policy gates.
  */
 export function evaluateAnonymizationPolicy(
   scopes: ReadonlyArray<Readonly<AnonymizationPreviewScope>>,
@@ -141,15 +140,14 @@ export function evaluateAnonymizationPolicy(
     .map((decision) => decision.scope)
     .sort();
 
+  const unresolvedGlobalRequirements = globalRequirements
+    .filter((requirement) => requirement === 'BACKUP_RETENTION_POLICY_REVIEW'
+      || requirement === 'NOTIFICATION_PAYLOAD_REVIEW')
+    .sort();
+
   const blockers = new Set<AthleteAnonymizationPolicyEvaluation['blockers'][number]>();
   blockers.add('ADMINISTRATIVE_APPROVAL_REQUIRED');
-  if (
-    unresolvedScopes.includes('REPORT_DATABASE_RECORDS')
-    || unresolvedScopes.includes('ACTIVE_TENANT_EXPORT_PACKAGES')
-  ) {
-    blockers.add('EXTERNAL_ARTIFACT_VERIFICATION_REQUIRED');
-  }
-  if (globalRequirements.length > 0) {
+  if (unresolvedGlobalRequirements.length > 0) {
     blockers.add('GLOBAL_RETENTION_AND_NOTIFICATION_REVIEW_REQUIRED');
   }
 
@@ -158,6 +156,7 @@ export function evaluateAnonymizationPolicy(
     executionAllowed: false as const,
     decisions: Object.freeze(decisions),
     unresolvedScopes: Object.freeze(unresolvedScopes),
+    unresolvedGlobalRequirements: Object.freeze(unresolvedGlobalRequirements),
     blockers: Object.freeze([...blockers].sort()),
   });
 }
