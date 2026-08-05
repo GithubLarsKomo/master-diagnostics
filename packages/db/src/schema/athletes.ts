@@ -118,3 +118,22 @@ export const athleteAnonymizationExecutionArtifacts = sqliteTable('athlete_anony
   uniqueIndex('athlete_anonymization_execution_artifact_uq')
     .on(t.executionId, t.kind, t.storageReference),
 ]);
+
+export const athleteDataSubjectDeliveryApprovals = sqliteTable('athlete_data_subject_delivery_approvals', {
+  id: id(),
+  tenantId: tenantId(),
+  athleteId: text('athlete_id').notNull().references(() => athletes.id),
+  approvalVersion: integer('approval_version').notNull(),
+  sourceSchemaVersion: text('source_schema_version').notNull(),
+  deliveryPolicyVersion: text('delivery_policy_version').notNull(),
+  assessedAt: text('assessed_at').notNull(),
+  sourceFingerprint: text('source_fingerprint').notNull(),
+  decisionsFingerprint: text('decisions_fingerprint').notNull(),
+  reviewDecisionsJson: text('review_decisions_json').notNull(),
+  approvedByUserId: text('approved_by_user_id').notNull().references(() => users.id),
+  approvedAt: text('approved_at').notNull(),
+  ...timestamps,
+}, (t) => [
+  uniqueIndex('athlete_data_subject_delivery_approval_scope_uq')
+    .on(t.tenantId, t.athleteId, t.sourceFingerprint, t.decisionsFingerprint),
+]);
