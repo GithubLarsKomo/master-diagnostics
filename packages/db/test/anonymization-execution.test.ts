@@ -116,7 +116,7 @@ describe('athlete anonymization execution contract', () => {
       { kind: 'TENANT_EXPORT', storageReference: '01234567-89ab-cdef-0123-456789abcdef.mde' },
     ]);
 
-    await db.delete(schema.reportVersions).where(eq(schema.reportVersions.id, 'report-a'));
+    // Export rows are removable today; immutable report-version deletion remains a dedicated privacy-writer gate.
     await db.delete(schema.tenantExportPackages).where(eq(schema.tenantExportPackages.id, 'export-a'));
     expect((await listAthleteAnonymizationExecutionArtifacts(db, 'tenant-a', first.id))).toEqual(manifest);
 
