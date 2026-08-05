@@ -18,6 +18,8 @@ jobs:
       NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
       DATABASE_URL: file:${{ github.workspace }}/ci.db
       DATABASE_AUTH_TOKEN: ""
+      PRIVACY_BACKUP_STATE: DISABLED
+      PRIVACY_NOTIFICATIONS_STATE: DISABLED
 
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +49,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      - name: Verify runtime privacy capability attestation
+        run: pnpm privacy-capabilities:check
       - name: Verify independent Python diagnostic references
         run: |
           python3 packages/diagnostics/reference/verify_cubic_dmax_reference.py
