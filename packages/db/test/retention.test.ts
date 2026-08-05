@@ -33,6 +33,18 @@ async function seedTenant(
   });
 }
 
+async function seedUser(db: Database, id: string): Promise<void> {
+  const timestamp = '2020-01-01T00:00:00.000Z';
+  await db.insert(schema.users).values({
+    id,
+    email: `${id}@example.test`,
+    displayName: id,
+    preferredLocale: 'de',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+}
+
 async function seedAthlete(
   db: Database,
   tenantId: string,
@@ -149,6 +161,7 @@ describe('tenant-scoped athlete retention assessment', () => {
     const db = await createTestDatabase();
     await seedTenant(db, 'tenant-a', 3);
     await seedTenant(db, 'tenant-b', 1);
+    await seedUser(db, 'user-a');
     await seedAthlete(db, 'tenant-a', 'athlete-a', {
       linkedUserId: 'user-a',
       createdAt: '2020-01-01T00:00:00.000Z',
