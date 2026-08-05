@@ -25,12 +25,10 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@libsql/client": "^0.17.4",
     "@playwright/test": "^1.61.1",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "drizzle-orm": "^0.45.2",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
   }
