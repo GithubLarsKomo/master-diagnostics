@@ -2,7 +2,7 @@
 
 ## Status
 
-Aktuelle Policy-Version: `1.4.0`.
+Aktuelle Policy-Version: `1.5.0`.
 
 Die Policy ist ausschließlich ein **fail-closed Entscheidungsvertrag** für die read-only Anonymisierungs-Preview. Sie erteilt keine Ausführungsfreigabe: `executionAllowed` bleibt typseitig `false`.
 
@@ -10,15 +10,22 @@ Die Policy ist ausschließlich ein **fail-closed Entscheidungsvertrag** für die
 
 ### Aktuelles Athletenprofil
 
-Disposition: `REDACT_DIRECT_IDENTIFIERS`.
+Disposition: `MINIMIZE_ATHLETE_TOMBSTONE`.
 
-Direkte Identifikatoren und rückführbare Login-Verknüpfungen müssen entfernt bzw. redigiert werden. Ein minimaler technischer Athletenanker darf ausschließlich für verbleibende Compliance-/Audit-Nachweise bestehen bleiben, sofern nach der Ausführung keine Rückführung auf die natürliche Person mehr möglich ist.
+Policy v1.5 verschärft die frühere reine Direkt-Identifier-Redaktion. Nach der irreversiblen Verarbeitung bleibt nur der technische Athletenanker samt bereits vorhandenen Compliance-/Lifecycle-Bezügen erhalten. Sämtliche rückführbaren oder quasi-identifizierenden Profilwerte werden auf einen deterministischen Tombstone gesetzt:
+
+- `linkedUserId = null`,
+- Name/Klassifikationsfelder = `[ANONYMIZED]`,
+- Geburtsdatum = `0001-01-01`,
+- Körpergröße und Gewicht = `0`.
+
+Die Null-/Sentinelwerte sind ausdrücklich keine plausiblen Ersatzdaten. Der normale Athleten-Create-/Update-Pfad bleibt unverändert streng; gelöschte Athleten sind dort ohnehin ausgeschlossen. Eine alte Approval unter Policy v1.4 darf nicht weiterverwendet werden und wird durch die Versionsbindung automatisch ungültig.
 
 ### Athleten-Snapshots
 
 Disposition: `REMOVE_ATHLETE_SNAPSHOTS`.
 
-Historische Athleten-Snapshots können frühere Namen, Geburtsdaten und weitere Identitätsanker enthalten. Nach abgelaufener Aufbewahrung werden sie nicht in eine neue pseudonyme Repräsentation überführt, sondern später entfernt.
+Historische Athleten-Snapshots können frühere Namen, Geburtsdaten und weitere Identitätsanker enthalten. Nach abgelaufener Aufbewahrung werden sie nicht in eine neue pseudonyme Repräsentation überführt, sondern entfernt.
 
 ### Testplan-Snapshots
 
@@ -58,7 +65,7 @@ Disposition: `REMOVE_DIAGNOSTIC_AND_OPERATIONAL_RECORDS`.
 
 Nach Ablauf der zulässigen Aufbewahrungsfrist werden die individuellen Diagnostik- und Verlaufsdaten gelöscht statt unter einem nur pseudonymen technischen Bezug weitergeführt. Exakte Leistungs-, Herzfrequenz- und Laktatverläufe, Zeitpunkte, Geräte-/Protokollmerkmale und wiederholte Testhistorien können auch ohne direkte Identifikatoren reidentifizierbar sein.
 
-Der anonymisierte Analyseexport bleibt davon getrennt: Er ist ein bewusst generalisierter Exportvertrag mit pseudonymen IDs, Zeitperioden und Klassenbildung sowie Seltenheits-/Reidentifikationsprüfung und rechtfertigt nicht die dauerhafte Weiterhaltung detaillierter Primärdaten.
+Der anonymisierte Analyseexport bleibt davon getrennt: Er ist ein bewusst generalisierter Exportvertrag und rechtfertigt nicht die dauerhafte Weiterhaltung detaillierter Primärdaten.
 
 Die Mindestaufbewahrung des Audit-Trails wird separat erfüllt. Audit-Datensätze werden über die implementierte PII-Minimierung und den kontrollierten historischen Privacy-Maintenance-Pfad geschützt.
 
@@ -68,34 +75,29 @@ Die Mindestaufbewahrung des Audit-Trails wird separat erfüllt. Audit-Datensätz
 
 Disposition: `REMOVE_REPORT_ARTIFACTS_AND_RECORDS`.
 
-Persistierte Reports enthalten Namen und detaillierte individuelle Diagnostikergebnisse. Bei der späteren atomaren Ausführung muss zuerst das externe PDF-Artefakt über seine `storage_reference` entfernt und anschließend der zugehörige `report_versions`-Datensatz gelöscht werden. Der vorhandene Report-Storage stellt dafür bereits eine idempotente `remove()`-Operation bereit.
+Persistierte Reports enthalten Namen und detaillierte individuelle Diagnostikergebnisse. Vor der fachlichen DB-Löschung wird das PDF zunächst in die ausführungsgebundene Quarantäne verschoben. Die ursprüngliche `report_versions`-Historie bleibt im Normalbetrieb weiterhin immutable.
+
+Migration `0016_report_privacy_delete.sql` erweitert deshalb **nur** den bestehenden DELETE-Trigger: Eine Reportversion darf ausschließlich gelöscht werden, wenn
+
+- eine passende `REPORT`-Referenz im unveränderlichen Execution-Manifest existiert,
+- diese Manifest-Referenz exakt der `storage_reference` der Reportversion entspricht,
+- die Execution zum Athleten des Tests gehört,
+- und die Execution aktuell `ARTIFACTS_STAGED` ist.
+
+UPDATE bleibt ausnahmslos verboten. Es gibt kein globales Abschalten der Immutable-Invariante.
 
 ### Aktive Tenant-Exportpakete
 
 Disposition: `REMOVE_ACTIVE_TENANT_EXPORT_PACKAGES`.
 
-Ein vollständiges Tenant-Exportpaket kann eine noch identifierhaltige Kopie des Athletenbestands enthalten. Vor irreversibler Verarbeitung müssen deshalb alle noch aktiven Exportpakete des Tenants entfernt werden. Der bestehende Export-Lifecycle besitzt bereits die benötigte Reihenfolge: Storage-Datei löschen, danach den Paketdatensatz entfernen.
+Ein vollständiges Tenant-Exportpaket kann eine noch identifierhaltige Kopie des Athletenbestands enthalten. Vor irreversibler Verarbeitung werden aktive Pakete anhand des durablen Execution-Manifests in Quarantäne verschoben und die DB-Zeilen erst im fachlichen Commit entfernt.
 
 ## Globale Privacy-Capabilities
 
-Policy v1.4 löst die bisherigen Backup-/Notification-Review-Punkte nicht durch Annahmen, sondern durch zwei explizite versionierte Laufzeitverträge auf:
+Die Backup-/Notification-Review-Punkte werden durch zwei explizite versionierte Laufzeitverträge aufgelöst:
 
 - `BACKUP_PRIVACY_POLICY_V1`,
 - `NOTIFICATION_PRIVACY_POLICY_V1`.
-
-Die semantische Policy ist damit für alle aktuell bekannten globalen Anforderungen definiert. Ob sie im konkreten Betrieb tatsächlich erfüllt sind, muss separat über `evaluateGlobalPrivacyCapabilities()` attestiert werden.
-
-### Backup
-
-Ein Backup-System darf nur als erfüllt gelten, wenn es explizit `DISABLED` ist oder bei `ENABLED` mindestens Verschlüsselung im Ruhezustand, begrenzte Aufbewahrung und Privacy-Reconciliation bei Restore unter Policy-Version `1.0.0` nachweist. Fehlende Angaben bleiben blockierend.
-
-### Notifications
-
-Notifications dürfen nur als erfüllt gelten, wenn sie explizit `DISABLED` sind oder bei `ENABLED` einen athletenbezogenen Subject-Scope, Verbot direkter Identifikatoren und gezielten Subject-Cleanup unter Policy-Version `1.0.0` technisch unterstützen.
-
-Die derzeit vorhandene generische `notifications.payload_json`-Tabelle allein reicht dafür ausdrücklich nicht aus. Eine spätere Notification-Implementierung darf die Capability erst nach technischer Durchsetzung dieses Vertrags als `ENABLED` deklarieren.
-
-### Fail-closed Attestation
 
 Ohne explizite Capability-Deklaration bleibt `GLOBAL_PRIVACY_CAPABILITY_ATTESTATION_REQUIRED` aktiv. Bei erfolgreicher Attestation entfällt nur dieser Blocker; die separate administrative Freigabe bleibt zwingend bestehen.
 
@@ -103,19 +105,23 @@ Die Details stehen in `docs/global-privacy-policy.md`.
 
 ## Verbleibende Ausführungs-Gates
 
-Mit Policy v1.4 sind alle derzeit bekannten row-level und globalen Datenschutzregeln versioniert definiert. Vor einem irreversiblen Writer bleiben jedoch weiterhin zwingend:
+Mit Policy v1.5 und dem Execution-/Quarantäne-Vertrag sind die derzeit bekannten Datenschutz- und Dateisystemregeln versioniert definiert. Vor dem eigentlichen irreversiblen Commit bleiben weiterhin zwingend:
 
-- erfolgreiche Laufzeit-Attestation der benötigten globalen Privacy-Capabilities,
-- explizite administrative Ausführungsfreigabe,
-- atomare Ausführung mit überprüfbarer Fehlerstrategie und eigenem Audit-Ereignis.
+- erfolgreiche Laufzeit-Attestation,
+- neue explizite Approval unter Policy v1.5,
+- erneute Fresh-Validation unmittelbar vor dem ersten Stage,
+- Manifestgleichheit mit der aktuellen Preview,
+- transaktionale fachliche DB-Mutation inklusive Audit-Privacy-Pfad und `ARTIFACTS_STAGED -> DB_COMMITTED`,
+- finaler Quarantäne-Purge mit retrybarer Recovery und Abschluss-Audit.
 
 ## Fail-closed-Regeln
 
 - unbekannte zukünftige Preview-Scopes werden automatisch `POLICY_REVIEW_REQUIRED`,
 - unbekannte zukünftige globale Anforderungen bleiben `UNRESOLVED_GLOBAL_POLICY_REQUIREMENT`,
 - fehlende Runtime-Capability-Deklarationen sind blockierend und nicht gleichbedeutend mit `DISABLED`,
-- administrative Freigabe bleibt auch für vollständig definierte und attestierte Scopes separat erforderlich,
+- administrative Freigabe bleibt separat erforderlich,
 - die Policy selbst mutiert keine Daten und löscht keine Dateien,
 - Audit-Altbestand darf ausschließlich über den kontrollierten Privacy-Maintenance-Pfad behandelt werden,
 - vorhandene Audit-Redaktionsnachweise müssen erhalten bleiben,
-- externe Artefakte müssen vor dem Entfernen ihrer referenzierenden Datenbankzeilen behandelt werden.
+- externe Artefakte müssen vor dem Entfernen ihrer referenzierenden Datenbankzeilen staged sein,
+- normale Reporthistorie bleibt immutable; Privacy-DELETE ist nur execution- und manifestgebunden zulässig.
