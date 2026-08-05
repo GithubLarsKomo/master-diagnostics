@@ -157,14 +157,15 @@
   - [x] Audit-Payload-Minimierung für neue Athleten-, Guardian- und Löschereignisse
   - [x] read-only Kandidateninventar für identifierhaltigen Audit-Altbestand
   - [x] kontrollierter, versionierter Privacy-Maintenance-Pfad für Audit-Altbestand
-  - [x] versionierte Regeln für Profil, Snapshots und Beziehungs-/Privacy-Daten
-  - [ ] versionierte Regeln für Berichte/Artefakte und verbleibende Diagnostikdaten
+  - [x] versionierte Regeln für Profil, Snapshots, Beziehungs-/Privacy- und Diagnostikdaten
+  - [ ] versionierte Regeln für Berichte/Artefakte
 - [ ] Betroffenenexport
 - [ ] Löschung/Anonymisierung mit Vorschau
   - [x] vollständige read-only Scope-Preview über Profil, Snapshots, Beziehungsdaten, Diagnostik, Reports, Audit und aktive Exportartefakte
   - [x] versionierte fail-closed Dispositionsregeln für bekannte Scopes
   - [x] Beziehungs-/Privacy-Policy für Coach-Zuordnungen, Einwilligungen, Guardians und Löschworkflow
-  - [ ] Diagnostik-/Artefakt-Policy-Gates schließen
+  - [x] Diagnostik-Policy: detaillierte individuelle Diagnostik-/Verlaufsdaten nach Retention entfernen
+  - [ ] Artefakt-/Backup-/Notification-Policy-Gates schließen
   - [ ] explizite administrative Freigabe
   - [ ] atomare irreversible Ausführung
 

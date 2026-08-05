@@ -5,15 +5,17 @@ import {
   type AthleteAnonymizationPreview,
 } from './anonymization-preview';
 
-export const ANONYMIZATION_POLICY_VERSION = '1.1.0' as const;
+export const ANONYMIZATION_POLICY_VERSION = '1.2.0' as const;
 
 export type AnonymizationPolicyDisposition =
   | 'REDACT_DIRECT_IDENTIFIERS'
-  | 'REWRITE_EMBEDDED_IDENTIFIERS'
+  | 'REMOVE_ATHLETE_SNAPSHOTS'
+  | 'REMOVE_TEST_PLAN_SNAPSHOTS'
   | 'REMOVE_COACH_RELATIONSHIPS'
   | 'PRESERVE_MINIMIZED_CONSENT_RECORDS'
   | 'REMOVE_GUARDIAN_RECORDS'
   | 'REDACT_DELETION_REQUEST_FREE_TEXT'
+  | 'REMOVE_DIAGNOSTIC_AND_OPERATIONAL_RECORDS'
   | 'REVIEW_DIAGNOSTIC_REIDENTIFICATION_RISK'
   | 'VERIFY_AND_HANDLE_EXTERNAL_ARTIFACT'
   | 'USE_CONTROLLED_AUDIT_PRIVACY_PATH'
@@ -38,7 +40,6 @@ export interface AthleteAnonymizationPolicyEvaluation {
   unresolvedScopes: ReadonlyArray<string>;
   blockers: ReadonlyArray<
     | 'ADMINISTRATIVE_APPROVAL_REQUIRED'
-    | 'DIAGNOSTIC_REIDENTIFICATION_REVIEW_REQUIRED'
     | 'EXTERNAL_ARTIFACT_VERIFICATION_REQUIRED'
     | 'GLOBAL_RETENTION_AND_NOTIFICATION_REVIEW_REQUIRED'
   >;
@@ -58,11 +59,11 @@ const rules: Readonly<Record<string, Readonly<{
     gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
   }),
   ATHLETE_SNAPSHOTS: Object.freeze({
-    disposition: 'REWRITE_EMBEDDED_IDENTIFIERS',
+    disposition: 'REMOVE_ATHLETE_SNAPSHOTS',
     gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
   }),
   TEST_PLAN_SNAPSHOTS: Object.freeze({
-    disposition: 'REWRITE_EMBEDDED_IDENTIFIERS',
+    disposition: 'REMOVE_TEST_PLAN_SNAPSHOTS',
     gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
   }),
   COACH_ASSIGNMENTS: Object.freeze({
@@ -82,8 +83,8 @@ const rules: Readonly<Record<string, Readonly<{
     gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
   }),
   DIAGNOSTIC_AND_OPERATIONAL_RECORDS: Object.freeze({
-    disposition: 'REVIEW_DIAGNOSTIC_REIDENTIFICATION_RISK',
-    gate: 'POLICY_REVIEW_REQUIRED',
+    disposition: 'REMOVE_DIAGNOSTIC_AND_OPERATIONAL_RECORDS',
+    gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
   }),
   REPORT_DATABASE_RECORDS: Object.freeze({
     disposition: 'VERIFY_AND_HANDLE_EXTERNAL_ARTIFACT',
@@ -108,6 +109,10 @@ const rules: Readonly<Record<string, Readonly<{
  * intentionally fail-closed: it never authorizes execution and only identifies
  * which scopes may become automatable after explicit administrative approval
  * versus which scopes still need a policy decision or external verification.
+ *
+ * Policy v1.2 deliberately chooses deletion for individualized diagnostic and
+ * operational records instead of claiming that removal of direct identifiers
+ * alone makes detailed physiological time series irreversibly anonymous.
  */
 export function evaluateAnonymizationPolicy(
   scopes: ReadonlyArray<Readonly<AnonymizationPreviewScope>>,
@@ -138,9 +143,6 @@ export function evaluateAnonymizationPolicy(
 
   const blockers = new Set<AthleteAnonymizationPolicyEvaluation['blockers'][number]>();
   blockers.add('ADMINISTRATIVE_APPROVAL_REQUIRED');
-  if (unresolvedScopes.includes('DIAGNOSTIC_AND_OPERATIONAL_RECORDS')) {
-    blockers.add('DIAGNOSTIC_REIDENTIFICATION_REVIEW_REQUIRED');
-  }
   if (
     unresolvedScopes.includes('REPORT_DATABASE_RECORDS')
     || unresolvedScopes.includes('ACTIVE_TENANT_EXPORT_PACKAGES')
