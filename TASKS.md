@@ -143,7 +143,8 @@
   - [ ] offene Auth-, Freigabe-, Diagnostik-, Bluetooth- und Betriebsereignisse schließen
 - [ ] Aufbewahrungsjob 1–10 Jahre
   - [x] deterministische Fristberechnung und tenantgebundene Athletenbewertung
-  - [ ] tenantweite Kandidatenermittlung und geplanter Retention-Job
+  - [x] tenantweite read-only Kandidatenermittlung
+  - [ ] geplanter Retention-Job
 - [ ] Lösch-/Anonymisierungsanträge und Aufbewahrungsprüfung
   - [x] Antrag, Entscheidung und sofortiger Soft-Delete/Nutzungsschutz
   - [x] read-only Aufbewahrungsprüfung für irreversible Verarbeitung
