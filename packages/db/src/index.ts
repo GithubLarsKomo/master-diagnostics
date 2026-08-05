@@ -4,6 +4,7 @@ export * from './schema';
 export * from './services/audit';
 export * from './services/audit-privacy-inventory';
 export * from './services/audit-privacy-redaction';
+export * from './services/anonymization-preview';
 export * from './services/club-bootstrap';
 export * from './services/factory-protocol-templates';
 export * from './services/protocol-templates';

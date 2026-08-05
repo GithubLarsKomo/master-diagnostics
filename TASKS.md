@@ -156,10 +156,13 @@
   - [x] Daten-Scope und Audit-Randbedingungen für irreversible Anonymisierung dokumentiert
   - [x] Audit-Payload-Minimierung für neue Athleten-, Guardian- und Löschereignisse
   - [x] read-only Kandidateninventar für identifierhaltigen Audit-Altbestand
-  - [ ] kontrollierte, versionierte Privacy-Maintenance-Policy für Audit-Altbestand
+  - [x] kontrollierter, versionierter Privacy-Maintenance-Pfad für Audit-Altbestand
   - [ ] versionierte Regeln für Profil, Snapshots, Berichte/Artefakte und verbleibende Diagnostikdaten
 - [ ] Betroffenenexport
 - [ ] Löschung/Anonymisierung mit Vorschau
+  - [x] vollständige read-only Scope-Preview über Profil, Snapshots, Beziehungsdaten, Diagnostik, Reports, Audit und aktive Exportartefakte
+  - [ ] versionierte Dispositionsregeln und explizite administrative Freigabe
+  - [ ] atomare irreversible Ausführung
 
 ## Epic 11 — Bluetooth-Beta
 
