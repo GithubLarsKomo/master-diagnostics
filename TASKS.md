@@ -147,7 +147,7 @@
 - [ ] Lösch-/Anonymisierungsanträge und Aufbewahrungsprüfung
   - [x] Antrag, Entscheidung und sofortiger Soft-Delete/Nutzungsschutz
   - [x] read-only Aufbewahrungsprüfung für irreversible Verarbeitung
-  - [ ] Retention-Status in die Löschvorschau integrieren
+  - [x] Retention-Status in die Löschvorschau integriert
   - [ ] irreversible Verarbeitung nur nach Ablauf und expliziter Freigabe
 - [ ] Pseudonymisierung nach Löschung
 - [ ] Betroffenenexport
