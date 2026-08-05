@@ -85,6 +85,13 @@
       "when": 1785798000000,
       "tag": "0011_audit_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1785924000000,
+      "tag": "0012_audit_privacy_redaction",
+      "breakpoints": true
     }
   ]
 }
