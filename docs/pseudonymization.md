@@ -88,15 +88,15 @@ Der row-level Precheck bewertet diese globale Audit-Policy bewusst nicht. Dadurc
 
 ### Minimierung neuer Audit-Payloads
 
-Für neu erzeugte Ereignisse gelten jetzt folgende Regeln:
+Für neu erzeugte Ereignisse gelten folgende Regeln:
 
-- `athlete.created` speichert nur Zustand und Feldnamen, keine Feldwerte.
-- `athlete.updated` speichert nur die Namen tatsächlich geänderter Felder, keine Vorher-/Nachher-Werte.
+- `athlete.created` und `athlete.updated` behalten den fachlich relevanten alten/neuen Zustand für Nicht-Direktidentifikatoren. `firstName`, `lastName` und `birthDate` werden dabei als `[REDACTED]` gespeichert; `changedFields` hält auch Änderungen dieser redigierten Felder nachvollziehbar.
 - `guardian.registered` und `guardian.revoked` speichern Beziehung, Zeit-/Statusdaten und nur boolesche Kontakt-Präsenz; Name, E-Mail und Telefonnummer werden nicht strukturiert dupliziert.
-- Löschantrag und Löschentscheidung speichern nur Request-/Athleten-ID, Status und Zeitpunkte; die bereits in `athlete_deletion_requests` vorhandenen freien Begründungstexte werden nicht zusätzlich ins Audit kopiert.
-- `athlete.deletion_completed` speichert keinen vollständigen Athleten-Snapshot mehr, sondern nur pseudonyme Zustandsmetadaten.
+- Löschantrag und Löschentscheidung speichern Request-/Athleten-ID, Status und Zeitpunkte ohne Freitextduplikate im JSON. Die Begründung bleibt entsprechend SPEC §33.2 im dedizierten Audit-Feld `reason` erhalten.
+- `athlete.deletion_completed` speichert keinen vollständigen Athleten-Snapshot mehr, sondern nur pseudonyme Zustandsmetadaten; die Abschlussbegründung bleibt im dedizierten `reason`-Feld.
+- Technische Athlete-/Request-IDs bleiben als pseudonyme Referenzen erhalten, damit Audit-Ereignisse fachlich zugeordnet werden können.
 
-Freitext, der ausschließlich als Audit-Begründung existiert (z. B. Guardian-Widerruf oder Löschabschluss), bleibt vorerst erhalten, weil sein ersatzloses Entfernen die Nachvollziehbarkeit verschlechtern würde. Solche Freitexte müssen beim späteren SPEC-§33.3-Privacy-Maintenance-Pfad mitbehandelt werden.
+Freitext-Begründungen können selbst direkte Identifikatoren enthalten. Sie bleiben vorerst erhalten, weil SPEC §33.2 eine Begründung im Audit fordert. Der spätere SPEC-§33.3-Privacy-Maintenance-Pfad muss deshalb neben Legacy-JSON-Payloads ausdrücklich auch `reason` behandeln, ohne die Ereignishistorie allgemein editierbar zu machen.
 
 ## Writer-Gates vor Implementierung
 
