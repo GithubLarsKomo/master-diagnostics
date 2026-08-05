@@ -4,7 +4,10 @@ import { migrate } from 'drizzle-orm/libsql/migrator';
 import { describe, expect, it } from 'vitest';
 import type { Database } from '../src/client';
 import * as schema from '../src/schema';
-import { getAthleteRetentionAssessment } from '../src/services/retention';
+import {
+  getAthleteRetentionAssessment,
+  listTenantRetentionCandidates,
+} from '../src/services/retention';
 
 async function createTestDatabase(): Promise<Database> {
   const databasePath = `/tmp/masters-retention-${crypto.randomUUID()}.db`;
@@ -49,7 +52,12 @@ async function seedAthlete(
   db: Database,
   tenantId: string,
   id: string,
-  options: { linkedUserId?: string | null; createdAt?: string; deletedAt?: string | null } = {},
+  options: {
+    linkedUserId?: string | null;
+    createdAt?: string;
+    consentBlockedAt?: string | null;
+    deletedAt?: string | null;
+  } = {},
 ): Promise<void> {
   const createdAt = options.createdAt ?? '2024-01-01T00:00:00.000Z';
   await db.insert(schema.athletes).values({
@@ -65,6 +73,7 @@ async function seedAthlete(
     primarySport: 'ROWING',
     primaryDiscipline: 'SINGLE',
     trainingStatus: 'TRAINED',
+    consentBlockedAt: options.consentBlockedAt ?? null,
     deletedAt: options.deletedAt ?? null,
     createdAt,
     updatedAt: createdAt,
@@ -182,5 +191,60 @@ describe('tenant-scoped athlete retention assessment', () => {
       'tenant-b',
       'athlete-a',
     )).rejects.toThrow('Athlete not found');
+  });
+
+  it('builds a deterministic tenant-only worklist without active retention periods', async () => {
+    const db = await createTestDatabase();
+    await seedTenant(db, 'tenant-a', 2);
+    await seedTenant(db, 'tenant-b', 1);
+    await seedUser(db, 'user-manual');
+
+    await seedAthlete(db, 'tenant-a', 'athlete-z-active', {
+      createdAt: '2026-08-01T00:00:00.000Z',
+    });
+    await seedAthlete(db, 'tenant-a', 'athlete-c-manual', {
+      linkedUserId: 'user-manual',
+      createdAt: '2020-01-01T00:00:00.000Z',
+    });
+    await seedAthlete(db, 'tenant-a', 'athlete-b-expired', {
+      createdAt: '2020-01-01T00:00:00.000Z',
+      consentBlockedAt: '2025-01-01T00:00:00.000Z',
+      deletedAt: '2025-02-01T00:00:00.000Z',
+    });
+    await seedAthlete(db, 'tenant-b', 'athlete-a-foreign', {
+      createdAt: '2020-01-01T00:00:00.000Z',
+    });
+
+    const candidates = await listTenantRetentionCandidates(
+      db,
+      'tenant-a',
+      '2027-07-31T00:00:00.000Z',
+    );
+
+    expect(candidates.map((candidate) => ({
+      athleteId: candidate.athleteId,
+      disposition: candidate.disposition,
+      consentBlockedAt: candidate.consentBlockedAt,
+      deletedAt: candidate.deletedAt,
+      reason: candidate.assessment.reason,
+      eligible: candidate.assessment.eligibleForIrreversibleAction,
+    }))).toEqual([
+      {
+        athleteId: 'athlete-b-expired',
+        disposition: 'ELIGIBLE',
+        consentBlockedAt: '2025-01-01T00:00:00.000Z',
+        deletedAt: '2025-02-01T00:00:00.000Z',
+        reason: 'RETENTION_EXPIRED',
+        eligible: true,
+      },
+      {
+        athleteId: 'athlete-c-manual',
+        disposition: 'MANUAL_REVIEW',
+        consentBlockedAt: null,
+        deletedAt: null,
+        reason: 'MANUAL_REVIEW_REQUIRED',
+        eligible: false,
+      },
+    ]);
   });
 });
