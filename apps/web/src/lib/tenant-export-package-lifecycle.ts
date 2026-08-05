@@ -4,11 +4,11 @@ import {
   tenantHasActiveAnonymizationExecution,
   type Database,
 } from '@masters/db';
-import { db } from '@/lib/db';
+import { db } from './db';
 import {
   createTenantExportPackageStorage,
   type TenantExportPackageStorage,
-} from '@/lib/tenant-export-package-storage';
+} from './tenant-export-package-storage';
 
 export async function cleanupExpiredTenantExportPackagesWithDependencies(
   database: Database,
