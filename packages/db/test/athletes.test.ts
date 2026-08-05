@@ -97,7 +97,7 @@ describe('athlete service tenant isolation', () => {
     ).rejects.toThrow('Athlete not found');
   });
 
-  it('updates inside the tenant and records audit events with auth context', async () => {
+  it('updates inside the tenant and records minimized audit events with auth context', async () => {
     const actor = {
       userId: 'admin-a',
       role: 'TENANT_ADMIN',
@@ -127,5 +127,34 @@ describe('athlete service tenant isolation', () => {
     expect(auditRows.every((event) => event.tenantId === 'tenant-a')).toBe(true);
     expect(auditRows.every((event) => event.authProvider === 'BETTER_AUTH')).toBe(true);
     expect(auditRows.every((event) => event.sessionId === 'session-a')).toBe(true);
+
+    expect(JSON.parse(auditRows[0]!.afterJson!)).toEqual({
+      state: 'CREATED',
+      fields: [
+        'birthDate',
+        'currentWeightKgX100',
+        'firstName',
+        'heightCm',
+        'lastName',
+        'primaryDiscipline',
+        'primarySport',
+        'referenceCategory',
+        'trainingStatus',
+      ],
+    });
+    expect(JSON.parse(auditRows[1]!.beforeJson!)).toEqual({
+      state: 'EXISTING',
+      changedFields: ['currentWeightKgX100'],
+    });
+    expect(JSON.parse(auditRows[1]!.afterJson!)).toEqual({
+      state: 'UPDATED',
+      changedFields: ['currentWeightKgX100'],
+    });
+
+    const serializedAudit = JSON.stringify(auditRows);
+    expect(serializedAudit).not.toContain('Petra');
+    expect(serializedAudit).not.toContain('Muster');
+    expect(serializedAudit).not.toContain('1992-04-18');
+    expect(serializedAudit).not.toContain('6925');
   });
 });
