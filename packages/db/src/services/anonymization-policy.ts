@@ -10,7 +10,7 @@ import {
   type GlobalPrivacyCapabilityEvaluation,
 } from './global-privacy-policy';
 
-export const ANONYMIZATION_POLICY_VERSION = '1.5.0' as const;
+export const ANONYMIZATION_POLICY_VERSION = '1.6.0' as const;
 
 export type AnonymizationPolicyDisposition =
   | 'MINIMIZE_ATHLETE_TOMBSTONE'
@@ -25,7 +25,8 @@ export type AnonymizationPolicyDisposition =
   | 'REMOVE_REPORT_ARTIFACTS_AND_RECORDS'
   | 'USE_CONTROLLED_AUDIT_PRIVACY_PATH'
   | 'PRESERVE_AUDIT_REDACTION_PROOF'
-  | 'REMOVE_ACTIVE_TENANT_EXPORT_PACKAGES';
+  | 'REMOVE_ACTIVE_TENANT_EXPORT_PACKAGES'
+  | 'REMOVE_DATA_SUBJECT_DELIVERY_PACKAGES';
 
 export type AnonymizationPolicyGate =
   | 'AUTOMATABLE_AFTER_ADMIN_APPROVAL'
@@ -114,6 +115,10 @@ const rules: Readonly<Record<string, Readonly<{
     disposition: 'REMOVE_ACTIVE_TENANT_EXPORT_PACKAGES',
     gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
   }),
+  DATA_SUBJECT_DELIVERY_PACKAGES: Object.freeze({
+    disposition: 'REMOVE_DATA_SUBJECT_DELIVERY_PACKAGES',
+    gate: 'AUTOMATABLE_AFTER_ADMIN_APPROVAL',
+  }),
 });
 
 const knownGlobalRequirements = new Set([
@@ -124,12 +129,9 @@ const knownGlobalRequirements = new Set([
 
 /**
  * Evaluates the read-only preview against versioned disposition rules. Policy
- * v1.5 strengthens the athlete-profile rule from direct-identifier redaction to
- * a minimal technical tombstone because birth date, body dimensions, sport,
- * discipline and training status are also potential quasi-identifiers.
- *
- * All earlier approvals are intentionally invalidated by the policy-version
- * change and must be explicitly re-approved against this stronger contract.
+ * v1.6 adds athlete-scoped data-subject delivery packages to the irreversible
+ * artifact scope. Earlier approvals are intentionally invalidated because those
+ * encrypted packages may still contain the athlete's pre-anonymization data.
  */
 export function evaluateAnonymizationPolicy(
   scopes: ReadonlyArray<Readonly<AnonymizationPreviewScope>>,
