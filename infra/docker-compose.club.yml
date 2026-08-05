@@ -43,6 +43,21 @@ services:
         condition: service_completed_successfully
     networks: [internal]
 
+  retention-scan:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      DATABASE_URL: http://libsql:8080
+    command: ["sh", "-c", "set -e; while true; do pnpm --filter @masters/db retention:scan; sleep 86400; done"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [internal]
+
   app:
     build:
       context: ..
