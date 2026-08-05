@@ -8,6 +8,7 @@ export * from './services/anonymization-preview';
 export * from './services/anonymization-policy';
 export * from './services/anonymization-approval';
 export * from './services/anonymization-execution';
+export * from './services/anonymization-db-commit';
 export * from './services/anonymization-tombstone';
 export * from './services/global-privacy-policy';
 export * from './services/club-bootstrap';
