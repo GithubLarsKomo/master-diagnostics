@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 import type { Database } from '../client';
 import { athleteDataSubjectDeliveryPackages } from '../schema';
 import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
@@ -119,4 +119,59 @@ export async function getAthleteDataSubjectDeliveryPackage(
     eq(athleteDataSubjectDeliveryPackages.athleteId, athleteId),
   )).limit(1);
   return row ? stored(row) : null;
+}
+
+export async function getAvailableAthleteDataSubjectDeliveryPackage(
+  db: Database,
+  tokenHash: string,
+  now = new Date().toISOString(),
+): Promise<Readonly<StoredAthleteDataSubjectDeliveryPackage> | null> {
+  const [row] = await db
+    .select()
+    .from(athleteDataSubjectDeliveryPackages)
+    .where(and(
+      eq(athleteDataSubjectDeliveryPackages.tokenHash, tokenHash),
+      isNull(athleteDataSubjectDeliveryPackages.downloadedAt),
+      gt(athleteDataSubjectDeliveryPackages.expiresAt, now),
+    ))
+    .limit(1);
+  return row ? stored(row) : null;
+}
+
+export async function consumeAthleteDataSubjectDeliveryPackage(
+  db: Database,
+  tokenHash: string,
+  now = new Date().toISOString(),
+): Promise<Readonly<StoredAthleteDataSubjectDeliveryPackage> | null> {
+  if (!Number.isFinite(Date.parse(now))) throw new Error('Download time must be a valid ISO-8601 timestamp');
+
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .update(athleteDataSubjectDeliveryPackages)
+      .set({ downloadedAt: now, updatedAt: now })
+      .where(and(
+        eq(athleteDataSubjectDeliveryPackages.tokenHash, tokenHash),
+        isNull(athleteDataSubjectDeliveryPackages.downloadedAt),
+        gt(athleteDataSubjectDeliveryPackages.expiresAt, now),
+      ))
+      .returning();
+    const row = rows[0];
+    if (!row) return null;
+
+    await appendAuditEvent(tx, {
+      tenantId: row.tenantId,
+      occurredAt: now,
+      action: 'athlete.data_subject_export_downloaded',
+      entityType: 'athlete_data_subject_delivery_package',
+      entityId: row.id,
+      source: 'DOWNLOAD_LINK',
+      after: {
+        packageVersion: row.packageVersion,
+        approvalId: row.approvalId,
+        manifestFingerprint: row.manifestFingerprint,
+        packageSha256: row.packageSha256,
+      },
+    });
+    return stored(row);
+  });
 }
