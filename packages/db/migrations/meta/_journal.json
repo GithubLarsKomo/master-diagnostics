@@ -2,21 +2,117 @@
   "version": "7",
   "dialect": "sqlite",
   "entries": [
-    {"idx":0,"version":"6","when":1784580264561,"tag":"0000_curious_satana","breakpoints":true},
-    {"idx":1,"version":"6","when":1785325500000,"tag":"0001_guardian_workflow","breakpoints":true},
-    {"idx":2,"version":"6","when":1785359100000,"tag":"0002_factory_protocol_templates","breakpoints":true},
-    {"idx":3,"version":"6","when":1785387600000,"tag":"0003_immutable_test_plan_snapshots","breakpoints":true},
-    {"idx":4,"version":"6","when":1785391200000,"tag":"0004_test_safety_checklist","breakpoints":true},
-    {"idx":5,"version":"6","when":1785394800000,"tag":"0005_test_termination_events","breakpoints":true},
-    {"idx":6,"version":"6","when":1785414000000,"tag":"0006_measurement_sync","breakpoints":true},
-    {"idx":7,"version":"6","when":1785417600000,"tag":"0007_athlete_deletion_requests","breakpoints":true},
-    {"idx":8,"version":"6","when":1785525300000,"tag":"0008_diagnostic_result_snapshots","breakpoints":true},
-    {"idx":9,"version":"6","when":1785680400000,"tag":"0009_immutable_report_versions","breakpoints":true},
-    {"idx":10,"version":"6","when":1785736800000,"tag":"0010_tenant_export_packages","breakpoints":true},
-    {"idx":11,"version":"6","when":1785798000000,"tag":"0011_audit_hardening","breakpoints":true},
-    {"idx":12,"version":"6","when":1785924000000,"tag":"0012_audit_privacy_redaction","breakpoints":true},
-    {"idx":13,"version":"6","when":1785937200000,"tag":"0013_anonymization_approvals","breakpoints":true},
-    {"idx":14,"version":"6","when":1785938400000,"tag":"0014_anonymization_execution_state","breakpoints":true},
-    {"idx":15,"version":"6","when":1785939000000,"tag":"0015_anonymization_execution_artifacts","breakpoints":true}
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1784580264561,
+      "tag": "0000_curious_satana",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1785325500000,
+      "tag": "0001_guardian_workflow",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785359100000,
+      "tag": "0002_factory_protocol_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1785387600000,
+      "tag": "0003_immutable_test_plan_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785391200000,
+      "tag": "0004_test_safety_checklist",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1785394800000,
+      "tag": "0005_test_termination_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1785414000000,
+      "tag": "0006_measurement_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1785417600000,
+      "tag": "0007_athlete_deletion_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1785525300000,
+      "tag": "0008_diagnostic_result_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1785680400000,
+      "tag": "0009_immutable_report_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1785736800000,
+      "tag": "0010_tenant_export_packages",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1785798000000,
+      "tag": "0011_audit_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1785924000000,
+      "tag": "0012_audit_privacy_redaction",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1785937200000,
+      "tag": "0013_anonymization_approvals",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1785938400000,
+      "tag": "0014_anonymization_execution_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1785939000000,
+      "tag": "0015_anonymization_execution_artifacts",
+      "breakpoints": true
+    }
   ]
 }
