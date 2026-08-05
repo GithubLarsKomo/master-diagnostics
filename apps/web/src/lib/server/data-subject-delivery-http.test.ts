@@ -4,9 +4,10 @@ import { serveDataSubjectDeliveryDownload } from './data-subject-delivery-http';
 const token = 'A'.repeat(43);
 
 function request(authorization?: string): Request {
-  return new Request('https://diagnostics.example.test/api/data-subject/export/download?token=ignored', {
-    headers: authorization ? { Authorization: authorization } : undefined,
-  });
+  const url = 'https://diagnostics.example.test/api/data-subject/export/download?token=ignored';
+  return authorization
+    ? new Request(url, { headers: { Authorization: authorization } })
+    : new Request(url);
 }
 
 describe('data subject delivery HTTP boundary', () => {
