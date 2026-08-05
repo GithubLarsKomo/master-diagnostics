@@ -169,7 +169,8 @@
   - [x] Freitextfelder fail-closed ausblenden und als PII-freie Review-Punkte inventarisieren
   - [x] immutable, fingerprintgebundene administrative Review-/Freigabe für alle aktuellen Freitext-Review-Punkte implementieren
   - [x] freigegebene Review-Entscheidungen in eine deterministische, erneut fingerprintgeprüfte reviewed Delivery-Projection anwenden
-  - [ ] Report-PDFs in ein auslieferbares Paket integrieren
+  - [x] Report-PDF-Integrität gegen immutable Content-Hashes prüfen und deterministisches Paketmanifest vorbereiten
+  - [ ] verifiziertes `manifest.json`/`data.json`/PDF-Dateiset als auslieferbares Paket oder Archiv persistieren
   - [ ] administrative Erzeugung/Auslieferung mit Export-Audit implementieren
 - [ ] Löschung/Anonymisierung mit Vorschau
   - [x] vollständige read-only Scope-Preview über Profil, Snapshots, Beziehungsdaten, Diagnostik, Reports, Audit und aktive Exportartefakte
