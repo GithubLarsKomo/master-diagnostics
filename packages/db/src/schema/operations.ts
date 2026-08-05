@@ -16,6 +16,25 @@ export const auditEvents = sqliteTable('audit_events', {
   authProvider: text('auth_provider'), sessionId: text('session_id'), ...timestamps,
 });
 
+export const auditEventPrivacyRedactions = sqliteTable('audit_event_privacy_redactions', {
+  id: id(),
+  tenantId: tenantId(),
+  auditEventId: text('audit_event_id').notNull(),
+  subjectAthleteId: text('subject_athlete_id').notNull(),
+  redactionVersion: integer('redaction_version').notNull(),
+  redactActorUserId: integer('redact_actor_user_id', { mode: 'boolean' }).notNull(),
+  redactSessionId: integer('redact_session_id', { mode: 'boolean' }).notNull(),
+  redactReason: integer('redact_reason', { mode: 'boolean' }).notNull(),
+  redactBeforeJson: integer('redact_before_json', { mode: 'boolean' }).notNull(),
+  redactAfterJson: integer('redact_after_json', { mode: 'boolean' }).notNull(),
+  requestedByUserId: text('requested_by_user_id').notNull(),
+  maintenanceReference: text('maintenance_reference').notNull(),
+  redactedAt: text('redacted_at').notNull(),
+  ...timestamps,
+}, (t) => [
+  uniqueIndex('audit_event_privacy_redaction_event_uq').on(t.auditEventId),
+]);
+
 export const notifications = sqliteTable('notifications', {
   id: id(), tenantId: tenantId(), recipientUserId: text('recipient_user_id').notNull(), type: text('type').notNull(), payloadJson: text('payload_json').notNull(),
   readAt: text('read_at'), ...timestamps,
