@@ -44,6 +44,43 @@ Die bestehende generische `payload_json`-Tabelle allein erfüllt diesen Vertrag 
 
 Eine teilweise erfüllte Capability wird nicht akzeptiert. Jeder fehlende Bestandteil wird als eigener strukturierter Blocker ausgewiesen.
 
+`resolveGlobalPrivacyCapabilitiesFromEnvironment()` bildet diesen Vertrag auf explizite Runtime-Konfiguration ab. Unbekannte Zustands- oder Boolean-Werte werden nicht coerced, sondern als Konfigurationsfehler verworfen. Fehlende Werte bleiben fehlend und werden vom Evaluator blockierend behandelt.
+
+### Environment-Vertrag
+
+Backup:
+
+- `PRIVACY_BACKUP_STATE=DISABLED|ENABLED`
+- bei `ENABLED`: `PRIVACY_BACKUP_POLICY_VERSION=1.0.0`
+- bei `ENABLED`: `PRIVACY_BACKUP_ENCRYPTED_AT_REST=true`
+- bei `ENABLED`: `PRIVACY_BACKUP_BOUNDED_RETENTION_CONFIGURED=true`
+- bei `ENABLED`: `PRIVACY_BACKUP_RESTORE_RECONCILIATION=true`
+
+Notifications:
+
+- `PRIVACY_NOTIFICATIONS_STATE=DISABLED|ENABLED`
+- bei `ENABLED`: `PRIVACY_NOTIFICATIONS_POLICY_VERSION=1.0.0`
+- bei `ENABLED`: `PRIVACY_NOTIFICATIONS_SUBJECT_SCOPED_PAYLOAD=true`
+- bei `ENABLED`: `PRIVACY_NOTIFICATIONS_DIRECT_IDENTIFIERS_FORBIDDEN=true`
+- bei `ENABLED`: `PRIVACY_NOTIFICATIONS_SUBJECT_CLEANUP_SUPPORTED=true`
+
+`DISABLED` ist nur dann korrekt, wenn die jeweilige externe Funktion im tatsächlichen Deployment nicht betrieben wird. Sobald etwa tägliche Backups produktiv aktiviert sind, muss `PRIVACY_BACKUP_STATE=ENABLED` gesetzt werden und der reale Backup-/Restore-Prozess alle vier versionsgebundenen Kontrollanforderungen erfüllen.
+
+## Deployment-Preflight
+
+`pnpm privacy-capabilities:check` liest ausschließlich diesen Environment-Vertrag, bewertet ihn mit derselben Policy und gibt eine PII-/Secret-freie Zusammenfassung aus:
+
+- `readyForIrreversibleProcessing`,
+- deklarierte Backup-/Notification-Zustände,
+- erwartete Policy-Versionen,
+- strukturierte Blocker.
+
+Bei nicht erfülltem Vertrag endet das Kommando mit Exit-Code ungleich `0`.
+
+Im Club-Compose läuft dieser Check als einmaliger `privacy-check`-Service. Die Web-App hängt von dessen erfolgreichem Abschluss ab. Damit kann ein Deployment mit fehlender oder unvollständiger globaler Privacy-Attestation nicht unbemerkt als betriebsbereit starten.
+
+`executeConfiguredAthleteAnonymization()` verwendet denselben Environment-Resolver. Selbst außerhalb des Compose-Preflights scheitert der produktionsorientierte irreversible Einstieg daher vor DB-/Dateimutationen, wenn die Attestation nicht bereit ist.
+
 ## Verhältnis zur Anonymisierungs-Policy
 
 Policy v1.4.0 übersetzt die früheren globalen Review-Punkte in zwei konkrete Anforderungen:
@@ -53,4 +90,4 @@ Policy v1.4.0 übersetzt die früheren globalen Review-Punkte in zwei konkrete A
 
 Sind die benötigten Capabilities nicht attestiert, bleibt `GLOBAL_PRIVACY_CAPABILITY_ATTESTATION_REQUIRED` aktiv. Bei erfolgreicher Attestation entfällt nur dieser Blocker; `ADMINISTRATIVE_APPROVAL_REQUIRED` bleibt bestehen und `executionAllowed` weiterhin `false`.
 
-Damit ist der fachliche Policy-Vertrag definiert, ohne einen nicht vorhandenen Backup-/Notification-Workflow vorzutäuschen oder den irreversiblen Writer vorzeitig freizugeben.
+Damit ist der fachliche Policy-Vertrag definiert und produktiv fail-closed verdrahtet, ohne einen nicht vorhandenen Backup-/Notification-Workflow vorzutäuschen. Die tatsächliche Aktivierung einer globalen Funktion darf erst nach technischer Umsetzung ihrer jeweiligen Policy-Anforderungen attestiert werden.
