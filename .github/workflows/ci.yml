@@ -88,6 +88,36 @@ jobs:
           sed -i 's/replace-with-at-least-32-random-bytes/ci-only-secret-with-at-least-32-characters/' .env
       - name: Validate Docker Compose configuration
         run: docker compose -f infra/docker-compose.club.yml config --quiet
+      - name: Verify subject package storage wiring
+        run: |
+          docker compose -f infra/docker-compose.club.yml config --format json > /tmp/club-compose.json
+          python3 - <<'PY'
+          import json
+
+          path = "/var/lib/masters/data-subject-delivery-packages"
+          with open("/tmp/club-compose.json", encoding="utf-8") as handle:
+              config = json.load(handle)
+
+          app = config["services"]["app"]
+          cleanup = config["services"]["export-cleanup"]
+          assert app["environment"]["DATA_SUBJECT_DELIVERY_PACKAGE_ROOT"] == path
+          assert cleanup["environment"]["DATA_SUBJECT_DELIVERY_PACKAGE_ROOT"] == path
+
+          def source_for(service):
+              matches = [
+                  volume.get("source")
+                  for volume in service.get("volumes", [])
+                  if volume.get("target") == path
+              ]
+              assert len(matches) == 1, matches
+              return matches[0]
+
+          assert source_for(app) == source_for(cleanup)
+          command = cleanup.get("command", [])
+          command_text = " ".join(command) if isinstance(command, list) else str(command)
+          assert "tenant-exports:cleanup" in command_text
+          assert "data-subject-delivery:cleanup" in command_text
+          PY
       - name: Build migration image
         run: docker build --target migrator -f apps/web/Dockerfile -t master-diagnostics-migrator:ci .
       - name: Build production web image
