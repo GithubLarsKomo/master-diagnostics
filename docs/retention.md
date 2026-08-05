@@ -56,9 +56,12 @@ Die Bewertung liefert:
 
 `eligibleForIrreversibleAction = true` ist nur eine notwendige Vorbedingung. Ein späterer Pseudonymisierungs-/Löschservice muss zusätzlich einen freigegebenen Löschworkflow und weitere Schutzbedingungen prüfen.
 
+## UI-Vorschau
+
+Die Athletenansicht zeigt den Assessment-Status im Abschnitt „Löschantrag“ read-only an. Eine aktive Frist blockiert dort ausdrücklich nur eine spätere irreversible Verarbeitung; Löschantrag, Nutzungssperre und Soft-Delete bleiben davon getrennt. Eine abgelaufene Frist erzeugt keinen Ausführungsbutton und keine automatische Freigabe.
+
 ## Nächste Schritte
 
-1. Retention-Status in die Löschvorschau aufnehmen.
-2. Tenantweite Kandidatenermittlung als read-only Job ergänzen.
-3. Pseudonymisierungsstrategie und Audit-Anforderungen definieren.
-4. Erst danach einen irreversiblen Writer implementieren.
+1. Tenantweite Kandidatenermittlung als read-only Job ergänzen.
+2. Pseudonymisierungsstrategie und Audit-Anforderungen definieren.
+3. Erst danach einen irreversiblen Writer implementieren.
