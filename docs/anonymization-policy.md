@@ -2,7 +2,7 @@
 
 ## Status
 
-Aktuelle Policy-Version: `1.2.0`.
+Aktuelle Policy-Version: `1.3.0`.
 
 Die Policy ist ausschließlich ein **fail-closed Entscheidungsvertrag** für die read-only Anonymisierungs-Preview. Sie erteilt keine Ausführungsfreigabe: `executionAllowed` bleibt typseitig `false`.
 
@@ -24,63 +24,73 @@ Historische Athleten-Snapshots können frühere Namen, Geburtsdaten und weitere 
 
 Disposition: `REMOVE_TEST_PLAN_SNAPSHOTS`.
 
-Testplan-Snapshots verbinden historische Athleten-/Planungsdaten mit individuellen Testverläufen. Da Policy v1.2 auch die detaillierten Diagnostikdaten entfernt, besteht kein fachlicher Zweck für eine separate anonymisierte Weiterhaltung dieser Snapshots.
+Testplan-Snapshots verbinden historische Athleten-/Planungsdaten mit individuellen Testverläufen. Da die Policy auch die detaillierten Diagnostikdaten entfernt, besteht kein fachlicher Zweck für eine separate anonymisierte Weiterhaltung dieser Snapshots.
 
 ## Beziehungs- und Privacy-Daten
-
-Die frühere Sammelklasse `RELATIONSHIP_AND_PRIVACY_RECORDS` wurde aufgelöst, weil die enthaltenen Datensätze unterschiedliche Zwecke und Risiken haben.
 
 ### Coach-Zuordnungen
 
 Disposition: `REMOVE_COACH_RELATIONSHIPS`.
 
-Nach abgeschlossener Löschung bzw. irreversibler Verarbeitung besteht kein fachlicher Zweck mehr für die Zuordnung eines Trainers zum betroffenen Athleten. Die spätere Ausführung darf diese Zuordnungszeilen deshalb entfernen. Historische Nachvollziehbarkeit bleibt ausschließlich über den minimierten Audit-Trail erhalten.
+Nach abgeschlossener irreversibler Verarbeitung besteht kein fachlicher Zweck mehr für die Zuordnung eines Trainers zum betroffenen Athleten. Historische Nachvollziehbarkeit bleibt ausschließlich über den minimierten Audit-Trail erhalten.
 
 ### Einwilligungsnachweise
 
 Disposition: `PRESERVE_MINIMIZED_CONSENT_RECORDS`.
 
-Die aktuelle Tabelle enthält Status, Einwilligungstyp, Dokumentversion und Lifecycle-Zeitpunkte sowie den technischen Athletenbezug, aber keine Namen oder Kontaktdaten. Nach Entfernung aller rückführbaren Identitätsanker kann dieser minimierte Compliance-Nachweis erhalten bleiben. Die Policy erlaubt keine erneute Anreicherung um Identifikatoren.
+Status, Einwilligungstyp, Dokumentversion und Lifecycle-Zeitpunkte können nach Entfernung aller rückführbaren Identitätsanker als minimierter Compliance-Nachweis erhalten bleiben. Die Policy erlaubt keine erneute Anreicherung um Identifikatoren.
 
 ### Guardian-Datensätze
 
 Disposition: `REMOVE_GUARDIAN_RECORDS`.
 
-Guardian-Name, E-Mail und Telefonnummer sind personenbezogene Daten einer dritten Person. Nach Wegfall des fachlichen Zwecks werden die Guardian-Datensätze später vollständig entfernt. Beziehung und Lifecycle bleiben, soweit erforderlich, im bereits PII-minimierten Audit-Trail nachvollziehbar.
+Guardian-Name, E-Mail und Telefonnummer sind personenbezogene Daten einer dritten Person. Nach Wegfall des fachlichen Zwecks werden die Guardian-Datensätze vollständig entfernt.
 
 ### Löschworkflow
 
 Disposition: `REDACT_DELETION_REQUEST_FREE_TEXT`.
 
-Status und Workflow-Zeitpunkte bleiben als Compliance-Nachweis erhalten. `reason` und `decisionReason` sind Freitextfelder und können direkte oder indirekte Identifikatoren enthalten; sie müssen bei der späteren irreversiblen Verarbeitung redigiert werden.
+Status und Workflow-Zeitpunkte bleiben als Compliance-Nachweis erhalten. `reason` und `decisionReason` können direkte oder indirekte Identifikatoren enthalten und müssen redigiert werden.
 
 ## Diagnostik- und Betriebsdaten
 
 Disposition: `REMOVE_DIAGNOSTIC_AND_OPERATIONAL_RECORDS`.
 
-Policy v1.2 entscheidet sich nach Ablauf der zulässigen Aufbewahrungsfrist bewusst für **Löschung** der individuellen Diagnostik- und Verlaufsdaten statt für eine nur behauptete Anonymisierung. Dazu gehören die athletenbezogenen Tests und die zugehörigen Mess-, Qualitäts-, Korrektur-, Schwellen-, Ergebnis-, Interpretations-, Zonen-, Lock- und Sync-Datensätze.
+Nach Ablauf der zulässigen Aufbewahrungsfrist werden die individuellen Diagnostik- und Verlaufsdaten gelöscht statt unter einem nur pseudonymen technischen Bezug weitergeführt. Exakte Leistungs-, Herzfrequenz- und Laktatverläufe, Zeitpunkte, Geräte-/Protokollmerkmale und wiederholte Testhistorien können auch ohne direkte Identifikatoren reidentifizierbar sein.
 
-Begründung:
+Der anonymisierte Analyseexport bleibt davon getrennt: Er ist ein bewusst generalisierter Exportvertrag mit pseudonymen IDs, Zeitperioden und Klassenbildung sowie Seltenheits-/Reidentifikationsprüfung und rechtfertigt nicht die dauerhafte Weiterhaltung detaillierter Primärdaten.
 
-- exakte Leistungs-, Herzfrequenz- und Laktatverläufe können für eine Person charakteristisch sein,
-- Zeitpunkte, Protokolle, Geräteart und wiederholte Testhistorien bilden zusätzliche Quasi-Identifikatoren,
-- das Entfernen von Name und Geburtsdatum beseitigt dieses Reidentifikationsrisiko nicht zuverlässig,
-- SPEC §32.3 erlaubt nach Prüfung der Aufbewahrungsgründe ausdrücklich Löschung **oder** irreversible Anonymisierung; die konservativere Löschung vermeidet eine unbelegte Anonymitätsannahme.
+Die Mindestaufbewahrung des Audit-Trails wird separat erfüllt. Audit-Datensätze werden über die implementierte PII-Minimierung und den kontrollierten historischen Privacy-Maintenance-Pfad geschützt.
 
-Der bereits vorhandene anonymisierte Analyseexport bleibt davon getrennt: Er ist ein bewusst generalisierter Exportvertrag mit pseudonymen IDs, Zeitperioden und Klassenbildung sowie Seltenheits-/Reidentifikationsprüfung. Er rechtfertigt nicht die dauerhafte Weiterhaltung der detaillierten Primärdaten eines gelöschten Athleten.
+## Report- und Exportartefakte
 
-Die Mindestaufbewahrung des Audit-Trails wird separat erfüllt. Audit-Datensätze werden nicht zusammen mit den detaillierten Diagnostikdaten gelöscht, sondern über die bereits implementierte PII-Minimierung und den kontrollierten historischen Privacy-Maintenance-Pfad geschützt.
+### Report-Versionen und PDF-Artefakte
 
-## Weiterhin offene Policy-Gates
+Disposition: `REMOVE_REPORT_ARTIFACTS_AND_RECORDS`.
 
-Policy v1.2.0 lässt nur noch folgende fachlich/operativ offenen Bereiche zu:
+Persistierte Reports enthalten Namen und detaillierte individuelle Diagnostikergebnisse. Policy v1.3 verlangt deshalb, dass bei der späteren atomaren Ausführung **zuerst das externe PDF-Artefakt über seine `storage_reference` entfernt und anschließend der zugehörige `report_versions`-Datensatz gelöscht wird**. Der vorhandene Report-Storage stellt dafür bereits eine idempotente `remove()`-Operation bereit.
 
-- `REPORT_DATABASE_RECORDS`: Datenbankzeile und externes Report-Artefakt müssen gemeinsam behandelt werden.
-- `ACTIVE_TENANT_EXPORT_PACKAGES`: aktive vollständige Exporte können identifierhaltige Kopien enthalten.
-- globale Backup- und Notification-Speicherorte, die derzeit nicht verlässlich row-level einem Athleten zugeordnet werden können.
+Die Preview liefert sämtliche betroffenen `storage_reference`-Werte vorab. Ein fehlgeschlagener Artifact-Delete darf in einem späteren Writer nicht still ignoriert werden; die Datenbanklöschung darf erst nach bestätigter Storage-Behandlung fortgesetzt werden.
+
+### Aktive Tenant-Exportpakete
+
+Disposition: `REMOVE_ACTIVE_TENANT_EXPORT_PACKAGES`.
+
+Ein vollständiges Tenant-Exportpaket kann eine noch identifierhaltige Kopie des Athletenbestands enthalten. Vor irreversibler Verarbeitung müssen deshalb alle noch aktiven Exportpakete des Tenants entfernt werden. Der bestehende Export-Lifecycle besitzt bereits die benötigte Reihenfolge: Storage-Datei löschen, danach den Paketdatensatz entfernen.
+
+Die Policy behandelt dies konservativ tenantweit, weil ein vollständiges Exportpaket nicht zuverlässig auf einen einzelnen Athleten reduziert werden kann. Abgelaufene Pakete unterliegen ohnehin dem vorhandenen Cleanup-Pfad.
+
+`REPORT_STORAGE_VERIFICATION` bleibt als Preview-Hinweis sichtbar, ist in Policy v1.3 aber kein offenes Review-Gate mehr: Die explizite Löschdisposition definiert die erforderliche Storage-Behandlung.
+
+## Weiterhin offene globale Policy-Gates
+
+Alle aktuell bekannten row-level Scopes sind mit Policy v1.3 versioniert aufgelöst. Offen bleiben ausschließlich:
+
+- `BACKUP_RETENTION_POLICY_REVIEW`,
+- `NOTIFICATION_PAYLOAD_REVIEW`,
 - die separate explizite administrative Ausführungsfreigabe.
 
-Solange mindestens eines dieser Gates offen ist, bleibt ein irreversibler Writer gesperrt.
+Backups und Notification-Payloads werden bewusst nicht durch Annahmen über ihre spätere Implementierung freigegeben. Solange diese globalen Gates offen sind, bleibt ein irreversibler Writer gesperrt.
 
 ## Fail-closed-Regeln
 
@@ -88,4 +98,5 @@ Solange mindestens eines dieser Gates offen ist, bleibt ein irreversibler Writer
 - administrative Freigabe bleibt auch für vollständig definierte Scopes separat erforderlich,
 - die Policy selbst mutiert keine Daten und löscht keine Dateien,
 - Audit-Altbestand darf ausschließlich über den kontrollierten Privacy-Maintenance-Pfad behandelt werden,
-- vorhandene Audit-Redaktionsnachweise müssen erhalten bleiben.
+- vorhandene Audit-Redaktionsnachweise müssen erhalten bleiben,
+- externe Artefakte müssen vor dem Entfernen ihrer referenzierenden Datenbankzeilen behandelt werden.
