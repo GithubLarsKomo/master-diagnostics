@@ -58,12 +58,12 @@ Die Bewertung liefert:
 
 ## Tenantweite Retention-Worklist
 
-`listTenantRetentionCandidates()` baut eine deterministische, tenantgebundene und vollständig read-only Worklist für einen späteren Retention-Job:
+`listTenantRetentionCandidates()` baut eine deterministische, tenantgebundene und vollständig read-only Worklist:
 
 - Athleten mit noch aktiver Aufbewahrungsfrist werden nicht aufgenommen.
 - Abgelaufene Assessments erhalten `disposition = ELIGIBLE`.
 - Fail-closed-Fälle erhalten `disposition = MANUAL_REVIEW` und bleiben für automatisierte irreversible Verarbeitung gesperrt.
-- Die Ausgabe ist nach `athleteId` stabil sortiert und enthält zusätzlich `consentBlockedAt` und `deletedAt`, damit ein späterer Writer seine weiteren Schutzbedingungen prüfen kann.
+- Die Ausgabe ist nach `athleteId` stabil sortiert und enthält zusätzlich `consentBlockedAt` und `deletedAt`, damit nachgelagerte Schutzprüfungen ihren Zustand bewerten können.
 - Die Worklist selbst prüft **keine** Freigabe eines Löschantrags und führt keine Datenänderung aus.
 
 Damit bedeutet `ELIGIBLE` weiterhin ausschließlich: Die Retention-Frist steht einer späteren irreversiblen Aktion nicht mehr entgegen. Es ist keine Löschfreigabe.
@@ -93,9 +93,31 @@ RETENTION_JOB_TENANT_ID=<tenant-id> pnpm retention:scan
 RETENTION_JOB_ASSESSED_AT=2027-07-31T00:00:00.000Z pnpm retention:scan
 ```
 
-Die Ausgabe erfolgt als JSON auf `stdout` und kann dadurch von Cron, systemd timer oder einer späteren Betriebssteuerung aufgenommen werden. Die konkrete produktive Zeitplanung gehört zum Deployment-/Betriebskonzept; der fachliche Job selbst bleibt davon entkoppelt.
+Standardmäßig wird der vollständige Plan als JSON auf `stdout` ausgegeben. Für dauerhaft protokollierte Scheduler-Läufe steht ein minimierter Modus zur Verfügung:
 
-Wichtig: Auch ein im Job als `ELIGIBLE` geführter Datensatz wird **nicht** verändert. Vor einem späteren irreversiblen Writer müssen mindestens Löschworkflow/Freigabe, Schutzbedingungen, Pseudonymisierungsstrategie und Audit-Semantik separat geprüft werden.
+```bash
+RETENTION_JOB_OUTPUT=summary pnpm retention:scan
+```
+
+Die Summary enthält ausschließlich `mode`, `assessedAt`, `tenantCount`, `candidateCount`, `eligibleCount` und `manualReviewCount`. Sie enthält keine Tenant-, Athleten- oder verknüpften User-IDs.
+
+Ein unbekannter `RETENTION_JOB_OUTPUT`-Wert wird nicht stillschweigend interpretiert, sondern beendet den Runner mit Fehler.
+
+## Produktive Zeitplanung im Club-Modus
+
+`infra/docker-compose.club.yml` enthält einen separaten `retention-scan`-Service. Er:
+
+- startet erst nach erfolgreicher Datenbankmigration,
+- verwendet dieselbe libSQL-Datenbank wie die App,
+- setzt `RETENTION_JOB_OUTPUT=summary`,
+- führt unmittelbar beim Containerstart einen Scan aus,
+- wartet nach einem erfolgreichen Lauf 86.400 Sekunden,
+- wiederholt danach den read-only Scan,
+- beendet sich bei einem Jobfehler über `set -e`, sodass `restart: unless-stopped` einen sichtbaren Retry auslöst.
+
+Die Kadenz ist damit täglich, aber relativ zum letzten erfolgreichen Start/Lauf; sie ist bewusst kein kalendergenauer Mitternachts-Cron. Andere Deployment-Modi müssen einen äquivalenten periodischen Aufruf bereitstellen.
+
+Wichtig: Auch ein im Job als `ELIGIBLE` geführter Datensatz wird **nicht** verändert. Der Scheduler erzeugt keine Anonymisierungs-Approval, startet keinen Writer und führt keine automatische Löschung aus.
 
 ## Read-only Schutzprüfung vor irreversibler Verarbeitung
 
@@ -111,14 +133,8 @@ Der Precheck ist nur bestanden, wenn zum gemeinsamen Bewertungszeitpunkt:
 
 Spätere Ereignisse dürfen einen historischen Assessment-Zeitpunkt nicht rückwirkend freigeben. Die Prüfung liefert deshalb strukturierte Blocker und berücksichtigt nur Zustände, die spätestens zu `assessedAt` wirksam waren.
 
-`passesPrecheck = true` ist erneut nur eine notwendige Vorbedingung. Ein Writer bleibt gesperrt, bis die globale Anonymisierungs-/Pseudonymisierungsstrategie und die Audit-Regeln versioniert umgesetzt sind. Der fachliche Scope und die offenen Writer-Gates sind in `docs/pseudonymization.md` beschrieben.
+`passesPrecheck = true` ist erneut nur eine notwendige Vorbedingung. Die irreversible Ausführung bleibt zusätzlich an versionierte Policy, globale Privacy-Capabilities und explizite Tenant-Admin-Freigabe gebunden.
 
 ## UI-Vorschau
 
-Die Athletenansicht zeigt den Assessment-Status im Abschnitt „Löschantrag“ read-only an. Eine aktive Frist blockiert dort ausdrücklich nur eine spätere irreversible Verarbeitung; Löschantrag, Nutzungssperre und Soft-Delete bleiben davon getrennt. Eine abgelaufene Frist erzeugt keinen Ausführungsbutton und keine automatische Freigabe.
-
-## Nächste Schritte
-
-1. Audit-Payloads bei Athleten- und Löschereignissen minimieren und die Behandlung historischer identifierhaltiger Audit-Daten festlegen.
-2. Vollständige read-only Anonymisierungs-Preview über Profil, Snapshots, Bericht-/Datei-Artefakte und verbleibende Diagnostikdaten ergänzen.
-3. Erst nach versionierter Policy und expliziter Freigabe einen irreversiblen Writer implementieren.
+Die Athletenansicht zeigt den Assessment-Status im Abschnitt „Löschantrag“ read-only an. Eine aktive Frist blockiert dort ausdrücklich nur eine spätere irreversible Verarbeitung; Löschantrag, Nutzungssperre und Soft-Delete bleiben davon getrennt. Eine abgelaufene Frist erzeugt keinen automatischen Löschlauf und keine automatische Freigabe.
