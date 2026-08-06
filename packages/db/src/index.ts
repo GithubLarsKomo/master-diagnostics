@@ -42,6 +42,7 @@ export * from './services/report-versions';
 export * from './services/report-access';
 export * from './services/test-export';
 export * from './services/analysis-export';
+export * from './services/test-artifact-delivery-audit';
 export * from './services/tenant-export';
 export * from './services/tenant-export-packages';
 export * from './services/tenant-import';

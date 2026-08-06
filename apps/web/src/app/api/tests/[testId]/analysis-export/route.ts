@@ -5,6 +5,7 @@ import {
   renderAnonymizedAnalysisExportJson,
 } from '@masters/domain';
 import {
+  auditTestArtifactDelivery,
   canReadReportForTest,
   getAnalysisExportCohortEvidence,
   getTestExportSource,
@@ -68,6 +69,12 @@ export async function GET(
   const regular = createTestExportDocument(source.metadata, source.measurements);
   const anonymized = createAnonymizedAnalysisExport(regular);
   const body = renderAnonymizedAnalysisExportJson(anonymized);
+
+  await auditTestArtifactDelivery(db, context.tenantId, testId, context, {
+    kind: 'ANALYSIS_EXPORT',
+    riskLevel: assessment.level,
+    equivalenceClassSize: cohort.equivalenceClassSize,
+  });
 
   return new Response(body, {
     status: 200,

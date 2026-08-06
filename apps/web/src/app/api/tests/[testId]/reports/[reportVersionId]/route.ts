@@ -1,4 +1,4 @@
-import { canReadReportForTest } from '@masters/db';
+import { auditTestArtifactDelivery, canReadReportForTest } from '@masters/db';
 import { db } from '@/lib/db';
 import { createDatabaseReportDeliveryService } from '@/lib/server/report-delivery-service';
 import { getTenantContext } from '@/lib/tenant-context';
@@ -20,6 +20,15 @@ export async function GET(
 
   const filename = `report-${report.version.locale}-v${report.version.versionNumber}.pdf`;
   const body = Uint8Array.from(report.bytes).buffer;
+
+  await auditTestArtifactDelivery(db, context.tenantId, testId, context, {
+    kind: 'REPORT',
+    reportVersionId: report.version.id,
+    locale: report.version.locale,
+    versionNumber: report.version.versionNumber,
+    contentHash: report.version.contentHash,
+  });
+
   return new Response(body, {
     status: 200,
     headers: {
