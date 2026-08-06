@@ -4,6 +4,7 @@ import type { Database } from '../client';
 import { athleteAnonymizationExecutions } from '../schema';
 
 export const RESTORE_PRIVACY_LEDGER_VERSION = 1 as const;
+const CANONICAL_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 export interface RestorePrivacyLedgerEntry {
   readonly tenantId: string;
@@ -23,7 +24,9 @@ export interface RestorePrivacyReconciliationLedger {
 }
 
 function assertIsoTimestamp(value: string, label: string): void {
-  if (!Number.isFinite(Date.parse(value))) throw new Error(`${label} must be a valid ISO-8601 timestamp`);
+  if (!CANONICAL_UTC_TIMESTAMP.test(value) || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`${label} must be a canonical UTC ISO-8601 timestamp`);
+  }
 }
 
 function canonicalPayload(
@@ -59,7 +62,7 @@ export async function buildRestorePrivacyReconciliationLedger(
 ): Promise<Readonly<RestorePrivacyReconciliationLedger>> {
   assertIsoTimestamp(backupCreatedAt, 'Backup creation time');
   assertIsoTimestamp(generatedAt, 'Ledger generation time');
-  if (Date.parse(generatedAt) < Date.parse(backupCreatedAt)) {
+  if (generatedAt < backupCreatedAt) {
     throw new Error('Ledger generation time cannot precede backup creation time');
   }
 
@@ -84,6 +87,7 @@ export async function buildRestorePrivacyReconciliationLedger(
     if (!row.dbCommittedAt || (row.executionStatus !== 'DB_COMMITTED' && row.executionStatus !== 'COMPLETED')) {
       throw new Error('Restore privacy ledger query returned an invalid irreversible execution');
     }
+    assertIsoTimestamp(row.dbCommittedAt, 'Anonymization DB commit time');
     return Object.freeze({
       tenantId: row.tenantId,
       athleteId: row.athleteId,
