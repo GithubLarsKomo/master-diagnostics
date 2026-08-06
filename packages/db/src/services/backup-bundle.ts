@@ -1,5 +1,13 @@
 import { spawn } from 'node:child_process';
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+  randomUUID,
+  type CipherGCM,
+  type DecipherGCM,
+} from 'node:crypto';
 import { once } from 'node:events';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { lstat, mkdir, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -77,7 +85,7 @@ async function waitForChild(child: ReturnType<typeof spawn>, label: string): Pro
   }
 }
 
-function hashingTransform(hash: ReturnType<typeof createHash>, cipher: ReturnType<typeof createCipheriv>) {
+function hashingTransform(hash: ReturnType<typeof createHash>, cipher: CipherGCM) {
   return new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       hash.update(chunk);
@@ -127,7 +135,12 @@ export async function createEncryptedBackupBundle(
   const iv = randomBytes(IV_LENGTH);
   const header = Buffer.concat([BACKUP_MAGIC, iv]);
   const hash = createHash('sha256');
-  const cipher = createCipheriv('aes-256-gcm', key, iv, { authTagLength: AUTH_TAG_LENGTH });
+  const cipher = createCipheriv(
+    'aes-256-gcm',
+    key,
+    iv,
+    { authTagLength: AUTH_TAG_LENGTH },
+  ) as CipherGCM;
 
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
   const tar = spawn('tar', [
@@ -184,7 +197,12 @@ export async function decryptBackupBundleToTar(
     const authTag = Buffer.alloc(AUTH_TAG_LENGTH);
     await handle.read(authTag, 0, AUTH_TAG_LENGTH, info.size - AUTH_TAG_LENGTH);
 
-    const decipher = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: AUTH_TAG_LENGTH });
+    const decipher = createDecipheriv(
+      'aes-256-gcm',
+      key,
+      iv,
+      { authTagLength: AUTH_TAG_LENGTH },
+    ) as DecipherGCM;
     decipher.setAuthTag(authTag);
     const encryptedStart = header.length;
     const encryptedEnd = info.size - AUTH_TAG_LENGTH - 1;
