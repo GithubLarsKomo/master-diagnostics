@@ -223,7 +223,7 @@ export async function appendReportVersion(
       action: 'report.version_created',
       entityType: 'report_version',
       entityId: created.id,
-      source: 'report.versioning',
+      source: 'WEB',
       after: {
         testId,
         interpretationId: input.interpretationId,
