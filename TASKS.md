@@ -204,7 +204,8 @@
 - [ ] Restore-Drill und RTO-Test
   - [x] verschlüsselte Bundles read-only auf Checksumme, GCM, Archivstruktur und Manifest verifizieren
   - [x] verifiziertes Bundle ausschließlich außerhalb der Produktivvolumes in privaten Restore-Scope stagen
-  - [ ] Privacy-Reconciliation, Healthcheck, kontrollierte Promotion und RTO praktisch testen
+  - [x] backupgebundenen read-only Privacy-Reconciliation-Ledger aus noch erreichbarer Live-DB erzeugen
+  - [ ] externen ausfallsicheren Privacy-Ledger, Anwendung im Staging, Healthcheck, kontrollierte Promotion und RTO praktisch testen
 - [ ] Online-Updateworkflow
 - [ ] signierte Offline-Updatepakete
 - [ ] Supportexport ohne Diagnostikdaten
