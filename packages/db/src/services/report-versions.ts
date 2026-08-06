@@ -10,6 +10,7 @@ import {
   tests,
   users,
 } from '../schema';
+import { appendAuditEvent, auditActorFields, type AuditActorContext } from './audit';
 
 export type ReportLocale = 'de' | 'en';
 
@@ -177,11 +178,12 @@ export async function getReportGenerationSource(
   });
 }
 
-/** Appends an immutable report version for one released interpretation and locale. */
+/** Appends an immutable report version and its audit event atomically. */
 export async function appendReportVersion(
   db: Database,
   tenantId: string,
   testId: string,
+  actor: AuditActorContext,
   input: AppendReportVersionInput,
 ): Promise<StoredReportVersion> {
   validateInput(input);
@@ -214,6 +216,25 @@ export async function appendReportVersion(
       updatedAt: now,
     }).returning();
     if (!created) throw new Error('Report version was not persisted');
+
+    await appendAuditEvent(tx, {
+      tenantId,
+      ...auditActorFields(actor),
+      action: 'report.version_created',
+      entityType: 'report_version',
+      entityId: created.id,
+      source: 'WEB',
+      after: {
+        testId,
+        interpretationId: input.interpretationId,
+        versionNumber,
+        locale: input.locale,
+        contentHash: input.contentHash,
+      },
+      occurredAt: now,
+      recordedAt: now,
+    });
+
     return stored(created);
   });
 }

@@ -1,6 +1,6 @@
 # Audit-Coverage gegen SPEC §33
 
-Stand: Epic 10, nach Einführung des append-only Audit-Service und der Auth-/Session-Attribution für die implementierten Fachwriter.
+Stand: Epic 10, nach Einführung des append-only Audit-Service, der Auth-/Session-Attribution für die implementierten Fachwriter und der atomar auditierten Berichtsversionierung.
 
 ## Grundvertrag
 
@@ -16,7 +16,7 @@ Vertrauensgrenze im Web:
 Besondere Fälle:
 
 - Club-Bootstrap kennt `BETTER_AUTH`, läuft aber vor einem regulären Tenant-Session-Kontext; `session_id` bleibt deshalb `NULL`.
-- Der einmalige Tenant-Export-Download ist ein Bearer-Link ohne Session. Das Download-Ereignis wird daher nicht fälschlich dem Export-Ersteller zugerechnet; Actor-, Provider- und Session-Felder bleiben `NULL`.
+- Einmalige Bearer-Downloads werden nicht fälschlich dem Ersteller zugerechnet. Beim Tenant-Export und Betroffenenexport bleiben Actor-, Provider- und Session-Felder des Download-Ereignisses deshalb `NULL`.
 
 ## Ereignismatrix
 
@@ -32,9 +32,9 @@ Besondere Fälle:
 | Bluetooth-Quellenwechsel | abhängig von Epic 11 | Bluetooth-Adapter/Quellenwechsel noch nicht implementiert. |
 | Schwellenberechnung | offen | Diagnostik-Kern ist deterministisch/versioniert, aber die fachliche Berechnung/Festschreibung hat noch kein eigenes Audit-Ereignis. |
 | manuelle LT1-/LT2-/Zonenfestlegung | offen | Fachkern/Entscheidungslogik vorhanden; persistenter auditierter Writer muss noch vervollständigt werden. |
-| Freigabe und Berichtsversion | offen | Immutable Ergebnis-/Berichtsversionen existieren, aber SPEC-konforme Freigabe-/Version-Audit-Events sind noch nicht vollständig nachgewiesen. |
-| Exporte | teilweise | Tenant-Export-Erstellung und einmaliger Download auditiert; Test-/Analyse-/Berichtsexporte müssen noch als Ereigniskategorie vereinheitlicht werden. |
-| Löschung und Anonymisierung | teilweise | Löschantrag, Entscheidung und Abschluss werden auditiert; irreversible Pseudonymisierung/Anonymisierung ist noch offen. |
+| Freigabe und Berichtsversion | teilweise | Immutable Berichtsversionen werden mit `report.version_created` samt Tenant-/Actor-/Session-Kontext atomar auditiert. Die fachliche Ergebnis-/Interpretationsfreigabe benötigt weiterhin einen eigenen vollständigen Audit-Nachweis. |
+| Exporte | teilweise | Tenant-Export-Erstellung/-Download sowie Betroffenenexport-Erstellung/-Download sind auditiert. Test-, Analyse- und Berichtsexporte/-downloads müssen noch als fachliche Ereigniskategorien vervollständigt werden. |
+| Löschung und Anonymisierung | abgedeckt | Löschantrag und Entscheidung sowie die irreversible Ausführung werden über Approval/Execution-Transitions bis `athlete.anonymization_db_committed` und `athlete.anonymization_completed` nachvollziehbar auditiert; Abbrüche werden ebenfalls protokolliert. |
 | Vorlagen- und Zonenregeländerungen | teilweise | Protokollvorlage und neue Vorlagenversion werden auditiert; Zonenregeländerungen sind noch nicht vollständig als eigener Writer abgedeckt. |
 | Backup, Restore, Update und Setup | teilweise | `club.bootstrap.completed` ist zentral auditiert; Backup/Restore/Update folgen mit Epic 12. |
 | Lock-Aufhebung | abgedeckt | `test.lock.released` mit Actor-/Session-Kontext. |
@@ -64,11 +64,10 @@ Der Task darf erst geschlossen werden, wenn mindestens folgende Restpunkte entwe
 2. Rollenänderungen.
 3. Unterbrechung/Resume als serverseitiger, auditierbarer Testzustand oder dokumentierte SPEC-Anpassung.
 4. Schwellenberechnung und manuelle LT1-/LT2-/Zonenentscheidung.
-5. Freigabe und Berichtsversion.
-6. Test-, Analyse- und Berichtsexporte.
-7. irreversible Löschung/Pseudonymisierung.
-8. Zonenregeländerungen.
-9. Bluetooth-Quellenwechsel mit Epic 11.
-10. Backup/Restore/Update mit Epic 12.
+5. fachliche Ergebnis-/Interpretationsfreigabe.
+6. Test-, Analyse- und Berichtsexporte/-downloads.
+7. Zonenregeländerungen.
+8. Bluetooth-Quellenwechsel mit Epic 11.
+9. Backup/Restore/Update mit Epic 12.
 
 Diese Matrix ist absichtlich konservativ: vorhandene Fachfunktionalität ohne nachgewiesenes Audit-Ereignis zählt nicht als abgedeckt.

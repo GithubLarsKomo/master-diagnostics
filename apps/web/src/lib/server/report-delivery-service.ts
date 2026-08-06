@@ -5,6 +5,7 @@ import {
   getNextReportVersionNumber,
   getReportGenerationSource,
   getReportVersion,
+  type AuditActorContext,
   type Database,
   type StoredReportVersion,
 } from '@masters/db';
@@ -50,7 +51,12 @@ export interface GeneratedReportVersion {
 
 export function createReportDeliveryService(db: Database, storage: ReportArtifactStorage) {
   return {
-    async generate(tenantId: string, testId: string, locale: ReportLocale): Promise<GeneratedReportVersion> {
+    async generate(
+      tenantId: string,
+      testId: string,
+      locale: ReportLocale,
+      actor: AuditActorContext,
+    ): Promise<GeneratedReportVersion> {
       const source = await getReportGenerationSource(db, tenantId, testId);
       if (!source) throw new Error('Released interpretation not found for tenant test');
       const nextVersion = await getNextReportVersionNumber(db, tenantId, testId, locale);
@@ -72,7 +78,7 @@ export function createReportDeliveryService(db: Database, storage: ReportArtifac
       await storage.put(reference, pdf);
       try {
         const storedBytes = await storage.get(reference);
-        const version = await appendReportVersion(db, tenantId, testId, {
+        const version = await appendReportVersion(db, tenantId, testId, actor, {
           interpretationId: source.interpretationId,
           locale,
           contentHash: hashPdf(storedBytes),

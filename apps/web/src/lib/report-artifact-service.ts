@@ -1,4 +1,9 @@
-import { appendReportVersion, type Database, type StoredReportVersion } from '@masters/db';
+import {
+  appendReportVersion,
+  type AuditActorContext,
+  type Database,
+  type StoredReportVersion,
+} from '@masters/db';
 import { renderReportPdf, type ReportDocument, type ReportLocale } from '@masters/domain';
 import type { ReportArtifactStorage } from './report-artifact-storage';
 
@@ -32,6 +37,7 @@ export interface PersistReportArtifactInput {
 export async function persistReportArtifactVersion(
   db: Database,
   storage: ReportArtifactStorage,
+  actor: AuditActorContext,
   input: PersistReportArtifactInput,
 ): Promise<StoredReportVersion> {
   if (input.document.locale !== input.locale) {
@@ -55,7 +61,7 @@ export async function persistReportArtifactVersion(
     }
   }
 
-  return appendReportVersion(db, input.tenantId, input.testId, {
+  return appendReportVersion(db, input.tenantId, input.testId, actor, {
     interpretationId: input.interpretationId,
     locale: input.locale,
     contentHash,

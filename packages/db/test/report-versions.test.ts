@@ -1,5 +1,5 @@
 import { createClient } from '@libsql/client';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/libsql';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Database } from '../src/client';
@@ -15,12 +15,19 @@ async function createTestDatabase(): Promise<Database> {
     `CREATE UNIQUE INDEX report_version_test_locale_version_uq ON report_versions (tenant_id, test_id, locale, version_number)`,
     `CREATE TRIGGER report_versions_immutable_update BEFORE UPDATE ON report_versions BEGIN SELECT RAISE(ABORT, 'report versions are immutable'); END`,
     `CREATE TRIGGER report_versions_immutable_delete BEFORE DELETE ON report_versions BEGIN SELECT RAISE(ABORT, 'report versions are immutable'); END`,
+    `CREATE TABLE audit_events (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, occurred_at TEXT NOT NULL, actor_user_id TEXT, actor_role TEXT, action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, source TEXT NOT NULL, reason TEXT, before_json TEXT, after_json TEXT, correlation_id TEXT NOT NULL, auth_provider TEXT, session_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   ]);
   return drizzle(client, { schema }) as Database;
 }
 
 const hashA = `sha256:${'a'.repeat(64)}`;
 const hashB = `sha256:${'b'.repeat(64)}`;
+const actor = {
+  userId: 'trainer-a',
+  role: 'TRAINER',
+  authProvider: 'BETTER_AUTH',
+  sessionId: 'session-a',
+} as const;
 
 describe('immutable report versions', () => {
   let db: Database;
@@ -37,22 +44,52 @@ describe('immutable report versions', () => {
     ]);
   });
 
-  it('appends independent immutable version sequences per locale', async () => {
-    const de1 = await appendReportVersion(db, 'tenant-a', 'test-a', { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'reports/test-a/de/v1.pdf' });
-    const de2 = await appendReportVersion(db, 'tenant-a', 'test-a', { interpretationId: 'interp-released', locale: 'de', contentHash: hashB, storageReference: 'reports/test-a/de/v2.pdf' });
-    const en1 = await appendReportVersion(db, 'tenant-a', 'test-a', { interpretationId: 'interp-released', locale: 'en', contentHash: hashA, storageReference: 'reports/test-a/en/v1.pdf' });
+  it('appends independent immutable version sequences per locale and audits each version', async () => {
+    const de1 = await appendReportVersion(db, 'tenant-a', 'test-a', actor, { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'reports/test-a/de/v1.pdf' });
+    const de2 = await appendReportVersion(db, 'tenant-a', 'test-a', actor, { interpretationId: 'interp-released', locale: 'de', contentHash: hashB, storageReference: 'reports/test-a/de/v2.pdf' });
+    const en1 = await appendReportVersion(db, 'tenant-a', 'test-a', actor, { interpretationId: 'interp-released', locale: 'en', contentHash: hashA, storageReference: 'reports/test-a/en/v1.pdf' });
 
     expect([de1.versionNumber, de2.versionNumber, en1.versionNumber]).toEqual([1, 2, 1]);
     expect(Object.isFrozen(de1)).toBe(true);
     expect((await listReportVersions(db, 'tenant-a', 'test-a', 'de')).map((item) => item.versionNumber)).toEqual([2, 1]);
+
+    const auditRows = await db.select().from(schema.auditEvents).where(eq(schema.auditEvents.action, 'report.version_created'));
+    expect(auditRows).toHaveLength(3);
+    const de1Audit = auditRows.find((row) => row.entityId === de1.id);
+    expect(de1Audit).toMatchObject({
+      tenantId: 'tenant-a',
+      actorUserId: 'trainer-a',
+      actorRole: 'TRAINER',
+      authProvider: 'BETTER_AUTH',
+      sessionId: 'session-a',
+      entityType: 'report_version',
+      source: 'WEB',
+    });
+    expect(JSON.parse(de1Audit?.afterJson ?? '{}')).toEqual({
+      testId: 'test-a',
+      interpretationId: 'interp-released',
+      versionNumber: 1,
+      locale: 'de',
+      contentHash: hashA,
+    });
+    expect(de1Audit?.afterJson).not.toContain('storageReference');
+  });
+
+  it('rolls back the report version when its audit event cannot be persisted', async () => {
+    await db.run(sql`DROP TABLE audit_events`);
+    await expect(appendReportVersion(db, 'tenant-a', 'test-a', actor, {
+      interpretationId: 'interp-released', locale: 'de', contentHash: hashA,
+      storageReference: 'reports/test-a/de/v1.pdf',
+    })).rejects.toThrow();
+    expect(await listReportVersions(db, 'tenant-a', 'test-a', 'de')).toHaveLength(0);
   });
 
   it('rejects a stale expected version before creating another immutable row', async () => {
-    await appendReportVersion(db, 'tenant-a', 'test-a', {
+    await appendReportVersion(db, 'tenant-a', 'test-a', actor, {
       interpretationId: 'interp-released', locale: 'de', contentHash: hashA,
       storageReference: 'reports/test-a/de/v1.pdf', expectedVersionNumber: 1,
     });
-    await expect(appendReportVersion(db, 'tenant-a', 'test-a', {
+    await expect(appendReportVersion(db, 'tenant-a', 'test-a', actor, {
       interpretationId: 'interp-released', locale: 'de', contentHash: hashB,
       storageReference: 'reports/test-a/de/stale.pdf', expectedVersionNumber: 1,
     })).rejects.toThrow('Report version changed during generation');
@@ -60,7 +97,7 @@ describe('immutable report versions', () => {
   });
 
   it('reads a report version only inside its tenant and test boundary', async () => {
-    const created = await appendReportVersion(db, 'tenant-a', 'test-a', { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'reports/test-a/de/v1.pdf' });
+    const created = await appendReportVersion(db, 'tenant-a', 'test-a', actor, { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'reports/test-a/de/v1.pdf' });
     expect((await getReportVersion(db, 'tenant-a', 'test-a', created.id))?.id).toBe(created.id);
     expect(await getReportVersion(db, 'tenant-b', 'test-a', created.id)).toBeNull();
     expect(await getReportVersion(db, 'tenant-a', 'test-b', created.id)).toBeNull();
@@ -68,14 +105,14 @@ describe('immutable report versions', () => {
   });
 
   it('enforces one version number per test and locale at database level', async () => {
-    const created = await appendReportVersion(db, 'tenant-a', 'test-a', { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'reports/test-a/de/v1.pdf' });
+    const created = await appendReportVersion(db, 'tenant-a', 'test-a', actor, { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'reports/test-a/de/v1.pdf' });
     await expect(db.insert(schema.reportVersions).values({
       id: crypto.randomUUID(), tenantId: created.tenantId, testId: created.testId, interpretationId: created.interpretationId, versionNumber: created.versionNumber, locale: created.locale, contentHash: hashB, storageReference: 'reports/test-a/de/duplicate.pdf', createdAt: '2026-08-02T10:01:00.000Z', updatedAt: '2026-08-02T10:01:00.000Z',
     })).rejects.toThrow();
   });
 
   it('rejects direct updates and deletes at database level', async () => {
-    const created = await appendReportVersion(db, 'tenant-a', 'test-a', { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'reports/test-a/de/v1.pdf' });
+    const created = await appendReportVersion(db, 'tenant-a', 'test-a', actor, { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'reports/test-a/de/v1.pdf' });
     await expect(db.update(schema.reportVersions).set({ storageReference: 'reports/test-a/de/changed.pdf' }).where(eq(schema.reportVersions.id, created.id))).rejects.toThrow();
     const [afterUpdate] = await db.select().from(schema.reportVersions).where(eq(schema.reportVersions.id, created.id)).limit(1);
     expect(afterUpdate?.storageReference).toBe(created.storageReference);
@@ -86,8 +123,8 @@ describe('immutable report versions', () => {
   });
 
   it('rejects draft interpretations, foreign tenants and invalid hashes', async () => {
-    await expect(appendReportVersion(db, 'tenant-a', 'test-a', { interpretationId: 'interp-draft', locale: 'de', contentHash: hashA, storageReference: 'draft.pdf' })).rejects.toThrow('Released interpretation');
-    await expect(appendReportVersion(db, 'tenant-b', 'test-a', { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'foreign.pdf' })).rejects.toThrow('Released interpretation');
-    await expect(appendReportVersion(db, 'tenant-a', 'test-a', { interpretationId: 'interp-released', locale: 'de', contentHash: 'bad', storageReference: 'bad.pdf' })).rejects.toThrow('hash is invalid');
+    await expect(appendReportVersion(db, 'tenant-a', 'test-a', actor, { interpretationId: 'interp-draft', locale: 'de', contentHash: hashA, storageReference: 'draft.pdf' })).rejects.toThrow('Released interpretation');
+    await expect(appendReportVersion(db, 'tenant-b', 'test-a', actor, { interpretationId: 'interp-released', locale: 'de', contentHash: hashA, storageReference: 'foreign.pdf' })).rejects.toThrow('Released interpretation');
+    await expect(appendReportVersion(db, 'tenant-a', 'test-a', actor, { interpretationId: 'interp-released', locale: 'de', contentHash: 'bad', storageReference: 'bad.pdf' })).rejects.toThrow('hash is invalid');
   });
 });
