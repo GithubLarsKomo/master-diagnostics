@@ -81,7 +81,8 @@ async function seedExecution(
     tenantId: string;
     athleteId: string;
     approvalId: string;
-    status: 'COMPLETED' | 'ABORTED';
+    status: 'PREPARING' | 'DB_COMMITTED' | 'COMPLETED' | 'ABORTED';
+    dbCommittedAt?: string;
     completedAt?: string;
   },
 ) {
@@ -95,38 +96,43 @@ async function seedExecution(
     status: input.status,
     preparedByUserId: 'admin-a',
     preparedAt,
-    artifactsStagedAt: input.status === 'COMPLETED' ? preparedAt : null,
-    dbCommittedAt: input.status === 'COMPLETED' ? preparedAt : null,
+    artifactsStagedAt: input.dbCommittedAt ? preparedAt : null,
+    dbCommittedAt: input.dbCommittedAt ?? null,
     completedAt: input.completedAt ?? null,
     abortedAt: input.status === 'ABORTED' ? preparedAt : null,
     createdAt: preparedAt,
-    updatedAt: input.completedAt ?? preparedAt,
+    updatedAt: input.completedAt ?? input.dbCommittedAt ?? preparedAt,
   });
 }
 
 describe('restore privacy reconciliation ledger', () => {
-  it('returns only completed anonymizations after the selected backup cutoff in deterministic order', async () => {
+  it('returns privacy-effective db commits after the backup cutoff in deterministic order', async () => {
     const db = await createTestDatabase();
     await seedApproval(db, 'approval-a', 'tenant-b', 'athlete-b', '1.6.0', scopeA, capA);
     await seedApproval(db, 'approval-b', 'tenant-a', 'athlete-a', '1.6.0', scopeB, capB);
     await seedApproval(db, 'approval-old', 'tenant-a', 'athlete-old', '1.5.0', scopeA, capA);
     await seedApproval(db, 'approval-aborted', 'tenant-a', 'athlete-x', '1.6.0', scopeA, capA);
+    await seedApproval(db, 'approval-preparing', 'tenant-a', 'athlete-y', '1.6.0', scopeA, capA);
 
     await seedExecution(db, {
       id: 'execution-b', tenantId: 'tenant-b', athleteId: 'athlete-b', approvalId: 'approval-a',
-      status: 'COMPLETED', completedAt: '2026-08-03T10:00:00.000Z',
+      status: 'COMPLETED', dbCommittedAt: '2026-08-03T10:00:00.000Z', completedAt: '2026-08-03T10:05:00.000Z',
     });
     await seedExecution(db, {
       id: 'execution-a', tenantId: 'tenant-a', athleteId: 'athlete-a', approvalId: 'approval-b',
-      status: 'COMPLETED', completedAt: '2026-08-03T10:00:00.000Z',
+      status: 'DB_COMMITTED', dbCommittedAt: '2026-08-03T10:00:00.000Z',
     });
     await seedExecution(db, {
       id: 'execution-old', tenantId: 'tenant-a', athleteId: 'athlete-old', approvalId: 'approval-old',
-      status: 'COMPLETED', completedAt: '2026-08-02T00:00:00.000Z',
+      status: 'COMPLETED', dbCommittedAt: '2026-08-02T00:00:00.000Z', completedAt: '2026-08-02T00:05:00.000Z',
     });
     await seedExecution(db, {
       id: 'execution-aborted', tenantId: 'tenant-a', athleteId: 'athlete-x', approvalId: 'approval-aborted',
       status: 'ABORTED',
+    });
+    await seedExecution(db, {
+      id: 'execution-preparing', tenantId: 'tenant-a', athleteId: 'athlete-y', approvalId: 'approval-preparing',
+      status: 'PREPARING',
     });
 
     const ledger = await getRestorePrivacyReconciliationLedger(
@@ -144,6 +150,7 @@ describe('restore privacy reconciliation ledger', () => {
       policyVersion: '1.6.0',
       scopeFingerprint: scopeB,
       capabilityFingerprint: capB,
+      dbCommittedAt: '2026-08-03T10:00:00.000Z',
     });
     expect(ledger.entriesFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
@@ -153,7 +160,7 @@ describe('restore privacy reconciliation ledger', () => {
     await seedApproval(db, 'approval-a', 'tenant-a', 'athlete-a', '1.6.0', scopeA, capA);
     await seedExecution(db, {
       id: 'execution-a', tenantId: 'tenant-a', athleteId: 'athlete-a', approvalId: 'approval-a',
-      status: 'COMPLETED', completedAt: '2026-08-03T10:00:00.000Z',
+      status: 'DB_COMMITTED', dbCommittedAt: '2026-08-03T10:00:00.000Z',
     });
 
     const first = await getRestorePrivacyReconciliationLedger(
