@@ -17,7 +17,7 @@ export async function POST(
     const { testId } = await params;
     const { locale } = inputSchema.parse(await request.json());
     const generated = await createDatabaseReportDeliveryService(db)
-      .generate(context.tenantId, testId, locale);
+      .generate(context.tenantId, testId, locale, context);
     return NextResponse.json(generated, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Report generation failed';
