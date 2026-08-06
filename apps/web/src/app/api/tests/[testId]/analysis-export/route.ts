@@ -73,7 +73,7 @@ export async function GET(
   await auditTestArtifactDelivery(db, context.tenantId, testId, context, {
     kind: 'ANALYSIS_EXPORT',
     riskLevel: assessment.level,
-    equivalenceClassSize: assessment.equivalenceClassSize,
+    equivalenceClassSize: cohort.equivalenceClassSize,
   });
 
   return new Response(body, {
