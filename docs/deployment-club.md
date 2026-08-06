@@ -11,6 +11,7 @@
 - stündlicher Cleanup ephemerer Tenant-/Betroffenenexportpakete
 - täglicher read-only Retention-Scan mit minimierter Betriebslog-Ausgabe
 - Docker Compose und Caddy mit automatischem TLS
+- extern bezogene Infrastruktur-Images auf explizite Versionen gepinnt
 - Betrieb der Anwendung ohne externe Datenbank
 
 ## Voraussetzungen
@@ -73,6 +74,12 @@ Die Startreihenfolge ist fest definiert:
 7. Caddy veröffentlicht die Anwendung und beschafft das TLS-Zertifikat.
 
 Ein Upgrade von einem älteren Stand benötigt deshalb vor `up -d --build` mindestens die beiden expliziten `PRIVACY_*_STATE`-Deklarationen. Fehlen sie, ist ein blockierter App-Start das beabsichtigte Verhalten.
+
+## Versionierte Infrastruktur-Images
+
+Der Club-Stack verwendet für externe Infrastruktur keine gleitenden `latest`-Tags. libSQL und Caddy werden in `infra/docker-compose.club.yml` auf explizite veröffentlichte Versionen gepinnt; CI prüft diese Invariante im kanonischen Compose-Output.
+
+Ein Upgrade dieser Komponenten ist damit eine bewusste Repository-Änderung: Versionshinweise prüfen, Image-Pin ändern, vollständige CI ausführen und erst danach deployen. Insbesondere Datenbank-Upgrades sollen später mit dem in SPEC §41 geforderten manuellen Vorab-Backup gekoppelt werden, statt implizit durch ein erneutes `docker pull` zu entstehen.
 
 ## Persistente Privacy-Artefakte
 
