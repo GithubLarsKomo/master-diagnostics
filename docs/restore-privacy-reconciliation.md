@@ -8,7 +8,9 @@ Ein Restore aus einem älteren Backup darf personenbezogene Daten, die nach Erst
 
 `getRestorePrivacyReconciliationLedger()` erzeugt den versionierten Vertrag `RESTORE_PRIVACY_LEDGER_VERSION = 1` aus der aktuellen Datenbank.
 
-Der Aufrufer übergibt als `sinceExclusive` den `createdAt`-Zeitpunkt des ausgewählten Backup-Manifests. Berücksichtigt werden Anonymisierungs-Executions mit Status `DB_COMMITTED` oder `COMPLETED`, deren `dbCommittedAt` strikt nach diesem Zeitpunkt liegt.
+Der Aufrufer übergibt als `sinceExclusive` den `createdAt`-Zeitpunkt des ausgewählten Backup-Manifests. Berücksichtigt werden Anonymisierungs-Executions mit Status `DB_COMMITTED` oder `COMPLETED`, deren `dbCommittedAt` strikt nach diesem Zeitpunkt und höchstens am übergebenen `generatedAt`-Zeitpunkt liegt. Damit beschreibt jeder Ledger ein geschlossenes Beobachtungsfenster `(sinceExclusive, generatedAt]`; später eintretende Commits können nicht rückwirkend in einen früher datierten Ledger geraten.
+
+Alle drei Zeitstempel (`sinceExclusive`, `generatedAt`, `dbCommittedAt`) müssen im kanonischen UTC-Format `YYYY-MM-DDTHH:mm:ss.SSSZ` vorliegen. Dadurch stimmen die lexikografischen SQLite-Vergleiche mit der zeitlichen Reihenfolge überein und Fingerprints bleiben über Laufzeitumgebungen hinweg reproduzierbar.
 
 `DB_COMMITTED` ist dabei absichtlich der privacy-effektive Zeitpunkt: Die irreversible Datenbankmutation ist bereits erfolgt. `COMPLETED` folgt erst nach erfolgreichem Purge der zuvor quarantänisierten externen Artefakte. Ein Crash zwischen diesen Zuständen darf deshalb nicht dazu führen, dass die bereits wirksame Datenschutzpflicht aus dem Restore-Ledger verschwindet.
 
@@ -31,7 +33,7 @@ Direkte Identifikatoren, Kontaktdaten, Freitextgründe, Reportinhalte oder Messw
 
 Die Einträge werden deterministisch nach DB-Commit-Zeitpunkt, Tenant, Athlete und Execution sortiert. `entriesFingerprint` ist ein SHA-256 über Ledger-Version, Backup-Cutoff und die kanonische Entry-Liste.
 
-`generatedAt` ist nur Metadatum und fließt nicht in den Inhaltsfingerprint ein. Derselbe fachliche Reconciliation-Scope erhält dadurch unabhängig vom Abfragezeitpunkt denselben Fingerprint.
+`generatedAt` ist nur Beobachtungsmetadatum und fließt nicht selbst in den Inhaltsfingerprint ein. Solange sich die fachliche Entry-Liste innerhalb eines späteren Beobachtungsfensters nicht ändert, bleibt deshalb auch der Fingerprint stabil. Kommt ein neuer privacy-wirksamer DB-Commit hinzu, ändert sich die Entry-Liste und damit der Fingerprint erwartungsgemäß.
 
 ## Warum dieser Ledger nicht Teil des wiederherzustellenden Backups sein darf
 
