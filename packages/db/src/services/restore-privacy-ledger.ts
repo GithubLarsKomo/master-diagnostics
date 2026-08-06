@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, asc, eq, gt } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray } from 'drizzle-orm';
 import type { Database } from '../client';
 import {
   athleteAnonymizationApprovals,
@@ -18,7 +18,7 @@ export interface RestorePrivacyLedgerEntry {
   readonly policyVersion: string;
   readonly scopeFingerprint: string;
   readonly capabilityFingerprint: string;
-  readonly completedAt: string;
+  readonly dbCommittedAt: string;
 }
 
 export interface RestorePrivacyReconciliationLedger {
@@ -46,11 +46,15 @@ function fingerprintEntries(
 }
 
 /**
- * Builds the read-only privacy reconciliation obligations that occurred after one backup snapshot.
+ * Builds the read-only privacy reconciliation obligations that became irreversible after one backup snapshot.
  *
- * The result intentionally contains only technical identifiers and immutable policy fingerprints.
- * It is not yet the external durable ledger required for productive restore; it is the canonical
- * source contract that such a ledger must persist outside the backup history.
+ * DB_COMMITTED is the privacy-effective checkpoint: the subject data mutation has already happened even if
+ * external artifact purge/final completion is still pending. The external durable ledger must therefore be
+ * able to record both DB_COMMITTED and COMPLETED executions without waiting for the final completion state.
+ *
+ * The result intentionally contains only technical identifiers and immutable policy fingerprints. It is not
+ * yet the external durable ledger required for productive restore; it is the canonical source contract that
+ * such a ledger must persist outside the backup history.
  */
 export async function getRestorePrivacyReconciliationLedger(
   db: Database,
@@ -69,7 +73,7 @@ export async function getRestorePrivacyReconciliationLedger(
     executionId: athleteAnonymizationExecutions.id,
     approvalId: athleteAnonymizationExecutions.approvalId,
     executionVersion: athleteAnonymizationExecutions.executionVersion,
-    completedAt: athleteAnonymizationExecutions.completedAt,
+    dbCommittedAt: athleteAnonymizationExecutions.dbCommittedAt,
     deletionRequestId: athleteAnonymizationApprovals.deletionRequestId,
     policyVersion: athleteAnonymizationApprovals.policyVersion,
     scopeFingerprint: athleteAnonymizationApprovals.scopeFingerprint,
@@ -81,18 +85,18 @@ export async function getRestorePrivacyReconciliationLedger(
       eq(athleteAnonymizationApprovals.athleteId, athleteAnonymizationExecutions.athleteId),
     ))
     .where(and(
-      eq(athleteAnonymizationExecutions.status, 'COMPLETED'),
-      gt(athleteAnonymizationExecutions.completedAt, sinceExclusive),
+      inArray(athleteAnonymizationExecutions.status, ['DB_COMMITTED', 'COMPLETED']),
+      gt(athleteAnonymizationExecutions.dbCommittedAt, sinceExclusive),
     ))
     .orderBy(
-      asc(athleteAnonymizationExecutions.completedAt),
+      asc(athleteAnonymizationExecutions.dbCommittedAt),
       asc(athleteAnonymizationExecutions.tenantId),
       asc(athleteAnonymizationExecutions.athleteId),
       asc(athleteAnonymizationExecutions.id),
     );
 
   const entries = Object.freeze(rows.map((row) => {
-    if (!row.completedAt) throw new Error('Completed anonymization execution is missing completedAt');
+    if (!row.dbCommittedAt) throw new Error('Privacy-effective anonymization execution is missing dbCommittedAt');
     return Object.freeze({
       tenantId: row.tenantId,
       athleteId: row.athleteId,
@@ -103,7 +107,7 @@ export async function getRestorePrivacyReconciliationLedger(
       policyVersion: row.policyVersion,
       scopeFingerprint: row.scopeFingerprint,
       capabilityFingerprint: row.capabilityFingerprint,
-      completedAt: row.completedAt,
+      dbCommittedAt: row.dbCommittedAt,
     });
   }));
 
