@@ -53,6 +53,7 @@ jobs:
         run: |
           bash -n infra/backup/create-club-backup.sh
           bash -n infra/backup/verify-club-backup.sh
+          bash -n infra/backup/install-club-backup-timer.sh
       - name: Verify runtime privacy capability attestation
         run: pnpm privacy-capabilities:check
       - name: Verify independent Python diagnostic references
@@ -113,6 +114,16 @@ jobs:
           sed -i 's/replace-with-at-least-32-random-bytes/ci-only-secret-with-at-least-32-characters/' .env
       - name: Validate Docker Compose configuration
         run: docker compose -f infra/docker-compose.club.yml config --quiet
+      - name: Verify daily backup timer rendering
+        run: |
+          unit_dir="$(mktemp -d)"
+          MASTER_DIAGNOSTICS_SYSTEMD_DIR="$unit_dir" MASTER_DIAGNOSTICS_SKIP_SYSTEMCTL=1 \
+            bash infra/backup/install-club-backup-timer.sh >/tmp/backup-timer-paths.txt
+          grep -F "WorkingDirectory=${GITHUB_WORKSPACE}" "$unit_dir/master-diagnostics-backup.service"
+          grep -F "ExecStart=/usr/bin/env bash ${GITHUB_WORKSPACE}/infra/backup/create-club-backup.sh" "$unit_dir/master-diagnostics-backup.service"
+          grep -F 'OnCalendar=*-*-* 03:00:00' "$unit_dir/master-diagnostics-backup.timer"
+          grep -F 'Persistent=true' "$unit_dir/master-diagnostics-backup.timer"
+          grep -F 'WantedBy=timers.target' "$unit_dir/master-diagnostics-backup.timer"
       - name: Verify maintenance, backup and infrastructure wiring
         run: |
           docker compose --profile backup -f infra/docker-compose.club.yml config --format json > /tmp/club-compose.json
@@ -164,6 +175,7 @@ jobs:
           backup_command = backup.get("command", [])
           backup_text = " ".join(backup_command) if isinstance(backup_command, list) else str(backup_command)
           assert "backup:bundle" in backup_text
+          assert backup["environment"]["BACKUP_RETENTION_COUNT"] == "30"
           required_read_only_targets = {
               "/backup-source/libsql",
               "/backup-source/reports",
