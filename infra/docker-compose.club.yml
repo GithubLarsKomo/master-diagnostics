@@ -96,6 +96,22 @@ services:
       - ${BACKUP_HOST_DIR:-/var/backups/master-diagnostics}:/backup-target:ro
       - ${BACKUP_KEY_FILE:-/etc/master-diagnostics/backup.key}:/run/secrets/backup.key:ro
 
+  backup-restore-stage:
+    profiles: [backup]
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    environment:
+      BACKUP_KEY_FILE: /run/secrets/backup.key
+      RESTORE_STAGING_ROOT: /restore-staging
+    command: ["pnpm", "--filter", "@masters/db", "backup:stage"]
+    volumes:
+      - ${BACKUP_HOST_DIR:-/var/backups/master-diagnostics}:/backup-target:ro
+      - ${BACKUP_KEY_FILE:-/etc/master-diagnostics/backup.key}:/run/secrets/backup.key:ro
+      - ${RESTORE_STAGING_HOST_DIR:-/var/lib/master-diagnostics/restore-staging}:/restore-staging
+
   app:
     build:
       context: ..
