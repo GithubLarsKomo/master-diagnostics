@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -20,7 +20,7 @@ const EXPECTED_SOURCES = Object.freeze([
   'caddy-data',
   'caddy-config',
 ] as const satisfies readonly BackupSourceName[]);
-const EXPECTED_TOP_LEVEL = Object.freeze(['manifest.json', ...EXPECTED_SOURCES].sort());
+const EXPECTED_TOP_LEVEL = new Set<string>(['manifest.json', ...EXPECTED_SOURCES]);
 
 export interface VerifyEncryptedBackupBundleInput {
   readonly bundlePath: string;
@@ -32,6 +32,7 @@ export interface VerifiedEncryptedBackupBundle {
   readonly fileName: string;
   readonly sha256: string;
   readonly manifest: BackupManifest;
+  readonly archiveEntryCount: number;
 }
 
 function parseChecksumFile(content: string, expectedFileName: string): string {
@@ -59,7 +60,7 @@ function parseManifest(value: unknown): BackupManifest {
   if (!Array.isArray(manifest.sources) || manifest.sources.length !== EXPECTED_SOURCES.length) {
     throw new Error('Backup manifest source set is invalid');
   }
-  if (!EXPECTED_SOURCES.every((source, index) => manifest.sources?.[index] === source)) {
+  if (!EXPECTED_SOURCES.every((source, index) => manifest.sources[index] === source)) {
     throw new Error('Backup manifest source set is invalid');
   }
   if (Object.keys(manifest).sort().join('\n') !== [
@@ -82,54 +83,63 @@ function parseManifest(value: unknown): BackupManifest {
   });
 }
 
-async function validateExtractedBundle(extractDir: string): Promise<BackupManifest> {
-  const topLevel = (await readdir(extractDir)).sort();
-  if (topLevel.join('\n') !== EXPECTED_TOP_LEVEL.join('\n')) {
-    throw new Error('Backup archive top-level contents are invalid');
-  }
-  for (const source of EXPECTED_SOURCES) {
-    const info = await lstat(join(extractDir, source));
-    if (!info.isDirectory() || info.isSymbolicLink()) {
-      throw new Error(`Backup archive source is not a directory: ${source}`);
+function validateArchiveEntries(stdout: string): readonly string[] {
+  const entries = stdout.split(/\r?\n/).filter(Boolean);
+  if (entries.length === 0) throw new Error('Backup archive is empty');
+  const topLevel = new Set<string>();
+  for (const entry of entries) {
+    if (entry.startsWith('/') || entry.includes('\\') || entry.split('/').includes('..')) {
+      throw new Error('Backup archive contains an unsafe path');
     }
+    const normalized = entry.replace(/\/+$/, '');
+    const [root] = normalized.split('/');
+    if (!root || !EXPECTED_TOP_LEVEL.has(root)) {
+      throw new Error('Backup archive contains an unsupported top-level entry');
+    }
+    topLevel.add(root);
   }
-  const manifestInfo = await lstat(join(extractDir, 'manifest.json'));
-  if (!manifestInfo.isFile() || manifestInfo.isSymbolicLink()) {
-    throw new Error('Backup archive manifest is not a regular file');
+  if (topLevel.size !== EXPECTED_TOP_LEVEL.size
+    || [...EXPECTED_TOP_LEVEL].some((entry) => !topLevel.has(entry))) {
+    throw new Error('Backup archive is missing required top-level entries');
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(await readFile(join(extractDir, 'manifest.json'), 'utf8')) as unknown;
-  } catch {
-    throw new Error('Backup manifest is not valid JSON');
-  }
-  return parseManifest(parsed);
+  return Object.freeze(entries);
 }
 
 /**
  * Authenticates and structurally verifies a backup without writing production volumes.
- * Plaintext exists only below a temporary 0700 directory and is removed before return/error.
+ * Plaintext exists only as one temporary 0600 tar below a private temporary directory and is
+ * removed before return/error; the contained data files are never extracted during verification.
  */
 export async function verifyEncryptedBackupBundle(
   input: VerifyEncryptedBackupBundleInput,
 ): Promise<VerifiedEncryptedBackupBundle> {
   const fileName = basename(input.bundlePath);
-  if (!fileName.endsWith('.mdbak') || fileName !== input.bundlePath.split('/').at(-1)) {
-    throw new Error('Backup bundle path must identify one .mdbak file');
-  }
+  if (!fileName.endsWith('.mdbak')) throw new Error('Backup bundle must use the .mdbak extension');
+
   const expectedChecksum = parseChecksumFile(await readFile(input.checksumPath, 'utf8'), fileName);
   const actualChecksum = await verifyBackupBundleChecksum(input.bundlePath);
   if (actualChecksum !== expectedChecksum) throw new Error('Backup bundle SHA-256 checksum mismatch');
 
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'masters-backup-verify-'));
   const tarPath = join(temporaryRoot, 'bundle.tar');
-  const extractDir = join(temporaryRoot, 'extract');
-  await mkdir(extractDir, { mode: 0o700 });
   try {
     await decryptBackupBundleToTar(input.bundlePath, input.keyFile, tarPath);
-    await execFileAsync('tar', ['-xf', tarPath, '-C', extractDir, '--no-same-owner']);
-    const manifest = await validateExtractedBundle(extractDir);
-    return Object.freeze({ fileName, sha256: actualChecksum, manifest });
+    const listed = await execFileAsync('tar', ['-tf', tarPath], { maxBuffer: 16 * 1024 * 1024 });
+    const entries = validateArchiveEntries(listed.stdout);
+    const manifestOutput = await execFileAsync('tar', ['-xOf', tarPath, 'manifest.json'], { maxBuffer: 1024 * 1024 });
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(manifestOutput.stdout) as unknown;
+    } catch {
+      throw new Error('Backup manifest is not valid JSON');
+    }
+    const manifest = parseManifest(parsed);
+    return Object.freeze({
+      fileName,
+      sha256: actualChecksum,
+      manifest,
+      archiveEntryCount: entries.length,
+    });
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
