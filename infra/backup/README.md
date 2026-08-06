@@ -2,7 +2,7 @@
 
 ## Aktueller Stand
 
-Epic 12 stellt zunächst einen **manuellen Full-Volume-Backup-Bundle-Pfad** bereit. Er ist absichtlich noch kein produktiver Tages-Scheduler und rechtfertigt noch **nicht** `PRIVACY_BACKUP_STATE=ENABLED`.
+Epic 12 stellt einen **manuellen Full-Volume-Backup-Bundle-Pfad** plus eine **read-only Restore-Verifikation** bereit. Es gibt noch keinen produktiven Tages-Scheduler und noch keine Rückschreibung in Produktivvolumes. Der Stand rechtfertigt deshalb noch **nicht** `PRIVACY_BACKUP_STATE=ENABLED`.
 
 Verbindliche Ziele aus SPEC §40 bleiben:
 
@@ -84,15 +84,40 @@ masters-backup-<timestamp>-<uuid>.mdbak.sha256
 
 `.mdbak` ist AES-256-GCM-verschlüsselt. Das Klartext-Tar wird nicht auf das Backup-Ziel geschrieben. Die `.sha256`-Datei dient als schneller Transport-/Dateiintegritätscheck; die GCM-Authentifizierung schützt zusätzlich den entschlüsselten Inhalt gegen Manipulation.
 
+## Backup vor einem Restore verifizieren
+
+Die Verifikation benötigt **keine Downtime** und hat keinen Schreibzugriff auf Produktivvolumes oder das Backup-Ziel. Sie prüft in dieser Reihenfolge:
+
+1. Sidecar-Format und Zuordnung zur ausgewählten `.mdbak`-Datei,
+2. SHA-256 des vollständigen Bundles,
+3. AES-256-GCM-Authentifizierung mit dem getrennten Backup-Schlüssel,
+4. lesbare Tar-Struktur ohne unsichere/unerwartete Top-Level-Pfade,
+5. exakt das Manifest-Schema der Bundle-Version 1,
+6. alle sechs erwarteten Quellklassen und `restoreReconciliationRequired = true`.
+
+Aufruf mit dem Dateinamen aus `BACKUP_HOST_DIR`:
+
+```bash
+bash infra/backup/verify-club-backup.sh masters-backup-<timestamp>-<uuid>.mdbak
+```
+
+Der Compose-Service `backup-verify` sieht das Backup-Ziel und das Key-File ausschließlich read-only. Die entschlüsselten Nutzdaten werden nicht entpackt. Temporär entsteht nur ein `0600`-Tar in einem privaten Verzeichnis des ephemeren Verifikationscontainers; dieses Verzeichnis wird vor Erfolg **und** Fehler vollständig entfernt.
+
+Ein manipuliertes Bundle scheitert selbst dann an der GCM-Authentifizierung, wenn jemand die unverschlüsselte SHA-256-Sidecar-Datei passend neu berechnet hat.
+
+Die erfolgreiche Verifikation bedeutet ausdrücklich **nicht**, dass ein Restore bereits freigegeben ist. Sie bestätigt nur Transportintegrität, kryptografische Authentizität und strukturelle Restore-Fähigkeit des Bundles.
+
 ## Datenschutzgrenze
 
-Ein Backup kann ältere, inzwischen gelöschte oder anonymisierte Fachdaten enthalten. Deshalb bleibt die globale Backup-Capability vorerst `DISABLED`, obwohl der manuelle Bundle-Mechanismus technisch existiert.
+Ein Backup kann ältere, inzwischen gelöschte oder anonymisierte Fachdaten enthalten. Deshalb bleibt die globale Backup-Capability vorerst `DISABLED`, obwohl Bundle-Erstellung und read-only Verifikation technisch existieren.
 
 Vor einer produktiven Aktivierung müssen zusätzlich umgesetzt und getestet sein:
 
 - automatische tägliche Ausführung,
 - bounded retention mit Standard 30 Backups,
-- Restore-Verifikation und Privacy-Reconciliation, bevor wiederhergestellte Daten nutzbar werden,
+- kontrollierte Rückschreibung in Restore-Volumes,
+- Privacy-Reconciliation vor Freigabe einer wiederhergestellten Instanz,
+- Health-/Integritätsprüfung der wiederhergestellten Anwendung,
 - Audit-/Statusnachweis erfolgreicher und fehlgeschlagener Backup-/Restore-Läufe.
 
 Erst dann darf die Runtime-Attestation auf `PRIVACY_BACKUP_STATE=ENABLED` mit Policy-Version `1.0.0` umgestellt werden.
