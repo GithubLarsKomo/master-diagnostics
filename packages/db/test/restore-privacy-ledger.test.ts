@@ -106,13 +106,14 @@ async function seedExecution(
 }
 
 describe('restore privacy reconciliation ledger', () => {
-  it('returns privacy-effective db commits after the backup cutoff in deterministic order', async () => {
+  it('returns privacy-effective db commits inside the observation window in deterministic order', async () => {
     const db = await createTestDatabase();
     await seedApproval(db, 'approval-a', 'tenant-b', 'athlete-b', '1.6.0', scopeA, capA);
     await seedApproval(db, 'approval-b', 'tenant-a', 'athlete-a', '1.6.0', scopeB, capB);
     await seedApproval(db, 'approval-old', 'tenant-a', 'athlete-old', '1.5.0', scopeA, capA);
     await seedApproval(db, 'approval-aborted', 'tenant-a', 'athlete-x', '1.6.0', scopeA, capA);
     await seedApproval(db, 'approval-preparing', 'tenant-a', 'athlete-y', '1.6.0', scopeA, capA);
+    await seedApproval(db, 'approval-future', 'tenant-a', 'athlete-future', '1.6.0', scopeA, capA);
 
     await seedExecution(db, {
       id: 'execution-b', tenantId: 'tenant-b', athleteId: 'athlete-b', approvalId: 'approval-a',
@@ -133,6 +134,10 @@ describe('restore privacy reconciliation ledger', () => {
     await seedExecution(db, {
       id: 'execution-preparing', tenantId: 'tenant-a', athleteId: 'athlete-y', approvalId: 'approval-preparing',
       status: 'PREPARING',
+    });
+    await seedExecution(db, {
+      id: 'execution-future', tenantId: 'tenant-a', athleteId: 'athlete-future', approvalId: 'approval-future',
+      status: 'COMPLETED', dbCommittedAt: '2026-08-05T10:00:00.000Z', completedAt: '2026-08-05T10:05:00.000Z',
     });
 
     const ledger = await getRestorePrivacyReconciliationLedger(
@@ -155,7 +160,7 @@ describe('restore privacy reconciliation ledger', () => {
     expect(ledger.entriesFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
-  it('keeps the content fingerprint stable across generation times and excludes direct PII fields', async () => {
+  it('keeps the content fingerprint stable while the observed entry set is unchanged', async () => {
     const db = await createTestDatabase();
     await seedApproval(db, 'approval-a', 'tenant-a', 'athlete-a', '1.6.0', scopeA, capA);
     await seedExecution(db, {
@@ -180,12 +185,17 @@ describe('restore privacy reconciliation ledger', () => {
     expect(Object.isFrozen(first.entries[0])).toBe(true);
   });
 
-  it('rejects invalid or temporally impossible cutoffs', async () => {
+  it('rejects non-canonical or temporally impossible observation timestamps', async () => {
     const db = await createTestDatabase();
     await expect(getRestorePrivacyReconciliationLedger(db, 'not-a-date'))
       .rejects.toThrow('cutoff');
+    await expect(getRestorePrivacyReconciliationLedger(db, '2026-08-02'))
+      .rejects.toThrow('canonical UTC');
     await expect(getRestorePrivacyReconciliationLedger(
       db, '2026-08-04T00:00:00.000Z', '2026-08-03T00:00:00.000Z',
     )).rejects.toThrow('must not precede');
+    await expect(getRestorePrivacyReconciliationLedger(
+      db, '2026-08-02T00:00:00.000Z', '2026-08-03T01:00:00+01:00',
+    )).rejects.toThrow('canonical UTC');
   });
 });
