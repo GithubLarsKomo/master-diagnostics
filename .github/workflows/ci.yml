@@ -50,7 +50,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - name: Verify backup host orchestrator syntax
-        run: bash -n infra/backup/create-club-backup.sh
+        run: |
+          bash -n infra/backup/create-club-backup.sh
+          bash -n infra/backup/verify-club-backup.sh
       - name: Verify runtime privacy capability attestation
         run: pnpm privacy-capabilities:check
       - name: Verify independent Python diagnostic references
@@ -125,6 +127,7 @@ jobs:
           cleanup = config["services"]["export-cleanup"]
           retention = config["services"]["retention-scan"]
           backup = config["services"]["backup-bundle"]
+          backup_verify = config["services"]["backup-verify"]
           libsql = config["services"]["libsql"]
           caddy = config["services"]["caddy"]
 
@@ -182,6 +185,14 @@ jobs:
           ]
           assert len(target_mounts) == 1
           assert target_mounts[0].get("read_only") is not True
+
+          verify_command = backup_verify.get("command", [])
+          verify_text = " ".join(verify_command) if isinstance(verify_command, list) else str(verify_command)
+          assert "backup:verify" in verify_text
+          verify_mounts = {volume.get("target"): volume for volume in backup_verify.get("volumes", [])}
+          assert set(verify_mounts) == {"/backup-target", "/run/secrets/backup.key"}
+          assert all(volume.get("read_only") is True for volume in verify_mounts.values())
+          assert not any(str(target).startswith('/backup-source') for target in verify_mounts)
           PY
       - name: Verify pinned infrastructure images resolve
         run: |
