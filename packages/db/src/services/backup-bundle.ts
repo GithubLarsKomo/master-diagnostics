@@ -10,7 +10,16 @@ import {
 } from 'node:crypto';
 import { once } from 'node:events';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { lstat, mkdir, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+  type FileHandle,
+} from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -60,7 +69,7 @@ function assertIsoTimestamp(value: string): void {
 }
 
 function timestampSegment(value: string): string {
-  return value.replace(/[-:.]/g, '').replace('Z', 'Z');
+  return value.replace(/[-:.]/g, '');
 }
 
 export async function readBackupEncryptionKey(keyFile: string): Promise<Buffer> {
@@ -76,6 +85,16 @@ async function assertBackupSources(sourceDir: string): Promise<void> {
     const info = await lstat(join(sourceDir, name)).catch(() => null);
     if (!info?.isDirectory()) throw new Error(`Backup source directory is missing: ${name}`);
   }
+}
+
+async function readExactly(
+  handle: FileHandle,
+  buffer: Buffer,
+  position: number,
+  label: string,
+): Promise<void> {
+  const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+  if (bytesRead !== buffer.length) throw new Error(`Backup bundle ${label} is truncated`);
 }
 
 async function waitForChild(child: ReturnType<typeof spawn>, label: string): Promise<void> {
@@ -189,13 +208,13 @@ export async function decryptBackupBundleToTar(
   const handle = await open(bundlePath, 'r');
   try {
     const header = Buffer.alloc(BACKUP_MAGIC.length + IV_LENGTH);
-    await handle.read(header, 0, header.length, 0);
+    await readExactly(handle, header, 0, 'header');
     if (!header.subarray(0, BACKUP_MAGIC.length).equals(BACKUP_MAGIC)) {
       throw new Error('Backup bundle magic/version is invalid');
     }
     const iv = header.subarray(BACKUP_MAGIC.length);
     const authTag = Buffer.alloc(AUTH_TAG_LENGTH);
-    await handle.read(authTag, 0, AUTH_TAG_LENGTH, info.size - AUTH_TAG_LENGTH);
+    await readExactly(handle, authTag, info.size - AUTH_TAG_LENGTH, 'authentication tag');
 
     const decipher = createDecipheriv(
       'aes-256-gcm',
