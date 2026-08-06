@@ -1,5 +1,5 @@
 import { createTestExportDocument, renderTestExport, type TestExportFormat } from '@masters/domain';
-import { canReadReportForTest, getTestExportSource } from '@masters/db';
+import { auditTestArtifactDelivery, canReadReportForTest, getTestExportSource } from '@masters/db';
 import { db } from '@/lib/db';
 import { getTenantContext } from '@/lib/tenant-context';
 
@@ -33,6 +33,11 @@ export async function GET(
   const document = createTestExportDocument(source.metadata, source.measurements);
   const body = renderTestExport(document, format);
   const descriptor = formats[format];
+
+  await auditTestArtifactDelivery(db, context.tenantId, testId, context, {
+    kind: 'TEST_EXPORT',
+    format,
+  });
 
   return new Response(body, {
     status: 200,
