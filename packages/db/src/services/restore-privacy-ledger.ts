@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, asc, eq, gt, inArray } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, lte } from 'drizzle-orm';
 import type { Database } from '../client';
 import {
   athleteAnonymizationApprovals,
@@ -7,6 +7,7 @@ import {
 } from '../schema';
 
 export const RESTORE_PRIVACY_LEDGER_VERSION = 1 as const;
+const CANONICAL_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 export interface RestorePrivacyLedgerEntry {
   readonly tenantId: string;
@@ -30,7 +31,9 @@ export interface RestorePrivacyReconciliationLedger {
 }
 
 function assertIsoTimestamp(value: string, label: string): void {
-  if (!Number.isFinite(Date.parse(value))) throw new Error(`${label} must be a valid ISO-8601 timestamp`);
+  if (!CANONICAL_UTC_TIMESTAMP.test(value) || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`${label} must be a canonical UTC ISO-8601 timestamp`);
+  }
 }
 
 function fingerprintEntries(
@@ -63,7 +66,7 @@ export async function getRestorePrivacyReconciliationLedger(
 ): Promise<Readonly<RestorePrivacyReconciliationLedger>> {
   assertIsoTimestamp(sinceExclusive, 'Restore privacy ledger cutoff');
   assertIsoTimestamp(generatedAt, 'Restore privacy ledger generation time');
-  if (Date.parse(generatedAt) < Date.parse(sinceExclusive)) {
+  if (generatedAt < sinceExclusive) {
     throw new Error('Restore privacy ledger generation time must not precede its cutoff');
   }
 
@@ -87,6 +90,7 @@ export async function getRestorePrivacyReconciliationLedger(
     .where(and(
       inArray(athleteAnonymizationExecutions.status, ['DB_COMMITTED', 'COMPLETED']),
       gt(athleteAnonymizationExecutions.dbCommittedAt, sinceExclusive),
+      lte(athleteAnonymizationExecutions.dbCommittedAt, generatedAt),
     ))
     .orderBy(
       asc(athleteAnonymizationExecutions.dbCommittedAt),
@@ -97,6 +101,7 @@ export async function getRestorePrivacyReconciliationLedger(
 
   const entries = Object.freeze(rows.map((row) => {
     if (!row.dbCommittedAt) throw new Error('Privacy-effective anonymization execution is missing dbCommittedAt');
+    assertIsoTimestamp(row.dbCommittedAt, 'Privacy-effective anonymization DB commit time');
     return Object.freeze({
       tenantId: row.tenantId,
       athleteId: row.athleteId,
