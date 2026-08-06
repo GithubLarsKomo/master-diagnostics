@@ -109,7 +109,7 @@ jobs:
           sed -i 's/replace-with-at-least-32-random-bytes/ci-only-secret-with-at-least-32-characters/' .env
       - name: Validate Docker Compose configuration
         run: docker compose -f infra/docker-compose.club.yml config --quiet
-      - name: Verify maintenance wiring
+      - name: Verify maintenance and infrastructure wiring
         run: |
           docker compose -f infra/docker-compose.club.yml config --format json > /tmp/club-compose.json
           python3 - <<'PY'
@@ -122,6 +122,13 @@ jobs:
           app = config["services"]["app"]
           cleanup = config["services"]["export-cleanup"]
           retention = config["services"]["retention-scan"]
+          libsql = config["services"]["libsql"]
+          caddy = config["services"]["caddy"]
+
+          assert libsql["image"] == "ghcr.io/tursodatabase/libsql-server:3ec6803"
+          assert caddy["image"] == "caddy:2.11.3-alpine"
+          assert all(":latest" not in service.get("image", "") for service in config["services"].values())
+
           assert app["environment"]["DATA_SUBJECT_DELIVERY_PACKAGE_ROOT"] == path
           assert cleanup["environment"]["DATA_SUBJECT_DELIVERY_PACKAGE_ROOT"] == path
 
