@@ -46,3 +46,4 @@ export * from './services/test-artifact-delivery-audit';
 export * from './services/tenant-export';
 export * from './services/tenant-export-packages';
 export * from './services/tenant-import';
+export * from './services/backup-restore-privacy-ledger';
