@@ -54,6 +54,7 @@ jobs:
           bash -n infra/backup/create-club-backup.sh
           bash -n infra/backup/verify-club-backup.sh
           bash -n infra/backup/install-club-backup-timer.sh
+          bash -n infra/backup/stage-club-restore.sh
       - name: Verify runtime privacy capability attestation
         run: pnpm privacy-capabilities:check
       - name: Verify independent Python diagnostic references
@@ -139,6 +140,7 @@ jobs:
           retention = config["services"]["retention-scan"]
           backup = config["services"]["backup-bundle"]
           backup_verify = config["services"]["backup-verify"]
+          backup_stage = config["services"]["backup-restore-stage"]
           libsql = config["services"]["libsql"]
           caddy = config["services"]["caddy"]
 
@@ -205,6 +207,26 @@ jobs:
           assert set(verify_mounts) == {"/backup-target", "/run/secrets/backup.key"}
           assert all(volume.get("read_only") is True for volume in verify_mounts.values())
           assert not any(str(target).startswith('/backup-source') for target in verify_mounts)
+
+          stage_command = backup_stage.get("command", [])
+          stage_text = " ".join(stage_command) if isinstance(stage_command, list) else str(stage_command)
+          assert "backup:stage" in stage_text
+          assert backup_stage["environment"]["RESTORE_STAGING_ROOT"] == "/restore-staging"
+          stage_mounts = {volume.get("target"): volume for volume in backup_stage.get("volumes", [])}
+          assert set(stage_mounts) == {"/backup-target", "/run/secrets/backup.key", "/restore-staging"}
+          assert stage_mounts["/backup-target"].get("read_only") is True
+          assert stage_mounts["/run/secrets/backup.key"].get("read_only") is True
+          assert stage_mounts["/restore-staging"].get("read_only") is not True
+          assert not any(str(target).startswith('/backup-source') for target in stage_mounts)
+          production_targets = {
+              "/var/lib/sqld",
+              "/var/lib/masters/reports",
+              "/var/lib/masters/exports",
+              "/var/lib/masters/data-subject-delivery-packages",
+              "/data",
+              "/config",
+          }
+          assert production_targets.isdisjoint(stage_mounts)
           PY
       - name: Verify pinned infrastructure images resolve
         run: |

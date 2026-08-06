@@ -200,8 +200,11 @@
 
 - [ ] produktives Docker Compose
 - [ ] Caddy-TLS und interne Zertifikate dokumentieren
-- [ ] verschlüsselte tägliche Backups
+- [x] verschlüsselte tägliche Backups
 - [ ] Restore-Drill und RTO-Test
+  - [x] verschlüsselte Bundles read-only auf Checksumme, GCM, Archivstruktur und Manifest verifizieren
+  - [x] verifiziertes Bundle ausschließlich außerhalb der Produktivvolumes in privaten Restore-Scope stagen
+  - [ ] Privacy-Reconciliation, Healthcheck, kontrollierte Promotion und RTO praktisch testen
 - [ ] Online-Updateworkflow
 - [ ] signierte Offline-Updatepakete
 - [ ] Supportexport ohne Diagnostikdaten

@@ -2,7 +2,7 @@
 
 ## Aktueller Stand
 
-Epic 12 stellt einen **verschlüsselten Full-Volume-Backup-Bundle-Pfad**, eine **tägliche hostseitige Zeitplanung mit bounded retention** und eine **read-only Restore-Verifikation** bereit. Es gibt noch keine Rückschreibung in Produktivvolumes und keine Privacy-Reconciliation einer wiederhergestellten Instanz. Der Stand rechtfertigt deshalb noch **nicht** `PRIVACY_BACKUP_STATE=ENABLED`.
+Epic 12 stellt einen **verschlüsselten Full-Volume-Backup-Bundle-Pfad**, eine **tägliche hostseitige Zeitplanung mit bounded retention**, eine **read-only Restore-Verifikation** und ein **isoliertes Restore-Staging außerhalb der Produktivvolumes** bereit. Es gibt noch keine Privacy-Reconciliation und keine Freigabe bzw. Promotion eines Stagings in die Produktivinstanz. Der Stand rechtfertigt deshalb noch **nicht** `PRIVACY_BACKUP_STATE=ENABLED`.
 
 Verbindliche Ziele aus SPEC §40:
 
@@ -55,6 +55,7 @@ openssl rand -base64 32 | sudo tee /etc/master-diagnostics/backup.key >/dev/null
 sudo chmod 600 /etc/master-diagnostics/backup.key
 
 sudo install -d -m 700 /var/backups/master-diagnostics
+sudo install -d -m 700 /var/lib/master-diagnostics/restore-staging
 ```
 
 In `.env`:
@@ -63,6 +64,7 @@ In `.env`:
 BACKUP_HOST_DIR=/var/backups/master-diagnostics
 BACKUP_KEY_FILE=/etc/master-diagnostics/backup.key
 BACKUP_RETENTION_COUNT=30
+RESTORE_STAGING_HOST_DIR=/var/lib/master-diagnostics/restore-staging
 ```
 
 Das Key-File muss Base64 enthalten, das exakt 32 Byte entschlüsselt. `BACKUP_RETENTION_COUNT` akzeptiert 1 bis 365; Standard ist 30.
@@ -149,15 +151,43 @@ Ein manipuliertes Bundle scheitert selbst dann an der GCM-Authentifizierung, wen
 
 Die erfolgreiche Verifikation bedeutet ausdrücklich **nicht**, dass ein Restore bereits freigegeben ist. Sie bestätigt nur Transportintegrität, kryptografische Authentizität und strukturelle Restore-Fähigkeit des Bundles.
 
+## Verifiziertes Backup isoliert stagen
+
+Der nächste Restore-Schritt schreibt weiterhin **nicht** in Produktivvolumes. Er erzeugt stattdessen aus einem verifizierten Bundle eine neue Klartextkopie in einem ausschließlich dafür vorgesehenen Staging-Verzeichnis:
+
+```bash
+bash infra/backup/stage-club-restore.sh masters-backup-<timestamp>-<uuid>.mdbak
+```
+
+Der Host-Wrapper benötigt keine Downtime. Der Compose-Service `backup-restore-stage` besitzt ausschließlich drei Mounts:
+
+- Backup-Ziel read-only,
+- Backup-Key read-only,
+- `RESTORE_STAGING_HOST_DIR` read-write.
+
+Produktive libSQL-, Report-, Export-, Betroffenenexport- oder Caddy-Volumes werden **nicht** in den Staging-Container gemountet.
+
+Vor der Entschlüsselung wird das ausgewählte verschlüsselte Bundle samt Sidecar in ein privates temporäres Verzeichnis kopiert. Dadurch prüft und entschlüsselt der Staging-Prozess einen stabilen Snapshot und nicht eine Datei, die währenddessen am Backup-Ziel ausgetauscht werden könnte. Auf dieser privaten Kopie laufen erneut SHA-256-, AES-GCM-, Archiv- und Manifest-Verifikation.
+
+Vor jeder Extraktion wird die verbose Tar-Struktur geprüft. Zulässig sind ausschließlich reguläre Dateien und Verzeichnisse; Symlinks, Hardlinks, Geräte, FIFOs und andere Special-Entries werden fail-closed abgelehnt. Erst danach wird mit deaktivierter Owner-/Permission-Übernahme in ein neues Verzeichnis der Form
+
+```text
+restore-<timestamp>-<uuid>/
+```
+
+extrahiert. Der Staging-Root sowie der neue Restore-Ordner werden mit `0700` geschützt. Nach der Extraktion werden die sechs erwarteten Quellverzeichnisse und `manifest.json` nochmals auf exakten Top-Level-Scope und Dateityp geprüft. Bei einem Fehler wird das neu angelegte Staging vollständig entfernt; temporäre entschlüsselte Tar-Daten werden immer gelöscht.
+
+**Wichtig:** Das erfolgreiche Staging ist noch kein freigegebener Restore. Die dort liegenden Daten sind entschlüsselte personenbezogene Produktivdaten und müssen wie Produktivdaten geschützt werden. Sie dürfen weder von der App noch von libSQL produktiv verwendet werden, solange Privacy-Reconciliation, Datenbank-/Anwendungsprüfung und ein expliziter Promotionsschritt nicht erfolgreich abgeschlossen sind. Nicht mehr benötigte Stagings müssen kontrolliert entfernt werden.
+
 ## Datenschutzgrenze
 
-Ein Backup kann ältere, inzwischen gelöschte oder anonymisierte Fachdaten enthalten. Deshalb bleibt die globale Backup-Capability vorerst `DISABLED`, obwohl Bundle-Erstellung, tägliche Zeitplanung, bounded retention und read-only Verifikation technisch existieren.
+Ein Backup kann ältere, inzwischen gelöschte oder anonymisierte Fachdaten enthalten. Deshalb bleibt die globale Backup-Capability vorerst `DISABLED`, obwohl Bundle-Erstellung, tägliche Zeitplanung, bounded retention, read-only Verifikation und isoliertes Restore-Staging technisch existieren.
 
 Vor einer produktiven Privacy-Attestation müssen zusätzlich umgesetzt und getestet sein:
 
-- kontrollierte Rückschreibung in isolierte Restore-Volumes,
-- Privacy-Reconciliation vor Freigabe einer wiederhergestellten Instanz,
-- Health-/Integritätsprüfung der wiederhergestellten Anwendung,
+- Privacy-Reconciliation des isolierten Stagings gegen inzwischen ausgeführte Lösch-/Anonymisierungszustände vor jeder Freigabe,
+- Health-/Integritätsprüfung der wiederhergestellten Datenbank und Anwendung,
+- expliziter kontrollierter Promotions-/Rückschreibepfad in Produktivvolumes,
 - Audit-/Statusnachweis erfolgreicher und fehlgeschlagener Backup-/Restore-Läufe,
 - praktischer Restore-/RTO-Drill.
 
