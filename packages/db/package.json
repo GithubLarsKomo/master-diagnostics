@@ -15,7 +15,8 @@
     "data-subject-delivery:cleanup": "tsx src/cleanup-data-subject-delivery-packages.ts",
     "privacy-capabilities:check": "tsx src/check-global-privacy-capabilities.ts",
     "retention:scan": "tsx src/run-retention-job.ts",
-    "backup:bundle": "tsx src/create-backup-bundle.ts"
+    "backup:bundle": "tsx src/create-backup-bundle.ts",
+    "backup:verify": "tsx src/verify-backup-bundle.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
