@@ -155,6 +155,10 @@ jobs:
           assert "sleep 86400" in retention_text
           assert retention["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
           PY
+      - name: Verify pinned infrastructure images resolve
+        run: |
+          docker manifest inspect ghcr.io/tursodatabase/libsql-server:3ec6803 >/dev/null
+          docker manifest inspect caddy:2.11.3-alpine >/dev/null
       - name: Build migration image
         run: docker build --target migrator -f apps/web/Dockerfile -t master-diagnostics-migrator:ci .
       - name: Build production web image
