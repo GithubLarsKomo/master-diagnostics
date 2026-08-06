@@ -49,6 +49,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      - name: Verify backup host orchestrator syntax
+        run: bash -n infra/backup/create-club-backup.sh
       - name: Verify runtime privacy capability attestation
         run: pnpm privacy-capabilities:check
       - name: Verify independent Python diagnostic references
@@ -109,9 +111,9 @@ jobs:
           sed -i 's/replace-with-at-least-32-random-bytes/ci-only-secret-with-at-least-32-characters/' .env
       - name: Validate Docker Compose configuration
         run: docker compose -f infra/docker-compose.club.yml config --quiet
-      - name: Verify maintenance and infrastructure wiring
+      - name: Verify maintenance, backup and infrastructure wiring
         run: |
-          docker compose -f infra/docker-compose.club.yml config --format json > /tmp/club-compose.json
+          docker compose --profile backup -f infra/docker-compose.club.yml config --format json > /tmp/club-compose.json
           python3 - <<'PY'
           import json
 
@@ -122,6 +124,7 @@ jobs:
           app = config["services"]["app"]
           cleanup = config["services"]["export-cleanup"]
           retention = config["services"]["retention-scan"]
+          backup = config["services"]["backup-bundle"]
           libsql = config["services"]["libsql"]
           caddy = config["services"]["caddy"]
 
@@ -154,6 +157,31 @@ jobs:
           assert "--silent --filter @masters/db retention:scan" in retention_text
           assert "sleep 86400" in retention_text
           assert retention["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
+
+          backup_command = backup.get("command", [])
+          backup_text = " ".join(backup_command) if isinstance(backup_command, list) else str(backup_command)
+          assert "backup:bundle" in backup_text
+          required_read_only_targets = {
+              "/backup-source/libsql",
+              "/backup-source/reports",
+              "/backup-source/tenant-exports",
+              "/backup-source/data-subject-delivery",
+              "/backup-source/caddy-data",
+              "/backup-source/caddy-config",
+              "/run/secrets/backup.key",
+          }
+          read_only_targets = {
+              volume.get("target")
+              for volume in backup.get("volumes", [])
+              if volume.get("read_only") is True
+          }
+          assert required_read_only_targets <= read_only_targets
+          target_mounts = [
+              volume for volume in backup.get("volumes", [])
+              if volume.get("target") == "/backup-target"
+          ]
+          assert len(target_mounts) == 1
+          assert target_mounts[0].get("read_only") is not True
           PY
       - name: Verify pinned infrastructure images resolve
         run: |

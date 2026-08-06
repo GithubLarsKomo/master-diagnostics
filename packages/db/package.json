@@ -14,7 +14,8 @@
     "tenant-exports:cleanup": "tsx src/cleanup-tenant-exports.ts",
     "data-subject-delivery:cleanup": "tsx src/cleanup-data-subject-delivery-packages.ts",
     "privacy-capabilities:check": "tsx src/check-global-privacy-capabilities.ts",
-    "retention:scan": "tsx src/run-retention-job.ts"
+    "retention:scan": "tsx src/run-retention-job.ts",
+    "backup:bundle": "tsx src/create-backup-bundle.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
