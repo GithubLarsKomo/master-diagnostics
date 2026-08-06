@@ -2,9 +2,9 @@
 
 ## Aktueller Stand
 
-Epic 12 stellt einen **manuellen Full-Volume-Backup-Bundle-Pfad** plus eine **read-only Restore-Verifikation** bereit. Es gibt noch keinen produktiven Tages-Scheduler und noch keine Rückschreibung in Produktivvolumes. Der Stand rechtfertigt deshalb noch **nicht** `PRIVACY_BACKUP_STATE=ENABLED`.
+Epic 12 stellt einen **verschlüsselten Full-Volume-Backup-Bundle-Pfad**, eine **tägliche hostseitige Zeitplanung mit bounded retention** und eine **read-only Restore-Verifikation** bereit. Es gibt noch keine Rückschreibung in Produktivvolumes und keine Privacy-Reconciliation einer wiederhergestellten Instanz. Der Stand rechtfertigt deshalb noch **nicht** `PRIVACY_BACKUP_STATE=ENABLED`.
 
-Verbindliche Ziele aus SPEC §40 bleiben:
+Verbindliche Ziele aus SPEC §40:
 
 - tägliches konsistentes Backup,
 - Verschlüsselung vor Ablage,
@@ -18,14 +18,15 @@ Verbindliche Ziele aus SPEC §40 bleiben:
 
 libSQL verwendet WAL-/Replikationszustand im persistenten Datenverzeichnis. Eine laufende Docker-Volume-Kopie würde daher eine Konsistenzbehauptung machen, die das Backup-System nicht garantieren kann.
 
-`infra/backup/create-club-backup.sh` verwendet deshalb für den ersten belastbaren Backup-Pfad eine konservative Grenze:
+`infra/backup/create-club-backup.sh` verwendet deshalb eine konservative Grenze:
 
 1. der Backup-Helper wird vor Beginn der Downtime gebaut,
 2. Caddy, Web-App und Maintenance-Writer werden beendet,
 3. libSQL wird anschließend mit erweitertem Shutdown-Timeout sauber beendet,
 4. erst dann werden die persistenten Volumes read-only in den Backup-Helper eingebunden,
 5. der Helper streamt ein Tar-Archiv direkt durch AES-256-GCM in das Backup-Ziel,
-6. nach Erfolg oder Fehler wird der reguläre Club-Stack wieder gestartet.
+6. nach erfolgreicher Bundle-Erzeugung werden ausschließlich ältere **vollständige** Backup-/Sidecar-Paare über der konfigurierten Retention entfernt,
+7. nach Erfolg oder Fehler wird der reguläre Club-Stack wieder gestartet.
 
 Damit wird kein laufendes WAL-Verzeichnis kopiert und kein Docker-Socket in einen Backup-Container gemountet.
 
@@ -42,7 +43,7 @@ Bundle-Version 1 enthält:
 
 Das Manifest im verschlüsselten Archiv enthält nur technische Metadaten: Bundle-Version, Erstellungszeitpunkt, Konsistenzmodus, Verschlüsselungsverfahren, Restore-Reconciliation-Pflicht und die Quellklassen.
 
-## Schlüssel und Ziel vorbereiten
+## Schlüssel, Ziel und Retention vorbereiten
 
 Der Backup-Schlüssel muss **getrennt vom Backup-Ziel** gesichert werden. Er darf weder in Git noch gemeinsam mit den verschlüsselten Bundles abgelegt werden.
 
@@ -61,9 +62,12 @@ In `.env`:
 ```dotenv
 BACKUP_HOST_DIR=/var/backups/master-diagnostics
 BACKUP_KEY_FILE=/etc/master-diagnostics/backup.key
+BACKUP_RETENTION_COUNT=30
 ```
 
-Das Key-File muss Base64 enthalten, das exakt 32 Byte entschlüsselt.
+Das Key-File muss Base64 enthalten, das exakt 32 Byte entschlüsselt. `BACKUP_RETENTION_COUNT` akzeptiert 1 bis 365; Standard ist 30.
+
+Die Retention zählt nur streng benannte, vollständige `.mdbak` + `.mdbak.sha256`-Paare. Orphaned Bundles oder Sidecars werden **nicht** automatisch gelöscht und zählen nicht als vollständige Sicherung; der Backup-Output meldet deren Anzahl zur operativen Prüfung. Gepruned wird nur nach erfolgreicher Erzeugung des neuen verschlüsselten Bundles. Beim Entfernen eines alten Paars wird zuerst das sensible Bundle gelöscht; ein möglicher Sidecar-Rest enthält keine Fachdaten.
 
 ## Manuellen Bundle-Lauf ausführen
 
@@ -75,7 +79,7 @@ bash infra/backup/create-club-backup.sh
 
 Der Lauf benötigt `docker`, Docker Compose v2 und `flock` auf dem Host. Ein exklusiver Lock verhindert parallele Backup-Läufe.
 
-Ein erfolgreicher Lauf erzeugt ausschließlich:
+Ein erfolgreicher Lauf erzeugt ausschließlich ein neues Paar:
 
 ```text
 masters-backup-<timestamp>-<uuid>.mdbak
@@ -83,6 +87,44 @@ masters-backup-<timestamp>-<uuid>.mdbak.sha256
 ```
 
 `.mdbak` ist AES-256-GCM-verschlüsselt. Das Klartext-Tar wird nicht auf das Backup-Ziel geschrieben. Die `.sha256`-Datei dient als schneller Transport-/Dateiintegritätscheck; die GCM-Authentifizierung schützt zusätzlich den entschlüsselten Inhalt gegen Manipulation.
+
+Die JSON-Ausgabe des Helpers enthält außerdem den Retention-Nachweis mit konfiguriertem Limit, vollständigen Paaren vor dem Prune, behaltenen/geprunten Paaren und Orphan-Zählern.
+
+## Tägliche Zeitplanung installieren
+
+Der tägliche Lauf wird absichtlich **auf dem Host** geplant. Ein Scheduler-Container müsste zum Stoppen/Starten des Stacks Docker-Socket-Rechte erhalten und würde die Sicherheitsgrenze unnötig erweitern.
+
+Nach vollständig konfigurierter `.env`:
+
+```bash
+sudo bash infra/backup/install-club-backup-timer.sh
+```
+
+Der Installer erzeugt:
+
+- `master-diagnostics-backup.service` als `Type=oneshot`, der exakt `infra/backup/create-club-backup.sh` aus diesem Checkout aufruft,
+- `master-diagnostics-backup.timer` mit `OnCalendar=*-*-* 03:00:00` und `Persistent=true`.
+
+`Persistent=true` sorgt dafür, dass ein während ausgeschaltetem Host verpasster Lauf nach dem nächsten Start nachgeholt wird. Der bestehende `flock`-Schutz verhindert trotzdem parallele Backup-Läufe.
+
+Kontrolle:
+
+```bash
+systemctl status master-diagnostics-backup.timer
+systemctl list-timers master-diagnostics-backup.timer
+journalctl -u master-diagnostics-backup.service
+```
+
+Zum Entfernen:
+
+```bash
+sudo systemctl disable --now master-diagnostics-backup.timer
+sudo rm -f /etc/systemd/system/master-diagnostics-backup.timer \
+  /etc/systemd/system/master-diagnostics-backup.service
+sudo systemctl daemon-reload
+```
+
+Der Installer verlangt einen Repository-Pfad ohne Whitespace oder `%`, damit der generierte systemd-Vertrag eindeutig bleibt.
 
 ## Backup vor einem Restore verifizieren
 
@@ -109,16 +151,15 @@ Die erfolgreiche Verifikation bedeutet ausdrücklich **nicht**, dass ein Restore
 
 ## Datenschutzgrenze
 
-Ein Backup kann ältere, inzwischen gelöschte oder anonymisierte Fachdaten enthalten. Deshalb bleibt die globale Backup-Capability vorerst `DISABLED`, obwohl Bundle-Erstellung und read-only Verifikation technisch existieren.
+Ein Backup kann ältere, inzwischen gelöschte oder anonymisierte Fachdaten enthalten. Deshalb bleibt die globale Backup-Capability vorerst `DISABLED`, obwohl Bundle-Erstellung, tägliche Zeitplanung, bounded retention und read-only Verifikation technisch existieren.
 
-Vor einer produktiven Aktivierung müssen zusätzlich umgesetzt und getestet sein:
+Vor einer produktiven Privacy-Attestation müssen zusätzlich umgesetzt und getestet sein:
 
-- automatische tägliche Ausführung,
-- bounded retention mit Standard 30 Backups,
-- kontrollierte Rückschreibung in Restore-Volumes,
+- kontrollierte Rückschreibung in isolierte Restore-Volumes,
 - Privacy-Reconciliation vor Freigabe einer wiederhergestellten Instanz,
 - Health-/Integritätsprüfung der wiederhergestellten Anwendung,
-- Audit-/Statusnachweis erfolgreicher und fehlgeschlagener Backup-/Restore-Läufe.
+- Audit-/Statusnachweis erfolgreicher und fehlgeschlagener Backup-/Restore-Läufe,
+- praktischer Restore-/RTO-Drill.
 
 Erst dann darf die Runtime-Attestation auf `PRIVACY_BACKUP_STATE=ENABLED` mit Policy-Version `1.0.0` umgestellt werden.
 
