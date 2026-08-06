@@ -81,6 +81,20 @@ services:
       - ${BACKUP_HOST_DIR:-/var/backups/master-diagnostics}:/backup-target
       - ${BACKUP_KEY_FILE:-/etc/master-diagnostics/backup.key}:/run/secrets/backup.key:ro
 
+  backup-verify:
+    profiles: [backup]
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    environment:
+      BACKUP_KEY_FILE: /run/secrets/backup.key
+    command: ["pnpm", "--filter", "@masters/db", "backup:verify"]
+    volumes:
+      - ${BACKUP_HOST_DIR:-/var/backups/master-diagnostics}:/backup-target:ro
+      - ${BACKUP_KEY_FILE:-/etc/master-diagnostics/backup.key}:/run/secrets/backup.key:ro
+
   app:
     build:
       context: ..
