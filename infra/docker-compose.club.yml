@@ -70,6 +70,7 @@ services:
       BACKUP_SOURCE_DIR: /backup-source
       BACKUP_TARGET_DIR: /backup-target
       BACKUP_KEY_FILE: /run/secrets/backup.key
+      BACKUP_RETENTION_COUNT: ${BACKUP_RETENTION_COUNT:-30}
     command: ["pnpm", "--filter", "@masters/db", "backup:bundle"]
     volumes:
       - libsql-data:/backup-source/libsql:ro
