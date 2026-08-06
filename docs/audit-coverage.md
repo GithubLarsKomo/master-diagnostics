@@ -1,6 +1,6 @@
 # Audit-Coverage gegen SPEC §33
 
-Stand: Epic 10, nach Einführung des append-only Audit-Service, der Auth-/Session-Attribution für die implementierten Fachwriter und der atomar auditierten Berichtsversionierung.
+Stand: Epic 10, nach Einführung des append-only Audit-Service, der Auth-/Session-Attribution für die implementierten Fachwriter sowie der auditierten Berichtsversionierung und Testartefakt-Auslieferung.
 
 ## Grundvertrag
 
@@ -17,6 +17,7 @@ Besondere Fälle:
 
 - Club-Bootstrap kennt `BETTER_AUTH`, läuft aber vor einem regulären Tenant-Session-Kontext; `session_id` bleibt deshalb `NULL`.
 - Einmalige Bearer-Downloads werden nicht fälschlich dem Ersteller zugerechnet. Beim Tenant-Export und Betroffenenexport bleiben Actor-, Provider- und Session-Felder des Download-Ereignisses deshalb `NULL`.
+- Authentifizierte Test-, Analyse- und Report-Downloads werden erst nach erfolgreicher Autorisierung/Policy-/Integritätsprüfung auditiert und erst danach als HTTP-200-Antwort ausgeliefert. Ein Auditfehler bleibt damit fail-closed vor der Auslieferung.
 
 ## Ereignismatrix
 
@@ -33,7 +34,7 @@ Besondere Fälle:
 | Schwellenberechnung | offen | Diagnostik-Kern ist deterministisch/versioniert, aber die fachliche Berechnung/Festschreibung hat noch kein eigenes Audit-Ereignis. |
 | manuelle LT1-/LT2-/Zonenfestlegung | offen | Fachkern/Entscheidungslogik vorhanden; persistenter auditierter Writer muss noch vervollständigt werden. |
 | Freigabe und Berichtsversion | teilweise | Immutable Berichtsversionen werden mit `report.version_created` samt Tenant-/Actor-/Session-Kontext atomar auditiert. Die fachliche Ergebnis-/Interpretationsfreigabe benötigt weiterhin einen eigenen vollständigen Audit-Nachweis. |
-| Exporte | teilweise | Tenant-Export-Erstellung/-Download sowie Betroffenenexport-Erstellung/-Download sind auditiert. Test-, Analyse- und Berichtsexporte/-downloads müssen noch als fachliche Ereigniskategorien vervollständigt werden. |
+| Exporte | abgedeckt | Tenant-Export und Betroffenenexport protokollieren Erstellung/Download. Authentifizierte Testexporte, anonymisierte Analyseexporte und Report-Downloads werden mit `test.export_downloaded`, `analysis.export_downloaded` bzw. `report.downloaded` und PII-minimierten technischen Metadaten protokolliert. |
 | Löschung und Anonymisierung | abgedeckt | Löschantrag und Entscheidung sowie die irreversible Ausführung werden über Approval/Execution-Transitions bis `athlete.anonymization_db_committed` und `athlete.anonymization_completed` nachvollziehbar auditiert; Abbrüche werden ebenfalls protokolliert. |
 | Vorlagen- und Zonenregeländerungen | teilweise | Protokollvorlage und neue Vorlagenversion werden auditiert; Zonenregeländerungen sind noch nicht vollständig als eigener Writer abgedeckt. |
 | Backup, Restore, Update und Setup | teilweise | `club.bootstrap.completed` ist zentral auditiert; Backup/Restore/Update folgen mit Epic 12. |
@@ -65,9 +66,8 @@ Der Task darf erst geschlossen werden, wenn mindestens folgende Restpunkte entwe
 3. Unterbrechung/Resume als serverseitiger, auditierbarer Testzustand oder dokumentierte SPEC-Anpassung.
 4. Schwellenberechnung und manuelle LT1-/LT2-/Zonenentscheidung.
 5. fachliche Ergebnis-/Interpretationsfreigabe.
-6. Test-, Analyse- und Berichtsexporte/-downloads.
-7. Zonenregeländerungen.
-8. Bluetooth-Quellenwechsel mit Epic 11.
-9. Backup/Restore/Update mit Epic 12.
+6. Zonenregeländerungen.
+7. Bluetooth-Quellenwechsel mit Epic 11.
+8. Backup/Restore/Update mit Epic 12.
 
 Diese Matrix ist absichtlich konservativ: vorhandene Fachfunktionalität ohne nachgewiesenes Audit-Ereignis zählt nicht als abgedeckt.
