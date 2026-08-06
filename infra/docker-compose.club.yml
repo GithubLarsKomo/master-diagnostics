@@ -59,6 +59,28 @@ services:
         condition: service_completed_successfully
     networks: [internal]
 
+  backup-bundle:
+    profiles: [backup]
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    environment:
+      BACKUP_SOURCE_DIR: /backup-source
+      BACKUP_TARGET_DIR: /backup-target
+      BACKUP_KEY_FILE: /run/secrets/backup.key
+    command: ["pnpm", "--filter", "@masters/db", "backup:bundle"]
+    volumes:
+      - libsql-data:/backup-source/libsql:ro
+      - report-data:/backup-source/reports:ro
+      - export-data:/backup-source/tenant-exports:ro
+      - data-subject-delivery-data:/backup-source/data-subject-delivery:ro
+      - caddy-data:/backup-source/caddy-data:ro
+      - caddy-config:/backup-source/caddy-config:ro
+      - ${BACKUP_HOST_DIR:-/var/backups/master-diagnostics}:/backup-target
+      - ${BACKUP_KEY_FILE:-/etc/master-diagnostics/backup.key}:/run/secrets/backup.key:ro
+
   app:
     build:
       context: ..
