@@ -17,6 +17,7 @@ export * from './services/data-subject-delivery-approval';
 export * from './services/data-subject-reviewed-delivery';
 export * from './services/data-subject-delivery-packages';
 export * from './services/data-subject-delivery-cleanup';
+export * from './services/restore-privacy-ledger';
 export * from './services/club-bootstrap';
 export * from './services/factory-protocol-templates';
 export * from './services/protocol-templates';
