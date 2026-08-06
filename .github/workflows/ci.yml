@@ -55,6 +55,7 @@ jobs:
           bash -n infra/backup/verify-club-backup.sh
           bash -n infra/backup/install-club-backup-timer.sh
           bash -n infra/backup/stage-club-restore.sh
+          bash -n infra/backup/create-club-restore-privacy-ledger.sh
       - name: Verify runtime privacy capability attestation
         run: pnpm privacy-capabilities:check
       - name: Verify independent Python diagnostic references
@@ -88,6 +89,35 @@ jobs:
               'mode', 'assessedAt', 'tenantCount', 'candidateCount',
               'eligibleCount', 'manualReviewCount',
           }
+          PY
+      - name: Verify restore privacy ledger CLI
+        run: |
+          cat >/tmp/restore-manifest.json <<'JSON'
+          {
+            "bundleVersion": 1,
+            "createdAt": "2026-08-01T00:00:00.000Z",
+            "restoreReconciliationRequired": true
+          }
+          JSON
+          rm -f /tmp/privacy-reconciliation-ledger.json
+          RESTORE_STAGING_MANIFEST=/tmp/restore-manifest.json \
+          RESTORE_PRIVACY_LEDGER_OUTPUT=/tmp/privacy-reconciliation-ledger.json \
+            pnpm --silent --filter @masters/db backup:privacy-ledger > /tmp/privacy-ledger-summary.json
+          test "$(stat -c '%a' /tmp/privacy-reconciliation-ledger.json)" = "600"
+          python3 - <<'PY'
+          import json
+
+          with open('/tmp/privacy-ledger-summary.json', encoding='utf-8') as handle:
+              summary = json.load(handle)
+          with open('/tmp/privacy-reconciliation-ledger.json', encoding='utf-8') as handle:
+              ledger = json.load(handle)
+          assert summary['ledgerVersion'] == 1
+          assert summary['backupCreatedAt'] == '2026-08-01T00:00:00.000Z'
+          assert summary['entryCount'] == 0
+          assert summary['fingerprint'].startswith('sha256:')
+          assert ledger['entryCount'] == 0
+          assert ledger['entries'] == []
+          assert ledger['fingerprint'] == summary['fingerprint']
           PY
       - name: Run Playwright E2E
         run: |
@@ -141,6 +171,7 @@ jobs:
           backup = config["services"]["backup-bundle"]
           backup_verify = config["services"]["backup-verify"]
           backup_stage = config["services"]["backup-restore-stage"]
+          privacy_ledger = config["services"]["backup-privacy-ledger"]
           libsql = config["services"]["libsql"]
           caddy = config["services"]["caddy"]
 
@@ -227,6 +258,16 @@ jobs:
               "/config",
           }
           assert production_targets.isdisjoint(stage_mounts)
+
+          ledger_command = privacy_ledger.get("command", [])
+          ledger_text = " ".join(ledger_command) if isinstance(ledger_command, list) else str(ledger_command)
+          assert "backup:privacy-ledger" in ledger_text
+          assert privacy_ledger["environment"]["DATABASE_URL"] == "http://libsql:8080"
+          ledger_mounts = {volume.get("target"): volume for volume in privacy_ledger.get("volumes", [])}
+          assert set(ledger_mounts) == {"/restore-staging"}
+          assert ledger_mounts["/restore-staging"].get("read_only") is not True
+          assert production_targets.isdisjoint(ledger_mounts)
+          assert privacy_ledger["depends_on"]["libsql"]["condition"] == "service_healthy"
           PY
       - name: Verify pinned infrastructure images resolve
         run: |
