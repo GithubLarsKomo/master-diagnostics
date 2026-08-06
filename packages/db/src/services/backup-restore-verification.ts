@@ -38,7 +38,9 @@ export interface VerifiedEncryptedBackupBundle {
 function parseChecksumFile(content: string, expectedFileName: string): string {
   const match = /^([0-9a-f]{64})  ([^\r\n]+)\r?\n?$/.exec(content);
   if (!match) throw new Error('Backup checksum file format is invalid');
-  const [, checksum, fileName] = match;
+  const checksum = match[1];
+  const fileName = match[2];
+  if (!checksum || !fileName) throw new Error('Backup checksum file format is invalid');
   if (fileName !== expectedFileName) throw new Error('Backup checksum file names a different bundle');
   return checksum;
 }
@@ -49,7 +51,8 @@ function parseManifest(value: unknown): BackupManifest {
   }
   const manifest = value as Record<string, unknown>;
   if (manifest.bundleVersion !== BACKUP_BUNDLE_VERSION) throw new Error('Backup manifest version is unsupported');
-  if (typeof manifest.createdAt !== 'string' || !Number.isFinite(Date.parse(manifest.createdAt))) {
+  const createdAt = manifest.createdAt;
+  if (typeof createdAt !== 'string' || !Number.isFinite(Date.parse(createdAt))) {
     throw new Error('Backup manifest creation time is invalid');
   }
   if (manifest.consistency !== 'CLEANLY_STOPPED_VOLUMES') throw new Error('Backup consistency mode is unsupported');
@@ -57,10 +60,11 @@ function parseManifest(value: unknown): BackupManifest {
   if (manifest.restoreReconciliationRequired !== true) {
     throw new Error('Backup manifest must require restore privacy reconciliation');
   }
-  if (!Array.isArray(manifest.sources) || manifest.sources.length !== EXPECTED_SOURCES.length) {
+  const sources = manifest.sources;
+  if (!Array.isArray(sources) || sources.length !== EXPECTED_SOURCES.length) {
     throw new Error('Backup manifest source set is invalid');
   }
-  if (!EXPECTED_SOURCES.every((source, index) => manifest.sources[index] === source)) {
+  if (!EXPECTED_SOURCES.every((source, index) => sources[index] === source)) {
     throw new Error('Backup manifest source set is invalid');
   }
   if (Object.keys(manifest).sort().join('\n') !== [
@@ -75,7 +79,7 @@ function parseManifest(value: unknown): BackupManifest {
   }
   return Object.freeze({
     bundleVersion: BACKUP_BUNDLE_VERSION,
-    createdAt: manifest.createdAt,
+    createdAt,
     consistency: 'CLEANLY_STOPPED_VOLUMES',
     encryption: 'AES-256-GCM',
     restoreReconciliationRequired: true,
