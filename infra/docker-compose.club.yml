@@ -112,6 +112,24 @@ services:
       - ${BACKUP_KEY_FILE:-/etc/master-diagnostics/backup.key}:/run/secrets/backup.key:ro
       - ${RESTORE_STAGING_HOST_DIR:-/var/lib/master-diagnostics/restore-staging}:/restore-staging
 
+  backup-privacy-ledger:
+    profiles: [backup]
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    env_file: ../.env
+    environment:
+      DATABASE_URL: http://libsql:8080
+    command: ["pnpm", "--filter", "@masters/db", "backup:privacy-ledger"]
+    volumes:
+      - ${RESTORE_STAGING_HOST_DIR:-/var/lib/master-diagnostics/restore-staging}:/restore-staging
+    depends_on:
+      libsql:
+        condition: service_healthy
+    networks: [internal]
+
   app:
     build:
       context: ..
