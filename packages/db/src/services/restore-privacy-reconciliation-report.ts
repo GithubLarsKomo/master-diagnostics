@@ -153,7 +153,29 @@ function sameIdentity(
   left: Readonly<RestorePrivacyEffectIdentity>,
   right: Readonly<RestorePrivacyEffectIdentity>,
 ): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return left.tenantId === right.tenantId
+    && left.athleteId === right.athleteId
+    && left.executionId === right.executionId
+    && left.approvalId === right.approvalId
+    && left.deletionRequestId === right.deletionRequestId
+    && left.executionVersion === right.executionVersion
+    && left.policyVersion === right.policyVersion
+    && left.scopeFingerprint === right.scopeFingerprint
+    && left.capabilityFingerprint === right.capabilityFingerprint;
+}
+
+function assertJournalPairConsistency(
+  pending: Readonly<RestorePrivacyEffectRecord>,
+  terminal: Readonly<RestorePrivacyEffectRecord>,
+): void {
+  if (pending.phase !== 'PENDING') throw new Error('Restore privacy effect journal pair is missing PENDING intent');
+  if (terminal.phase === 'PENDING') throw new Error('Restore privacy effect journal terminal record is invalid');
+  if (!sameIdentity(pending.effect, terminal.effect)) {
+    throw new Error('Restore privacy effect terminal marker does not match its PENDING identity');
+  }
+  if (terminal.recordedAt < pending.recordedAt) {
+    throw new Error('Restore privacy effect terminal marker precedes its PENDING intent');
+  }
 }
 
 function addObligation(
@@ -220,6 +242,7 @@ export function buildRestorePrivacyReconciliationReport(
       blockers.push(Object.freeze({ code: 'OPEN_PENDING_INTENT', executionId }));
       continue;
     }
+    assertJournalPairConsistency(pair.pending, pair.terminal);
 
     const ledgerEntry = ledgerEntries.get(executionId);
     if (pair.terminal.phase === 'ABORTED') {
