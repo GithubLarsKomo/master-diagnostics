@@ -10,6 +10,7 @@ import {
   prepareAthleteAnonymizationExecution,
   type Database,
   type GlobalPrivacyCapabilities,
+  type RestorePrivacyEffectRecord,
 } from '@masters/db';
 import * as schema from '@masters/db';
 import {
@@ -32,6 +33,7 @@ import {
   recoverCommittedAthleteAnonymization,
   type AthleteAnonymizationOrchestratorDependencies,
 } from './anonymization-execution-orchestrator';
+import type { AthleteAnonymizationPrivacyEffectJournal } from './anonymization-privacy-effect-journal';
 
 const roots: string[] = [];
 
@@ -64,6 +66,28 @@ const capabilities: GlobalPrivacyCapabilities = {
 const reportReference = 'tenant-a/test-a/de/report-a.pdf';
 const exportReference = '01234567-89ab-cdef-0123-456789abcdef.mde';
 const subjectReference = '123e4567-e89b-12d3-a456-426614174000.mdse';
+
+class RecordingPrivacyEffectJournal implements AthleteAnonymizationPrivacyEffectJournal {
+  readonly records: RestorePrivacyEffectRecord[] = [];
+  failNextPhase: RestorePrivacyEffectRecord['phase'] | null = null;
+  private readonly slots = new Map<string, string>();
+
+  async persist(record: Readonly<RestorePrivacyEffectRecord>): Promise<void> {
+    if (this.failNextPhase === record.phase) {
+      this.failNextPhase = null;
+      throw new Error(`simulated ${record.phase} journal failure`);
+    }
+    const slot = record.phase === 'PENDING' ? 'pending' : 'terminal';
+    const key = `${record.effect.executionId}:${slot}`;
+    const serialized = JSON.stringify(record);
+    const existing = this.slots.get(key);
+    if (existing && existing !== serialized) throw new Error('conflicting privacy effect journal record');
+    if (!existing) {
+      this.slots.set(key, serialized);
+      this.records.push(record);
+    }
+  }
+}
 
 async function seed(db: Database) {
   await db.insert(schema.tenants).values({
@@ -142,14 +166,16 @@ async function setup() {
   const approval = await approveAthleteAnonymization(
     db, 'tenant-a', 'athlete-a', actor, capabilities, '2026-08-05T13:00:00.000Z',
   );
+  const journal = new RecordingPrivacyEffectJournal();
   const deps: AthleteAnonymizationOrchestratorDependencies = {
     db,
     reportStorage,
     exportStorage,
     dataSubjectExportStorage,
+    privacyEffectJournal: journal,
     now: () => '2026-08-05T13:05:00.000Z',
   };
-  return { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, deps };
+  return { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, journal, deps };
 }
 
 class MutatingExportStorage implements QuarantinableTenantExportPackageStorage {
@@ -214,9 +240,23 @@ class FailOnceReportPurgeStorage implements QuarantinableReportArtifactStorage {
   }
 }
 
+class CountingReportPurgeStorage implements QuarantinableReportArtifactStorage {
+  purgeCalls = 0;
+  constructor(private readonly base: QuarantinableReportArtifactStorage) {}
+  put(reference: string, bytes: Uint8Array) { return this.base.put(reference, bytes); }
+  get(reference: string) { return this.base.get(reference); }
+  remove(reference: string) { return this.base.remove(reference); }
+  stageForDeletion(executionId: string, reference: string) { return this.base.stageForDeletion(executionId, reference); }
+  restoreStaged(handle: Readonly<StagedReportArtifact>) { return this.base.restoreStaged(handle); }
+  async purgeStaged(handle: Readonly<StagedReportArtifact>): Promise<void> {
+    this.purgeCalls += 1;
+    await this.base.purgeStaged(handle);
+  }
+}
+
 describe('athlete anonymization end-to-end orchestrator', () => {
-  it('stages artifacts, commits the DB, purges quarantine and completes exactly once', async () => {
-    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, deps } = await setup();
+  it('stages artifacts, journals the privacy effect, commits, purges and completes exactly once', async () => {
+    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, journal, deps } = await setup();
 
     const completed = await executeAthleteAnonymization(deps, {
       tenantId: 'tenant-a', athleteId: 'athlete-a', approvalId: approval.id,
@@ -235,6 +275,10 @@ describe('athlete anonymization end-to-end orchestrator', () => {
       firstName: '[ANONYMIZED]', lastName: '[ANONYMIZED]', birthDate: '0001-01-01',
       heightCm: 0, currentWeightKgX100: 0,
     });
+    expect(journal.records.map((record) => record.phase)).toEqual(['PENDING', 'COMMITTED']);
+    expect(journal.records[0]?.recordedAt).toBe(completed.artifactsStagedAt);
+    const committedRecord = journal.records.find((record) => record.phase === 'COMMITTED');
+    expect(committedRecord?.dbCommittedAt).toBe(completed.dbCommittedAt);
 
     const again = await executeAthleteAnonymization(deps, {
       tenantId: 'tenant-a', athleteId: 'athlete-a', approvalId: approval.id,
@@ -242,6 +286,7 @@ describe('athlete anonymization end-to-end orchestrator', () => {
     });
     expect(again.id).toBe(completed.id);
     expect(again.status).toBe('COMPLETED');
+    expect(journal.records.map((record) => record.phase)).toEqual(['PENDING', 'COMMITTED']);
 
     const actions = (await db.select().from(schema.auditEvents)).map((row) => row.action);
     expect(actions.filter((action) => action === 'athlete.anonymization_artifacts_staged')).toHaveLength(1);
@@ -250,7 +295,7 @@ describe('athlete anonymization end-to-end orchestrator', () => {
   });
 
   it('aborts a PREPARING execution when subject-package scope drifts before first staging', async () => {
-    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, deps } = await setup();
+    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, journal, deps } = await setup();
     const prepared = await prepareAthleteAnonymizationExecution(
       db,
       'tenant-a',
@@ -272,6 +317,7 @@ describe('athlete anonymization end-to-end orchestrator', () => {
 
     const execution = await getAthleteAnonymizationExecutionByApproval(db, 'tenant-a', 'athlete-a', approval.id);
     expect(execution?.status).toBe('ABORTED');
+    expect(journal.records).toEqual([]);
     expect(new TextDecoder().decode(await reportStorage.get(reportReference))).toBe('report-pdf');
     expect(new TextDecoder().decode(await exportStorage.get(exportReference))).toBe('encrypted-export');
     const actions = (await db.select().from(schema.auditEvents)).map((row) => row.action);
@@ -279,8 +325,30 @@ describe('athlete anonymization end-to-end orchestrator', () => {
     expect(actions.filter((action) => action === 'athlete.anonymization_execution_aborted')).toHaveLength(1);
   });
 
-  it('restores staged artifacts and aborts when DB scope drifts after staging', async () => {
-    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, deps } = await setup();
+  it('keeps ARTIFACTS_STAGED retryable when PENDING journal durability fails', async () => {
+    const { db, approval, journal, deps } = await setup();
+    journal.failNextPhase = 'PENDING';
+
+    await expect(executeAthleteAnonymization(deps, {
+      tenantId: 'tenant-a', athleteId: 'athlete-a', approvalId: approval.id,
+      actor, globalCapabilities: capabilities,
+    })).rejects.toThrow(/PENDING/);
+
+    const staged = await getAthleteAnonymizationExecutionByApproval(db, 'tenant-a', 'athlete-a', approval.id);
+    expect(staged?.status).toBe('ARTIFACTS_STAGED');
+    expect(await db.select().from(schema.tests)).toHaveLength(1);
+    expect(journal.records).toEqual([]);
+
+    const completed = await executeAthleteAnonymization(deps, {
+      tenantId: 'tenant-a', athleteId: 'athlete-a', approvalId: approval.id,
+      actor, globalCapabilities: capabilities,
+    });
+    expect(completed.status).toBe('COMPLETED');
+    expect(journal.records.map((record) => record.phase)).toEqual(['PENDING', 'COMMITTED']);
+  });
+
+  it('restores staged artifacts, aborts and journals ABORTED when DB scope drifts after staging', async () => {
+    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, journal, deps } = await setup();
     const mutatingExportStorage = new MutatingExportStorage(exportStorage, async () => {
       await db.insert(schema.tenantExportPackages).values({
         id: 'export-late', tenantId: 'tenant-a', tokenHash: `sha256:${'3'.repeat(64)}`,
@@ -302,13 +370,14 @@ describe('athlete anonymization end-to-end orchestrator', () => {
       db, 'tenant-a', 'athlete-a', approval.id,
     );
     expect(execution?.status).toBe('ABORTED');
+    expect(journal.records.map((record) => record.phase)).toEqual(['PENDING', 'ABORTED']);
     const [athlete] = await db.select().from(schema.athletes);
     expect(athlete?.firstName).toBe('Petra');
     expect(await db.select().from(schema.tests)).toHaveLength(1);
   });
 
-  it('restores all artifacts when a new subject package appears after subject staging', async () => {
-    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, deps } = await setup();
+  it('restores all artifacts and journals ABORTED when a new subject package appears after staging', async () => {
+    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, journal, deps } = await setup();
     const mutatingSubjectStorage = new MutatingSubjectStorage(dataSubjectExportStorage, async () => {
       await db.insert(schema.athleteDataSubjectDeliveryPackages).values({
         id: '223e4567-e89b-12d3-a456-426614174000', tenantId: 'tenant-a', athleteId: 'athlete-a',
@@ -334,12 +403,39 @@ describe('athlete anonymization end-to-end orchestrator', () => {
     expect(new TextDecoder().decode(await dataSubjectExportStorage.get(subjectReference))).toBe('encrypted-subject-export');
     const execution = await getAthleteAnonymizationExecutionByApproval(db, 'tenant-a', 'athlete-a', approval.id);
     expect(execution?.status).toBe('ABORTED');
+    expect(journal.records.map((record) => record.phase)).toEqual(['PENDING', 'ABORTED']);
     const [athlete] = await db.select().from(schema.athletes);
     expect(athlete?.firstName).toBe('Petra');
   });
 
+  it('blocks purge while COMMITTED privacy-effect durability is unavailable, then recovers', async () => {
+    const { db, reportStorage, approval, journal, deps } = await setup();
+    const countingStorage = new CountingReportPurgeStorage(reportStorage);
+    journal.failNextPhase = 'COMMITTED';
+    const failingDeps = { ...deps, reportStorage: countingStorage };
+
+    await expect(executeAthleteAnonymization(failingDeps, {
+      tenantId: 'tenant-a', athleteId: 'athlete-a', approvalId: approval.id,
+      actor, globalCapabilities: capabilities,
+    })).rejects.toThrow(/COMMITTED/);
+
+    const committed = await getAthleteAnonymizationExecutionByApproval(
+      db, 'tenant-a', 'athlete-a', approval.id,
+    );
+    expect(committed?.status).toBe('DB_COMMITTED');
+    expect(countingStorage.purgeCalls).toBe(0);
+    expect(journal.records.map((record) => record.phase)).toEqual(['PENDING']);
+
+    const recovered = await recoverCommittedAthleteAnonymization(failingDeps, {
+      tenantId: 'tenant-a', athleteId: 'athlete-a', executionId: committed!.id, actor,
+    });
+    expect(recovered.status).toBe('COMPLETED');
+    expect(countingStorage.purgeCalls).toBe(1);
+    expect(journal.records.map((record) => record.phase)).toEqual(['PENDING', 'COMMITTED']);
+  });
+
   it('leaves DB_COMMITTED on purge failure and recovers without replaying approval or DB mutation', async () => {
-    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, deps } = await setup();
+    const { db, reportStorage, exportStorage, dataSubjectExportStorage, approval, journal, deps } = await setup();
     const failOnce = new FailOnceReportPurgeStorage(reportStorage);
     const failingDeps = { ...deps, reportStorage: failOnce };
 
@@ -356,6 +452,7 @@ describe('athlete anonymization end-to-end orchestrator', () => {
     expect(await db.select().from(schema.athleteDataSubjectDeliveryPackages)).toEqual([]);
     const [athleteAfterCommit] = await db.select().from(schema.athletes);
     expect(athleteAfterCommit?.firstName).toBe('[ANONYMIZED]');
+    expect(journal.records.map((record) => record.phase)).toEqual(['PENDING', 'COMMITTED']);
 
     const recovered = await recoverCommittedAthleteAnonymization(failingDeps, {
       tenantId: 'tenant-a', athleteId: 'athlete-a', executionId: committed!.id, actor,
@@ -364,6 +461,7 @@ describe('athlete anonymization end-to-end orchestrator', () => {
     await expect(reportStorage.get(reportReference)).rejects.toThrow();
     await expect(exportStorage.get(exportReference)).rejects.toThrow();
     await expect(dataSubjectExportStorage.get(subjectReference)).rejects.toThrow();
+    expect(journal.records.map((record) => record.phase)).toEqual(['PENDING', 'COMMITTED']);
 
     const actions = (await db.select().from(schema.auditEvents)).map((row) => row.action);
     expect(actions.filter((action) => action === 'athlete.anonymization_db_committed')).toHaveLength(1);
