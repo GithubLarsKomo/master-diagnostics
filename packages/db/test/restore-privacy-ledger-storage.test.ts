@@ -55,17 +55,19 @@ describe('signed restore privacy ledger storage', () => {
     expect(JSON.stringify(verified)).not.toContain(Buffer.alloc(32, 7).toString('base64'));
   });
 
-  it('is idempotent for the same signed snapshot and never overwrites different content', async () => {
+  it('is idempotent for one observation and appends a later observation without overwriting', async () => {
     const { targetDir, keyFile } = await fixture();
     const first = await persistSignedRestorePrivacyLedger({ ledger, targetDir, keyFile });
     const retry = await persistSignedRestorePrivacyLedger({ ledger, targetDir, keyFile });
     expect(retry.created).toBe(false);
     expect(retry.path).toBe(first.path);
 
-    const different = Object.freeze({ ...ledger, generatedAt: '2026-08-06T13:00:00.000Z' });
-    await expect(persistSignedRestorePrivacyLedger({ ledger: different, targetDir, keyFile }))
-      .rejects.toThrow('already exists with different content');
+    const later = Object.freeze({ ...ledger, generatedAt: '2026-08-06T13:00:00.000Z' });
+    const laterPersisted = await persistSignedRestorePrivacyLedger({ ledger: later, targetDir, keyFile });
+    expect(laterPersisted.created).toBe(true);
+    expect(laterPersisted.path).not.toBe(first.path);
     expect(await readFile(first.path, 'utf8')).toContain('2026-08-06T12:00:00.000Z');
+    expect(await readFile(laterPersisted.path, 'utf8')).toContain('2026-08-06T13:00:00.000Z');
   });
 
   it('fails closed when the signed ledger or signing key is tampered with', async () => {
