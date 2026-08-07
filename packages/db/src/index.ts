@@ -10,6 +10,7 @@ export * from './services/anonymization-approval';
 export * from './services/anonymization-execution';
 export * from './services/anonymization-db-commit';
 export * from './services/anonymization-tombstone';
+export * from './services/anonymization-privacy-effect';
 export * from './services/global-privacy-policy';
 export * from './services/global-privacy-capability-env';
 export * from './services/data-subject-export';
