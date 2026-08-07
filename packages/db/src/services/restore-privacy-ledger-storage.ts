@@ -1,11 +1,11 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { link, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { RestorePrivacyReconciliationLedger } from './restore-privacy-ledger';
 
 export const SIGNED_RESTORE_PRIVACY_LEDGER_VERSION = 1 as const;
 const SIGNATURE_PREFIX = 'hmac-sha256:';
-const LEDGER_FILE_NAME = /^restore-privacy-ledger-[0-9TZ]+-[0-9a-f]{64}\.json$/;
+const LEDGER_FILE_NAME = /^restore-privacy-ledger-[0-9TZ]+-[0-9TZ]+-[0-9a-f]{64}\.json$/;
 
 export interface SignedRestorePrivacyLedgerEnvelope {
   readonly envelopeVersion: typeof SIGNED_RESTORE_PRIVACY_LEDGER_VERSION;
@@ -58,20 +58,21 @@ export function restorePrivacyLedgerFileName(
   ledger: Readonly<RestorePrivacyReconciliationLedger>,
 ): string {
   const digest = ledger.entriesFingerprint.slice('sha256:'.length);
-  return `restore-privacy-ledger-${timestampSegment(ledger.sinceExclusive)}-${digest}.json`;
+  return `restore-privacy-ledger-${timestampSegment(ledger.sinceExclusive)}-${timestampSegment(ledger.generatedAt)}-${digest}.json`;
 }
 
 /**
  * Persists one signed restore-privacy ledger outside backup/staging history.
  *
  * The final path is installed with an atomic hard-link from a private temp file on the same
- * filesystem. Existing snapshots are never overwritten; identical retries are accepted only when
- * the already persisted envelope is byte-identical.
+ * filesystem. Existing snapshots are never overwritten; identical retries for the same observation
+ * window are accepted only when the already persisted envelope is byte-identical.
  */
 export async function persistSignedRestorePrivacyLedger(
   input: PersistSignedRestorePrivacyLedgerInput,
 ): Promise<Readonly<{ path: string; created: boolean; envelope: SignedRestorePrivacyLedgerEnvelope }>> {
   await mkdir(input.targetDir, { recursive: true, mode: 0o700 });
+  await chmod(input.targetDir, 0o700);
   const key = await readLedgerSigningKey(input.keyFile);
   const signature = signLedger(key, input.ledger);
   const envelope = Object.freeze({
