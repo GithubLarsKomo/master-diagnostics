@@ -6,6 +6,7 @@ import {
   getAthleteAnonymizationExecution,
   getAthleteAnonymizationExecutionByApproval,
   getAthleteAnonymizationPolicyPreview,
+  getAthleteAnonymizationPrivacyEffectIdentity,
   listAthleteAnonymizationExecutionArtifacts,
   markAthleteAnonymizationArtifactsStaged,
   prepareAthleteAnonymizationExecution,
@@ -13,6 +14,7 @@ import {
   type AuditActorContext,
   type Database,
   type GlobalPrivacyCapabilities,
+  type RestorePrivacyEffectIdentity,
   type StoredAthleteAnonymizationExecution,
 } from '@masters/db';
 import { db as configuredDb } from '../db';
@@ -34,6 +36,13 @@ import {
   stageAnonymizationArtifacts,
   type StagedAnonymizationArtifacts,
 } from './anonymization-artifact-quarantine';
+import {
+  abortedAthleteAnonymizationPrivacyEffectRecord,
+  committedAthleteAnonymizationPrivacyEffectRecord,
+  configuredAthleteAnonymizationPrivacyEffectJournal,
+  pendingAthleteAnonymizationPrivacyEffectRecord,
+  type AthleteAnonymizationPrivacyEffectJournal,
+} from './anonymization-privacy-effect-journal';
 
 export interface AthleteAnonymizationExecutionInput {
   tenantId: string;
@@ -60,6 +69,7 @@ export interface AthleteAnonymizationOrchestratorDependencies {
   reportStorage: QuarantinableReportArtifactStorage;
   exportStorage: QuarantinableTenantExportPackageStorage;
   dataSubjectExportStorage: QuarantinableDataSubjectDeliveryPackageStorage;
+  privacyEffectJournal: AthleteAnonymizationPrivacyEffectJournal;
   now?: () => string;
 }
 
@@ -141,6 +151,76 @@ async function requireFreshPreStageState(
   return artifactHandles(deps, input.tenantId, execution.id);
 }
 
+async function requirePrivacyEffectIdentity(
+  deps: AthleteAnonymizationOrchestratorDependencies,
+  tenantId: string,
+  athleteId: string,
+  executionId: string,
+): Promise<Readonly<RestorePrivacyEffectIdentity>> {
+  const effect = await getAthleteAnonymizationPrivacyEffectIdentity(
+    deps.db,
+    tenantId,
+    athleteId,
+    executionId,
+  );
+  if (!effect) throw new Error('Anonymization privacy effect identity is unavailable');
+  return effect;
+}
+
+async function persistPendingPrivacyEffect(
+  deps: AthleteAnonymizationOrchestratorDependencies,
+  execution: Readonly<StoredAthleteAnonymizationExecution>,
+): Promise<void> {
+  if (execution.status !== 'ARTIFACTS_STAGED' || !execution.artifactsStagedAt) {
+    throw new Error('ARTIFACTS_STAGED execution with staged timestamp required before PENDING privacy effect');
+  }
+  const effect = await requirePrivacyEffectIdentity(
+    deps,
+    execution.tenantId,
+    execution.athleteId,
+    execution.id,
+  );
+  await deps.privacyEffectJournal.persist(
+    pendingAthleteAnonymizationPrivacyEffectRecord(effect, execution.artifactsStagedAt),
+  );
+}
+
+async function persistCommittedPrivacyEffect(
+  deps: AthleteAnonymizationOrchestratorDependencies,
+  execution: Readonly<StoredAthleteAnonymizationExecution>,
+): Promise<void> {
+  if (execution.status !== 'DB_COMMITTED' || !execution.dbCommittedAt) {
+    throw new Error('DB_COMMITTED execution with commit timestamp required before COMMITTED privacy effect');
+  }
+  const effect = await requirePrivacyEffectIdentity(
+    deps,
+    execution.tenantId,
+    execution.athleteId,
+    execution.id,
+  );
+  await deps.privacyEffectJournal.persist(
+    committedAthleteAnonymizationPrivacyEffectRecord(effect, execution.dbCommittedAt),
+  );
+}
+
+async function persistAbortedPrivacyEffect(
+  deps: AthleteAnonymizationOrchestratorDependencies,
+  execution: Readonly<StoredAthleteAnonymizationExecution>,
+): Promise<void> {
+  if (execution.status !== 'ABORTED' || !execution.abortedAt) {
+    throw new Error('ABORTED execution with abort timestamp required before ABORTED privacy effect');
+  }
+  const effect = await requirePrivacyEffectIdentity(
+    deps,
+    execution.tenantId,
+    execution.athleteId,
+    execution.id,
+  );
+  await deps.privacyEffectJournal.persist(
+    abortedAthleteAnonymizationPrivacyEffectRecord(effect, execution.abortedAt),
+  );
+}
+
 async function abortBeforeStaging(
   deps: AthleteAnonymizationOrchestratorDependencies,
   input: AthleteAnonymizationExecutionInput,
@@ -170,9 +250,11 @@ async function abortAfterSuccessfulRestore(
   input: AthleteAnonymizationExecutionInput,
   executionId: string,
   originalError: unknown,
+  privacyEffectPending = false,
 ): Promise<never> {
+  let aborted: Readonly<StoredAthleteAnonymizationExecution>;
   try {
-    await abortAthleteAnonymizationExecution(
+    aborted = await abortAthleteAnonymizationExecution(
       deps.db,
       input.tenantId,
       input.athleteId,
@@ -186,6 +268,17 @@ async function abortAfterSuccessfulRestore(
       'Anonymization failed after artifact restore and execution abort also failed',
     );
   }
+
+  if (privacyEffectPending) {
+    try {
+      await persistAbortedPrivacyEffect(deps, aborted);
+    } catch (journalError) {
+      throw new AggregateError(
+        [originalError, journalError],
+        'Anonymization database commit failed; artifacts were restored and execution aborted, but privacy effect ABORTED journaling failed',
+      );
+    }
+  }
   throw originalError;
 }
 
@@ -193,6 +286,22 @@ async function finalizeCommittedExecution(
   deps: AthleteAnonymizationOrchestratorDependencies,
   input: Pick<AthleteAnonymizationRecoveryInput, 'tenantId' | 'athleteId' | 'executionId' | 'actor'>,
 ): Promise<Readonly<StoredAthleteAnonymizationExecution>> {
+  const committed = await getAthleteAnonymizationExecution(
+    deps.db,
+    input.tenantId,
+    input.athleteId,
+    input.executionId,
+  );
+  if (!committed) throw new Error('Anonymization execution not found during committed finalization');
+  if (committed.status === 'COMPLETED') return committed;
+  if (committed.status !== 'DB_COMMITTED') {
+    throw new Error('DB_COMMITTED anonymization execution required for finalization');
+  }
+
+  // The external COMMITTED proof is a hard prerequisite for destructive purge.
+  // Its timestamp is the immutable DB commit timestamp so retries are byteidentical.
+  await persistCommittedPrivacyEffect(deps, committed);
+
   const handles = await artifactHandles(deps, input.tenantId, input.executionId);
   await purgeAnonymizationArtifacts(
     handles,
@@ -220,10 +329,10 @@ async function finalizeCommittedExecution(
 }
 
 /**
- * Executes or resumes the irreversible athlete workflow. The filesystem and DB
- * boundary is intentionally two-phase:
- * PREPARING -> quarantine -> ARTIFACTS_STAGED -> transactional DB commit ->
- * DB_COMMITTED -> purge -> COMPLETED.
+ * Executes or resumes the irreversible athlete workflow. The filesystem, durable
+ * privacy-effect journal and DB boundary is intentionally ordered:
+ * PREPARING -> quarantine -> ARTIFACTS_STAGED -> PENDING -> transactional DB
+ * commit -> DB_COMMITTED -> COMMITTED -> purge -> COMPLETED.
  */
 export async function executeAthleteAnonymization(
   deps: AthleteAnonymizationOrchestratorDependencies,
@@ -329,6 +438,11 @@ export async function executeAthleteAnonymization(
       : finalizeCommittedExecution(deps, { ...input, executionId: execution.id });
   }
 
+  // A failed PENDING write deliberately leaves ARTIFACTS_STAGED + quarantine
+  // intact. No privacy-effective DB mutation has happened, and the same approval
+  // can be retried once external journal durability is restored.
+  await persistPendingPrivacyEffect(deps, execution);
+
   try {
     await commitStagedAthleteAnonymizationDatabase(
       deps.db,
@@ -362,7 +476,7 @@ export async function executeAthleteAnonymization(
         'Anonymization database commit failed and artifact restore was incomplete',
       );
     }
-    return abortAfterSuccessfulRestore(deps, input, execution.id, commitError);
+    return abortAfterSuccessfulRestore(deps, input, execution.id, commitError, true);
   }
 
   return finalizeCommittedExecution(deps, { ...input, executionId: execution.id });
@@ -389,6 +503,7 @@ export function configuredAnonymizationOrchestratorDependencies(): AthleteAnonym
     reportStorage: createReportArtifactStorage(),
     exportStorage: createTenantExportPackageStorage(),
     dataSubjectExportStorage: createDataSubjectDeliveryPackageStorage(),
+    privacyEffectJournal: configuredAthleteAnonymizationPrivacyEffectJournal(),
   };
 }
 
