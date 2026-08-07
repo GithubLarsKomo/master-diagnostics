@@ -56,6 +56,7 @@ jobs:
           bash -n infra/backup/install-club-backup-timer.sh
           bash -n infra/backup/stage-club-restore.sh
           bash -n infra/backup/create-club-restore-privacy-ledger.sh
+          bash -n infra/backup/reconcile-club-restore-privacy.sh
       - name: Verify runtime privacy capability attestation
         run: pnpm privacy-capabilities:check
       - name: Verify independent Python diagnostic references
@@ -135,6 +136,36 @@ jobs:
           assert envelope['signature'].startswith('hmac-sha256:')
           assert 'restore-privacy-ledger.key' not in json.dumps(envelope)
           PY
+      - name: Verify read-only restore privacy reconciliation CLI
+        run: |
+          mkdir -p /tmp/restore-privacy-effect-journal
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          Path('/tmp/restore-privacy-effect-journal.key').write_text(base64.b64encode(bytes([9]) * 32).decode() + '\n')
+          PY
+          chmod 600 /tmp/restore-privacy-effect-journal.key
+          RESTORE_STAGING_MANIFEST=/tmp/restore-staging/restore-ci/manifest.json \
+          RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-privacy-ledger \
+          RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-privacy-ledger.key \
+          RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-privacy-effect-journal \
+          RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-privacy-effect-journal.key \
+            pnpm --silent --filter @masters/db backup:privacy-reconcile > /tmp/restore-privacy-reconciliation.json
+          python3 - <<'PY'
+          import json
+
+          with open('/tmp/restore-privacy-reconciliation.json', encoding='utf-8') as handle:
+              report = json.load(handle)
+          assert report['reportVersion'] == 1
+          assert report['backupCutoff'] == '2026-08-01T00:00:00.000Z'
+          assert report['status'] == 'CLEAR'
+          assert report['reconciliationReady'] is True
+          assert report['promotionAllowed'] is False
+          assert report['ledger']['entryCount'] == 0
+          assert report['journalMarkerCount'] == 0
+          assert report['obligations'] == []
+          assert report['blockers'] == []
+          PY
       - name: Run Playwright E2E
         run: |
           set -o pipefail
@@ -188,6 +219,7 @@ jobs:
           backup_verify = config["services"]["backup-verify"]
           backup_stage = config["services"]["backup-restore-stage"]
           privacy_ledger = config["services"]["backup-privacy-ledger"]
+          privacy_reconcile = config["services"]["backup-privacy-reconcile"]
           libsql = config["services"]["libsql"]
           caddy = config["services"]["caddy"]
 
@@ -292,6 +324,22 @@ jobs:
           assert ledger_mounts["/privacy-ledger"].get("read_only") is not True
           assert production_targets.isdisjoint(ledger_mounts)
           assert privacy_ledger["depends_on"]["libsql"]["condition"] == "service_healthy"
+
+          reconcile_command = privacy_reconcile.get("command", [])
+          reconcile_text = " ".join(reconcile_command) if isinstance(reconcile_command, list) else str(reconcile_command)
+          assert "backup:privacy-reconcile" in reconcile_text
+          assert "DATABASE_URL" not in privacy_reconcile.get("environment", {})
+          reconcile_mounts = {volume.get("target"): volume for volume in privacy_reconcile.get("volumes", [])}
+          assert set(reconcile_mounts) == {
+              "/restore-staging",
+              "/privacy-ledger",
+              "/run/secrets/restore-privacy-ledger.key",
+              "/privacy-effect-journal",
+              "/run/secrets/restore-privacy-effect-journal.key",
+          }
+          assert all(volume.get("read_only") is True for volume in reconcile_mounts.values())
+          assert production_targets.isdisjoint(reconcile_mounts)
+          assert "depends_on" not in privacy_reconcile
           PY
       - name: Verify pinned infrastructure images resolve
         run: |
