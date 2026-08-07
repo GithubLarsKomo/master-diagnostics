@@ -42,14 +42,45 @@ Namen, Geburtsdaten, Kontakte, Gründe, Messwerte und andere direkte Fachdaten g
 - Dateiname wird gegen Execution-ID und signierten Slot geprüft
 - Terminalmarker muss kryptografisch auf dasselbe technische Intent wie `PENDING` verweisen
 
-## Aktuelle Scope-Grenze
+## Orchestrator-Integration
 
-Dieser Slice definiert und testet zunächst nur den append-only Storage-/Signaturvertrag. Er ist noch nicht in den Anonymisierungs-Orchestrator verdrahtet.
+Der Anonymisierungs-Orchestrator erzwingt nun die Reihenfolge:
 
-Der nächste Slice muss den Writer exakt so kapseln:
+`ARTIFACTS_STAGED -> PENDING durabel -> DB-Commit -> DB_COMMITTED -> COMMITTED durabel -> Artifact-Purge -> COMPLETED`
 
-`ARTIFACTS_STAGED -> PENDING durabel -> DB-Commit -> COMMITTED durabel -> Artifact-Purge/COMPLETED`
+Die technische Journalidentität wird DB-seitig aus Execution und immutable Approval geladen und ist strikt an Tenant, Athlete und Approval gebunden. Für idempotente Crash-Retries verwendet `PENDING` den bereits durablen `artifactsStagedAt`-Zeitanker und `COMMITTED` exakt den tatsächlichen `dbCommittedAt`-Zeitanker.
 
-Scheitert der DB-Commit nach `PENDING`, muss `ABORTED` durabel in den Terminal-Slot geschrieben werden. Ein Fehler beim Schreiben von `COMMITTED` nach bereits erfolgreichem DB-Commit darf niemals zu einem Restore der Artefakte oder zu einer Behauptung führen, die DB-Mutation sei rückgängig gemacht worden. Stattdessen bleibt der offene `PENDING`-Zustand ein harter Restore-Blocker.
+Wichtige Fehlergrenzen:
 
-Bis Orchestrator-Integration, Restore-Auswertung und praktischer Drill abgeschlossen sind, bleibt `PRIVACY_BACKUP_STATE=DISABLED`.
+- Scheitert das Schreiben von `PENDING`, bleibt die Execution in `ARTIFACTS_STAGED` und die Artefakt-Quarantäne unangetastet. Es findet kein DB-Commit statt; derselbe Lauf ist nach Behebung des Journalfehlers retrybar.
+- Scheitert der DB-Commit nach einem bestätigten `PENDING`, werden die Artefakte restauriert, die Execution wird `ABORTED` und anschließend wird der terminale `ABORTED`-Marker persistiert.
+- Scheitert das Schreiben von `COMMITTED` nach bereits erfolgreichem DB-Commit, bleibt die Execution `DB_COMMITTED`. Der Artifact-Purge und `COMPLETED` sind gesperrt, bis der `COMMITTED`-Marker erfolgreich und kryptografisch konsistent persistiert werden kann.
+- Ein Purge-Fehler nach vorhandenem `COMMITTED` bleibt wie bisher anhand des immutable Execution-Manifests retrybar; der DB-Commit wird nicht wiederholt.
+
+Damit kann ein Journalfehler nach einer privacy-effektiven DB-Mutation niemals zu einem Artefakt-Restore oder zu einer falschen Behauptung eines Rollbacks führen.
+
+## Club-Deployment
+
+Der App-Container schreibt das Journal direkt auf einen separaten Host-Pfad und liest einen ausschließlich dafür vorgesehenen HMAC-Key:
+
+- Host-Verzeichnis: `RESTORE_PRIVACY_EFFECT_JOURNAL_HOST_DIR`
+- Host-Key-Datei: `RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE`
+- Container-Verzeichnis: `RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/var/lib/masters/restore-privacy-effect-journal`
+- Container-Key: `RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/run/secrets/restore-privacy-effect-journal.key`
+
+Der Runner arbeitet als UID/GID `1001`. Vor dem ersten produktiven Start müssen Journalverzeichnis und Key deshalb für diesen Benutzer les-/schreibbar vorbereitet werden. Beispiel auf dem Host:
+
+```sh
+sudo install -d -m 0700 -o 1001 -g 1001 /var/lib/master-diagnostics/restore-privacy-effect-journal
+sudo sh -c 'openssl rand -base64 32 > /etc/master-diagnostics/restore-privacy-effect-journal.key'
+sudo chown 1001:1001 /etc/master-diagnostics/restore-privacy-effect-journal.key
+sudo chmod 0400 /etc/master-diagnostics/restore-privacy-effect-journal.key
+```
+
+Der Journal-Key ist unabhängig vom Backup-Verschlüsselungskey und vom Restore-Privacy-Ledger-Key zu halten.
+
+## Verbleibende Scope-Grenze
+
+Die Writer-Seite der Disaster-Recovery-Lücke ist damit geschlossen. Offen ist weiterhin die Restore-Seite: Ein Restore-Staging muss den signierten Ledger und alle Privacy-Effect-Marker seit dem Backup-Cutoff auswerten, offene `PENDING`-Intents fail-closed behandeln und die wirksamen Anonymisierungen vor einer Promotion auf das Staging anwenden bzw. nachweisen.
+
+Bis diese Restore-Auswertung, Healthchecks, kontrollierte Promotion und ein praktischer RTO-Drill abgeschlossen sind, bleibt `PRIVACY_BACKUP_STATE=DISABLED`.
