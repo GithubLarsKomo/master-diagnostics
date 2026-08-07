@@ -21,6 +21,7 @@ export * from './services/data-subject-delivery-cleanup';
 export * from './services/restore-privacy-ledger';
 export * from './services/restore-privacy-ledger-storage';
 export * from './services/restore-privacy-effect-journal';
+export * from './services/restore-privacy-reconciliation-report';
 export * from './services/club-bootstrap';
 export * from './services/factory-protocol-templates';
 export * from './services/protocol-templates';
