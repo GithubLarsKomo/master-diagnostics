@@ -303,7 +303,7 @@ async function latestVerifiedLedgerForCutoff(
     right.envelope.ledger.generatedAt.localeCompare(left.envelope.ledger.generatedAt)
       || right.name.localeCompare(left.name)
   ));
-  const latest = candidates[0];
+  const latest = candidates[0]!;
   const conflicting = candidates.filter((candidate) => (
     candidate.envelope.ledger.generatedAt === latest.envelope.ledger.generatedAt
       && candidate.envelope.ledger.entriesFingerprint !== latest.envelope.ledger.entriesFingerprint
