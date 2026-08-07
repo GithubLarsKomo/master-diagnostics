@@ -8,15 +8,16 @@ Der **Privacy Effect Journal v1** ist deshalb die vorgelagerte, außerhalb der B
 
 ## Zustandsvertrag
 
-Für eine Execution entstehen ausschließlich immutable, HMAC-signierte Marker:
+Für eine Execution gibt es exakt zwei immutable, HMAC-signierte Slots:
 
-1. `PENDING` — muss vor Beginn der privacy-effektiven DB-Transaktion durabel existieren.
-2. `COMMITTED` — wird nach erfolgreichem DB-Commit mit dem tatsächlichen `dbCommittedAt` ergänzt.
-3. `ABORTED` — beendet ein zuvor persistiertes Intent ohne wirksamen DB-Commit.
+1. `pending.json` enthält ausschließlich einen `PENDING`-Record und muss vor Beginn der privacy-effektiven DB-Transaktion durabel existieren.
+2. `terminal.json` enthält anschließend **entweder** `COMMITTED` **oder** `ABORTED`.
 
-Die Marker sind getrennte Dateien und werden niemals überschrieben. Byteidentische Retries sind idempotent; abweichender Inhalt für dieselbe Execution/Phase scheitert fail-closed.
+`COMMITTED` bindet den tatsächlichen `dbCommittedAt`. `ABORTED` beendet ein zuvor persistiertes Intent ohne wirksamen DB-Commit.
 
-Ein `PENDING` ohne verifizierbaren `COMMITTED`- oder `ABORTED`-Marker ist absichtlich **kein** „nicht passiert“. Bei einem Restore muss dieser Zustand später die Promotion blockieren, bis er konservativ aufgelöst wurde.
+Der Terminal-Slot ist absichtlich gemeinsam: konkurrierende Commit-/Abort-Pfade können dadurch nicht beide als gültiger Endzustand persistiert werden. Ein Terminalmarker ist nur zulässig, wenn zuvor ein verifizierter `PENDING`-Marker mit exakt derselben technischen Reconciliation-Identität existiert. Byteidentische Retries sind idempotent; jeder konkurrierende Inhalt für denselben Slot scheitert fail-closed.
+
+Ein `PENDING` ohne verifizierbaren Terminalmarker ist absichtlich **kein** „nicht passiert“. Bei einem Restore muss dieser Zustand später die Promotion blockieren, bis er konservativ aufgelöst wurde.
 
 ## Minimierte Daten
 
@@ -38,7 +39,8 @@ Namen, Geburtsdaten, Kontakte, Gründe, Messwerte und andere direkte Fachdaten g
 - Storage-Root `0700`, Marker `0600`
 - Installation per Hard-Link aus einer privaten temporären Datei auf demselben Filesystem
 - timing-safe Signaturprüfung
-- Dateiname wird gegen Execution-ID und signierte Phase geprüft
+- Dateiname wird gegen Execution-ID und signierten Slot geprüft
+- Terminalmarker muss kryptografisch auf dasselbe technische Intent wie `PENDING` verweisen
 
 ## Aktuelle Scope-Grenze
 
@@ -48,6 +50,6 @@ Der nächste Slice muss den Writer exakt so kapseln:
 
 `ARTIFACTS_STAGED -> PENDING durabel -> DB-Commit -> COMMITTED durabel -> Artifact-Purge/COMPLETED`
 
-Scheitert der DB-Commit nach `PENDING`, muss `ABORTED` durabel geschrieben werden. Ein Fehler beim Schreiben von `COMMITTED` nach bereits erfolgreichem DB-Commit darf niemals zu einem Restore der Artefakte oder zu einer Behauptung führen, die DB-Mutation sei rückgängig gemacht worden.
+Scheitert der DB-Commit nach `PENDING`, muss `ABORTED` durabel in den Terminal-Slot geschrieben werden. Ein Fehler beim Schreiben von `COMMITTED` nach bereits erfolgreichem DB-Commit darf niemals zu einem Restore der Artefakte oder zu einer Behauptung führen, die DB-Mutation sei rückgängig gemacht worden. Stattdessen bleibt der offene `PENDING`-Zustand ein harter Restore-Blocker.
 
 Bis Orchestrator-Integration, Restore-Auswertung und praktischer Drill abgeschlossen sind, bleibt `PRIVACY_BACKUP_STATE=DISABLED`.
