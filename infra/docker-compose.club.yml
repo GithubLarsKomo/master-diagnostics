@@ -148,10 +148,14 @@ services:
       REPORT_STORAGE_DIR: /var/lib/masters/reports
       TENANT_EXPORT_STORAGE_DIR: /var/lib/masters/exports
       DATA_SUBJECT_DELIVERY_PACKAGE_ROOT: /var/lib/masters/data-subject-delivery-packages
+      RESTORE_PRIVACY_EFFECT_JOURNAL_DIR: /var/lib/masters/restore-privacy-effect-journal
+      RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE: /run/secrets/restore-privacy-effect-journal.key
     volumes:
       - report-data:/var/lib/masters/reports
       - export-data:/var/lib/masters/exports
       - data-subject-delivery-data:/var/lib/masters/data-subject-delivery-packages
+      - ${RESTORE_PRIVACY_EFFECT_JOURNAL_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-effect-journal}:/var/lib/masters/restore-privacy-effect-journal
+      - ${RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE:-/etc/master-diagnostics/restore-privacy-effect-journal.key}:/run/secrets/restore-privacy-effect-journal.key:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
