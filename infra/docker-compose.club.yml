@@ -134,6 +134,26 @@ services:
         condition: service_healthy
     networks: [internal]
 
+  backup-privacy-reconcile:
+    profiles: [backup]
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    environment:
+      RESTORE_PRIVACY_LEDGER_DIR: /privacy-ledger
+      RESTORE_PRIVACY_LEDGER_KEY_FILE: /run/secrets/restore-privacy-ledger.key
+      RESTORE_PRIVACY_EFFECT_JOURNAL_DIR: /privacy-effect-journal
+      RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE: /run/secrets/restore-privacy-effect-journal.key
+    command: ["pnpm", "--filter", "@masters/db", "backup:privacy-reconcile"]
+    volumes:
+      - ${RESTORE_STAGING_HOST_DIR:-/var/lib/master-diagnostics/restore-staging}:/restore-staging:ro
+      - ${RESTORE_PRIVACY_LEDGER_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-ledger}:/privacy-ledger:ro
+      - ${RESTORE_PRIVACY_LEDGER_KEY_FILE:-/etc/master-diagnostics/restore-privacy-ledger.key}:/run/secrets/restore-privacy-ledger.key:ro
+      - ${RESTORE_PRIVACY_EFFECT_JOURNAL_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-effect-journal}:/privacy-effect-journal:ro
+      - ${RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE:-/etc/master-diagnostics/restore-privacy-effect-journal.key}:/run/secrets/restore-privacy-effect-journal.key:ro
+
   app:
     build:
       context: ..
