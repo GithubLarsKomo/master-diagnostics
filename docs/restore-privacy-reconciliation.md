@@ -2,67 +2,105 @@
 
 ## Zweck
 
-Ein Restore aus einem älteren Backup darf personenbezogene Daten, die nach Erstellung dieses Backups irreversibel anonymisiert wurden, nicht wieder aktivieren. Deshalb ist ein technisch intaktes und erfolgreich gestagtes Backup allein noch nicht promotionsfähig.
+Ein Restore aus einem älteren Backup darf personenbezogene Daten, die nach Erstellung dieses Backups irreversibel anonymisiert wurden, nicht wieder aktivieren. Ein technisch intaktes und erfolgreich gestagtes Backup ist deshalb allein noch nicht promotionsfähig.
 
-## Kanonischer read-only Source
+## Externe Nachweisquellen
 
-`getRestorePrivacyReconciliationLedger()` erzeugt den versionierten Vertrag `RESTORE_PRIVACY_LEDGER_VERSION = 1` aus der aktuellen Datenbank.
+Die Restore-Seite verwendet zwei voneinander getrennte, außerhalb der Backup-Historie persistierte Nachweise:
 
-Der Aufrufer übergibt als `sinceExclusive` den `createdAt`-Zeitpunkt des ausgewählten Backup-Manifests. Berücksichtigt werden Anonymisierungs-Executions mit Status `DB_COMMITTED` oder `COMPLETED`, deren `dbCommittedAt` strikt nach diesem Zeitpunkt und höchstens am übergebenen `generatedAt`-Zeitpunkt liegt. Damit beschreibt jeder Ledger ein geschlossenes Beobachtungsfenster `(sinceExclusive, generatedAt]`; später eintretende Commits können nicht rückwirkend in einen früher datierten Ledger geraten.
+1. den signierten **Restore Privacy Ledger**, der ein geschlossenes Beobachtungsfenster `(manifest.createdAt, generatedAt]` aus der Live-DB festhält,
+2. das signierte **Privacy Effect Journal**, das jede irreversible Anonymisierung bereits vor dem DB-Commit mit `PENDING` und anschließend terminal mit `COMMITTED` oder `ABORTED` bindet.
 
-Alle drei Zeitstempel (`sinceExclusive`, `generatedAt`, `dbCommittedAt`) müssen im kanonischen UTC-Format `YYYY-MM-DDTHH:mm:ss.SSSZ` vorliegen. Dadurch stimmen die lexikografischen SQLite-Vergleiche mit der zeitlichen Reihenfolge überein und Fingerprints bleiben über Laufzeitumgebungen hinweg reproduzierbar.
+Der Ledger ist damit ein konsistenter DB-Snapshot der bekannten privacy-effektiven Commits. Das Journal schließt zusätzlich die Disaster-Lücke nach dem letzten Ledger-Snapshot, weil es direkt im Writer-Pfad fortgeschrieben wird.
 
-`DB_COMMITTED` ist dabei absichtlich der privacy-effektive Zeitpunkt: Die irreversible Datenbankmutation ist bereits erfolgt. `COMPLETED` folgt erst nach erfolgreichem Purge der zuvor quarantänisierten externen Artefakte. Ein Crash zwischen diesen Zuständen darf deshalb nicht dazu führen, dass die bereits wirksame Datenschutzpflicht aus dem Restore-Ledger verschwindet.
+## Read-only Reconciliation Report v1
 
-Jeder Eintrag enthält nur die für eine spätere Reconciliation notwendigen technischen Bindungen:
+`createRestorePrivacyReconciliationReportFromStorage()` und der CLI-Befehl `backup:privacy-reconcile` erzeugen den versionierten Report `RESTORE_PRIVACY_RECONCILIATION_REPORT_VERSION = 1` ausschließlich aus:
 
-- Tenant-ID,
-- Athlete-ID,
-- Execution-ID,
-- Approval-ID,
-- Deletion-Request-ID,
-- Execution-Version,
-- Anonymisierungs-Policy-Version,
-- Scope-Fingerprint,
-- Capability-Fingerprint,
-- DB-Commit-Zeitpunkt der irreversiblen Verarbeitung.
+- dem `manifest.json` des isolierten Restore-Stagings,
+- dem externen Restore-Privacy-Ledger-Verzeichnis und dessen HMAC-Key,
+- dem externen Privacy-Effect-Journal und dessen getrenntem HMAC-Key.
 
-Direkte Identifikatoren, Kontaktdaten, Freitextgründe, Reportinhalte oder Messwerte gehören ausdrücklich nicht in diesen Vertrag.
+Die Live-Datenbank ist ausdrücklich **keine** Abhängigkeit. Der Report verändert weder das Restore-Staging noch Ledger oder Journal.
 
-## Determinismus
+Für den ausgewählten Backup-Cutoff wird der jüngste kryptografisch verifizierte Ledger mit exakt demselben `sinceExclusive` verwendet. Zusätzlich werden alle signierten Journalmarker verifiziert und pro Execution zusammengeführt.
 
-Die Einträge werden deterministisch nach DB-Commit-Zeitpunkt, Tenant, Athlete und Execution sortiert. `entriesFingerprint` ist ein SHA-256 über Ledger-Version, Backup-Cutoff und die kanonische Entry-Liste.
+## Ergebniszustände
 
-`generatedAt` ist nur Beobachtungsmetadatum und fließt nicht selbst in den Inhaltsfingerprint ein. Solange sich die fachliche Entry-Liste innerhalb eines späteren Beobachtungsfensters nicht ändert, bleibt deshalb auch der Fingerprint stabil. Kommt ein neuer privacy-wirksamer DB-Commit hinzu, ändert sich die Entry-Liste und damit der Fingerprint erwartungsgemäß.
+Der Report liefert genau einen der folgenden Zustände:
 
-## Warum dieser Ledger nicht Teil des wiederherzustellenden Backups sein darf
+- `BLOCKED`: Die Datenschutzlage ist nicht eindeutig genug für eine Reconciliation.
+- `REPLAY_REQUIRED`: Die Nachweise sind konsistent und mindestens eine nach dem Backup privacy-effektiv gewordene Anonymisierung muss auf dem Restore-Staging noch nachgezogen bzw. nachgewiesen werden.
+- `CLEAR`: Die Nachweise sind konsistent und es existiert keine nach dem Backup liegende Replay-Pflicht.
 
-Ein Backup enthält nur den Datenschutzstatus zum Zeitpunkt seiner Erstellung. Würde der Reconciliation-Nachweis ausschließlich innerhalb desselben Backups gespeichert, würde ein Restore auf einen älteren Stand auch den Nachweis späterer Löschungen zurückrollen.
+`promotionAllowed` ist in diesem Slice **immer `false`**. Auch `CLEAR` autorisiert keine Promotion; Healthcheck, kontrollierte Promotion und Restore-Audit bleiben separate Gates.
 
-Für einen produktiven Restore ist deshalb ein **durabler, manipulationsgeschützter Nachweis außerhalb der Backup-Historie** erforderlich. Der in diesem Slice implementierte Service definiert dessen kanonischen read-only Source, persistiert ihn aber noch nicht extern.
+## Fail-closed Blocker
 
-Der spätere externe Writer muss spätestens ab `DB_COMMITTED` retrybar sein. Die finale `COMPLETED`-Transition darf nicht die einzige Quelle für den Restore-Nachweis sein.
+Der Report blockiert insbesondere bei:
 
-## Fail-closed Restore-Gate
+- fehlendem vertrauenswürdigem Ledger für den ausgewählten Backup-Cutoff,
+- jedem `PENDING` ohne verifizierten terminalen Marker,
+- Ledger-Eintrag plus terminalem `ABORTED` für dieselbe Execution,
+- abweichender technischer Identity zwischen Ledger und Journal,
+- abweichendem `dbCommittedAt` zwischen Ledger und Journal,
+- einem `COMMITTED`-Journalmarker innerhalb des Ledger-Beobachtungsfensters, der im Ledger fehlt.
 
-Ein isoliertes Restore-Staging darf erst promotionsfähig werden, wenn mindestens folgende Schritte erfolgreich sind:
+Ein `COMMITTED`-Journalmarker **nach** `ledger.generatedAt` ist dagegen zulässig und wird als Journal-only Replay-Pflicht übernommen. Genau dadurch bleibt ein Disaster nach dem letzten Ledger-Snapshot rekonstruierbar.
 
-1. Backup-Checksumme, AES-GCM und Archivstruktur verifizieren.
-2. Backup ausschließlich außerhalb der Produktivvolumes stagen.
-3. Einen vertrauenswürdigen externen Privacy-Ledger für den Zeitraum nach `manifest.createdAt` laden und validieren.
-4. Alle dort enthaltenen Reconciliation-Pflichten auf das Staging anwenden oder nachweislich bereits erfüllt finden.
-5. Danach Datenbank-/Anwendungs-Healthchecks ausführen.
-6. Erst anschließend einen separaten kontrollierten Promotionsschritt erlauben.
+## Ledger-Härtung beim Lesen
 
-Fehlt der externe Ledger, ist seine Integrität unklar oder kann eine Pflicht nicht eindeutig abgeglichen werden, bleibt die Promotion blockiert.
+Vor Verwendung prüft der Report zusätzlich zum HMAC:
 
-## Noch offen
+- Ledger-Version und kanonische UTC-Zeitstempel,
+- Observation Window und Entry-Zeitpunkte,
+- positive Execution-Versionen und technische Fingerprint-Formate,
+- eindeutige Execution-IDs,
+- kanonische Entry-Sortierung,
+- den neu berechneten `entriesFingerprint`,
+- Übereinstimmung von Dateiname und signiertem Ledgerinhalt.
 
-Dieser Stand schreibt nichts in das Restore-Staging und nichts auf ein externes Ledger-Ziel. Die nächsten getrennten Slices sind:
+Strukturell inkonsistente oder kryptografisch ungültige Dateien führen zu einem harten Fehler statt zu einem verwertbaren Report.
 
-- externe append-only bzw. manipulationsgeschützte Ledger-Persistenz außerhalb der Backup-Bundles,
-- Verifikation dieses externen Ledgers,
-- Anwendung der Reconciliation-Pflichten auf ein isoliertes Staging,
-- Healthcheck, Promotion, Restore-Audit und praktischer RTO-Drill.
+## Replay-Pflichten
 
-`PRIVACY_BACKUP_STATE` bleibt bis zum vollständigen Nachweis des produktiven Restore-Vertrags `DISABLED`.
+Jede Replay-Pflicht enthält ausschließlich die bereits minimierte technische Identity:
+
+- Tenant-, Athlete-, Execution-, Approval- und Deletion-Request-ID,
+- Execution- und Policy-Version,
+- Scope- und Capability-Fingerprint,
+- `dbCommittedAt`,
+- Evidenzquelle `LEDGER`, `JOURNAL` oder beide.
+
+Namen, Geburtsdaten, Kontakte, Gründe, Messwerte, Reportinhalte und andere direkte Fachdaten gehören nicht in diesen Vertrag.
+
+## Club-Betrieb
+
+Der Host-Wrapper
+
+```sh
+bash infra/backup/reconcile-club-restore-privacy.sh restore-<timestamp>-<uuid>
+```
+
+startet den Compose-Service `backup-privacy-reconcile`.
+
+Dieser Service besitzt ausschließlich read-only Mounts auf:
+
+- das Restore-Staging,
+- den Restore-Privacy-Ledger,
+- den Ledger-Key,
+- das Privacy-Effect-Journal,
+- den Journal-Key.
+
+Er mountet keine Produktivvolumes und besitzt keine `DATABASE_URL`-Abhängigkeit.
+
+## Verbleibende Restore-Slices
+
+Der nächste Schritt ist die **kontrollierte Anwendung** der konsistenten Replay-Pflichten auf eine isolierte Staging-Datenbank. Erst danach folgen:
+
+1. Datenbank-/Anwendungs-Healthcheck im Staging,
+2. kontrollierte Promotion/Rückschreibung,
+3. Restore-Audit,
+4. praktischer RTO-Drill.
+
+Bis diese Schritte praktisch nachgewiesen sind, bleibt `PRIVACY_BACKUP_STATE=DISABLED`.
