@@ -9,7 +9,7 @@ const SIGNATURE_PREFIX = 'hmac-sha256:';
 const CANONICAL_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const FINGERPRINT = /^sha256:[0-9a-f]{64}$/;
 const EXECUTION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const FILE_NAME = /^privacy-effect-([0-9a-f-]{36})-(pending|committed|aborted)\.json$/;
+const FILE_NAME = /^privacy-effect-([0-9a-f-]{36})-(pending|terminal)\.json$/;
 const SIGNING_DOMAIN = 'masters:restore-privacy-effect-journal:v1\n';
 
 export type RestorePrivacyEffectPhase = 'PENDING' | 'COMMITTED' | 'ABORTED';
@@ -125,13 +125,13 @@ function signRecord(key: Buffer, record: Readonly<RestorePrivacyEffectRecord>): 
   return `${SIGNATURE_PREFIX}${digest}`;
 }
 
-function phaseSegment(phase: RestorePrivacyEffectPhase): string {
-  return phase.toLowerCase();
+function markerSegment(phase: RestorePrivacyEffectPhase): 'pending' | 'terminal' {
+  return phase === 'PENDING' ? 'pending' : 'terminal';
 }
 
 export function restorePrivacyEffectFileName(record: Readonly<RestorePrivacyEffectRecord>): string {
   validateRecord(record);
-  return `privacy-effect-${record.effect.executionId}-${phaseSegment(record.phase)}.json`;
+  return `privacy-effect-${record.effect.executionId}-${markerSegment(record.phase)}.json`;
 }
 
 function assertSignatureShape(signature: string): asserts signature is `hmac-sha256:${string}` {
@@ -140,12 +140,49 @@ function assertSignatureShape(signature: string): asserts signature is `hmac-sha
   }
 }
 
+function sameEffectIdentity(
+  left: Readonly<RestorePrivacyEffectIdentity>,
+  right: Readonly<RestorePrivacyEffectIdentity>,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+async function verifiedEnvelopeFromPath(
+  filePath: string,
+  keyFile: string,
+): Promise<Readonly<SignedRestorePrivacyEffectEnvelope>> {
+  if (!FILE_NAME.test(basename(filePath))) throw new Error('Restore privacy effect file name is invalid');
+  const parsed = JSON.parse(await readFile(filePath, 'utf8')) as Partial<SignedRestorePrivacyEffectEnvelope>;
+  if (parsed.envelopeVersion !== SIGNED_RESTORE_PRIVACY_EFFECT_ENVELOPE_VERSION || !parsed.record) {
+    throw new Error('Restore privacy effect envelope version is invalid');
+  }
+  validateRecord(parsed.record);
+  if (basename(filePath) !== restorePrivacyEffectFileName(parsed.record)) {
+    throw new Error('Restore privacy effect file name does not match its signed record');
+  }
+  if (typeof parsed.signature !== 'string') throw new Error('Restore privacy effect signature is missing');
+  assertSignatureShape(parsed.signature);
+  const key = await readSigningKey(keyFile);
+  const expected = signRecord(key, parsed.record);
+  const actualBytes = Buffer.from(parsed.signature.slice(SIGNATURE_PREFIX.length), 'hex');
+  const expectedBytes = Buffer.from(expected.slice(SIGNATURE_PREFIX.length), 'hex');
+  if (actualBytes.length !== expectedBytes.length || !timingSafeEqual(actualBytes, expectedBytes)) {
+    throw new Error('Restore privacy effect signature verification failed');
+  }
+  return Object.freeze({
+    envelopeVersion: SIGNED_RESTORE_PRIVACY_EFFECT_ENVELOPE_VERSION,
+    record: parsed.record,
+    signature: parsed.signature,
+  });
+}
+
 /**
  * Persists one immutable signed privacy-effect marker outside backup history.
  *
- * A PENDING marker is intended to exist before the privacy-effective DB transaction starts.
- * COMMITTED or ABORTED is then appended as a separate immutable marker. Existing markers are
- * never overwritten; byte-identical retries are idempotent.
+ * PENDING owns a dedicated slot. COMMITTED and ABORTED compete for exactly one terminal slot,
+ * which prevents contradictory outcomes from being durably accepted for the same execution.
+ * A terminal marker is accepted only after the signed PENDING marker exists and carries the
+ * exact same technical reconciliation identity.
  */
 export async function persistSignedRestorePrivacyEffectRecord(
   input: PersistRestorePrivacyEffectRecordInput,
@@ -153,6 +190,24 @@ export async function persistSignedRestorePrivacyEffectRecord(
   validateRecord(input.record);
   await mkdir(input.targetDir, { recursive: true, mode: 0o700 });
   await chmod(input.targetDir, 0o700);
+
+  if (input.record.phase !== 'PENDING') {
+    const pendingPath = join(input.targetDir, `privacy-effect-${input.record.effect.executionId}-pending.json`);
+    const pendingEnvelope = await verifiedEnvelopeFromPath(pendingPath, input.keyFile)
+      .catch((error: unknown) => {
+        throw new Error('Verified PENDING restore privacy effect marker required before terminal marker', {
+          cause: error,
+        });
+      });
+    if (pendingEnvelope.record.phase !== 'PENDING'
+      || !sameEffectIdentity(pendingEnvelope.record.effect, input.record.effect)) {
+      throw new Error('Restore privacy effect terminal marker does not match its PENDING intent');
+    }
+    if (input.record.recordedAt < pendingEnvelope.record.recordedAt) {
+      throw new Error('Restore privacy effect terminal marker must not precede PENDING intent');
+    }
+  }
+
   const key = await readSigningKey(input.keyFile);
   const envelope = Object.freeze({
     envelopeVersion: SIGNED_RESTORE_PRIVACY_EFFECT_ENVELOPE_VERSION,
@@ -185,29 +240,5 @@ export async function readVerifiedRestorePrivacyEffectRecord(
   filePath: string,
   keyFile: string,
 ): Promise<Readonly<SignedRestorePrivacyEffectEnvelope>> {
-  const nameMatch = FILE_NAME.exec(basename(filePath));
-  if (!nameMatch) throw new Error('Restore privacy effect file name is invalid');
-  const parsed = JSON.parse(await readFile(filePath, 'utf8')) as Partial<SignedRestorePrivacyEffectEnvelope>;
-  if (parsed.envelopeVersion !== SIGNED_RESTORE_PRIVACY_EFFECT_ENVELOPE_VERSION || !parsed.record) {
-    throw new Error('Restore privacy effect envelope version is invalid');
-  }
-  validateRecord(parsed.record);
-  const expectedName = restorePrivacyEffectFileName(parsed.record);
-  if (basename(filePath) !== expectedName) {
-    throw new Error('Restore privacy effect file name does not match its signed record');
-  }
-  if (typeof parsed.signature !== 'string') throw new Error('Restore privacy effect signature is missing');
-  assertSignatureShape(parsed.signature);
-  const key = await readSigningKey(keyFile);
-  const expected = signRecord(key, parsed.record);
-  const actualBytes = Buffer.from(parsed.signature.slice(SIGNATURE_PREFIX.length), 'hex');
-  const expectedBytes = Buffer.from(expected.slice(SIGNATURE_PREFIX.length), 'hex');
-  if (actualBytes.length !== expectedBytes.length || !timingSafeEqual(actualBytes, expectedBytes)) {
-    throw new Error('Restore privacy effect signature verification failed');
-  }
-  return Object.freeze({
-    envelopeVersion: SIGNED_RESTORE_PRIVACY_EFFECT_ENVELOPE_VERSION,
-    record: parsed.record,
-    signature: parsed.signature,
-  });
+  return verifiedEnvelopeFromPath(filePath, keyFile);
 }
