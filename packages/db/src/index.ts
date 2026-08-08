@@ -31,6 +31,7 @@ export * from './services/restore-private-recovery-assessment';
 export * from './services/restore-private-recovery-plan';
 export * from './services/restore-private-recovery-planning';
 export * from './services/restore-private-recovery-intent';
+export * from './services/restore-private-recovery-receipt';
 export * from './services/restore-private-recovery-normalization';
 export * from './services/restore-private-recovery-executor';
 export * from './services/club-bootstrap';
