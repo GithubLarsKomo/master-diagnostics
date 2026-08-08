@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { createReadStream } from 'node:fs';
 import {
   chmod,
   chown,
   lstat,
-  open,
   readdir,
   rm,
 } from 'node:fs/promises';
@@ -58,16 +58,11 @@ function requireRole(): CandidateRole {
 }
 
 async function hashFile(filePath: string): Promise<`sha256:${string}`> {
-  const handle = await open(filePath, 'r');
-  try {
-    const hash = createHash('sha256');
-    for await (const chunk of handle.readableWebStream() as AsyncIterable<Uint8Array>) {
-      hash.update(chunk);
-    }
-    return `sha256:${hash.digest('hex')}`;
-  } finally {
-    await handle.close();
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk);
   }
+  return `sha256:${hash.digest('hex')}`;
 }
 
 async function collectTree(root: string): Promise<Readonly<TreeSummary>> {
