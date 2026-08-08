@@ -7,12 +7,14 @@ on:
       - '.env.example'
       - 'infra/backup/authorize-club-restore-promotion.sh'
       - 'infra/backup/prepare-club-restore-promotion-plan.sh'
+      - 'infra/backup/prepare-club-restore-promotion-candidates.sh'
       - 'infra/backup/resolve-active-club-volumes.py'
       - 'infra/docker-compose.club.yml'
       - 'infra/docker-compose.restore-promotion.yml'
       - 'packages/db/**'
       - 'docs/restore-private-promotion.md'
       - 'docs/restore-private-promotion-execution-plan.md'
+      - 'docs/restore-private-promotion-candidates.md'
   push:
     branches: [main]
     paths:
@@ -20,12 +22,14 @@ on:
       - '.env.example'
       - 'infra/backup/authorize-club-restore-promotion.sh'
       - 'infra/backup/prepare-club-restore-promotion-plan.sh'
+      - 'infra/backup/prepare-club-restore-promotion-candidates.sh'
       - 'infra/backup/resolve-active-club-volumes.py'
       - 'infra/docker-compose.club.yml'
       - 'infra/docker-compose.restore-promotion.yml'
       - 'packages/db/**'
       - 'docs/restore-private-promotion.md'
       - 'docs/restore-private-promotion-execution-plan.md'
+      - 'docs/restore-private-promotion-candidates.md'
 
 jobs:
   contract:
@@ -190,15 +194,62 @@ jobs:
           assert active.rindex('backup-privacy-replay-migrate') < active.rindex('backup-restore-promotion-plan')
           PY
 
+      - name: Verify candidate preparation host mutation boundary
+        run: |
+          bash -n infra/backup/prepare-club-restore-promotion-candidates.sh
+          python3 - <<'PY'
+          from pathlib import Path
+
+          script = Path('infra/backup/prepare-club-restore-promotion-candidates.sh').read_text()
+          active = '\n'.join(
+              line for line in script.splitlines()
+              if not line.lstrip().startswith('#')
+          )
+          assert 'promotion-intent.json' in active
+          assert 'promotion-execution-plan.json' in active
+          assert 'backup:restore-promotion-candidates-authorize' in active
+          assert 'CANDIDATE_COPY_AUTHORIZED' in active
+          assert 'candidateMutationAllowed' in active
+          assert 'productionMutationAllowed' in active
+          assert 'cleanup_private_db' in active
+          assert 'docker volume create' in active
+          assert 'docker volume inspect' in active
+          assert 'docker ps -aq --filter "volume=${candidate_volume}"' in active
+          assert 'com.master-diagnostics.restore.plan-fingerprint' in active
+          assert 'com.master-diagnostics.restore.rollback-volume' in active
+          assert 'backup-restore-promotion-candidate-copy' in active
+          assert '--no-deps' in active
+
+          authorize = active.index('backup:restore-promotion-candidates-authorize')
+          stop_db = active.index('cleanup_private_db', authorize)
+          create_volume = active.index('docker volume create', stop_db)
+          copy_candidate = active.rindex('backup-restore-promotion-candidate-copy')
+          assert authorize < stop_db < create_volume < copy_candidate
+
+          forbidden = (
+              'docker volume rm',
+              'docker cp ',
+              'docker compose down',
+              'backup-privacy-artifact-plan',
+              'backup-privacy-replay ',
+              'backup-privacy-artifact-replay',
+              'backup-restore-recovery-execute',
+              '-v "${active_',
+          )
+          for token in forbidden:
+              assert token not in active
+          PY
+
       - name: Verify isolated promotion Compose contract
         run: |
           cp .env.example .env
           sed -i 's/diagnostics.example.org/localhost/g' .env
           sed -i 's/replace-with-at-least-32-random-bytes/ci-only-secret-with-at-least-32-characters/' .env
-          docker compose --profile backup \
-            -f infra/docker-compose.club.yml \
-            -f infra/docker-compose.restore-promotion.yml \
-            config --format json > /tmp/restore-promotion-compose.json
+          RESTORE_PRIVATE_PROMOTION_CANDIDATE_VOLUME=restore-promotion-candidate-contract \
+            docker compose --profile backup \
+              -f infra/docker-compose.club.yml \
+              -f infra/docker-compose.restore-promotion.yml \
+              config --format json > /tmp/restore-promotion-compose.json
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -270,6 +321,22 @@ jobs:
               'RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME',
           ):
               assert forbidden_env not in plan['environment']
+
+          copy = config['services']['backup-restore-promotion-candidate-copy']
+          assert copy['command'][-1] == 'backup:restore-promotion-candidate-copy'
+          assert copy.get('network_mode') == 'none'
+          assert not copy.get('depends_on')
+          mounts = {volume.get('target'): volume for volume in copy.get('volumes', [])}
+          assert set(mounts) == {'/restore-replay', '/candidate'}
+          assert mounts['/restore-replay']['type'] == 'bind'
+          assert mounts['/restore-replay']['read_only'] is True
+          assert mounts['/candidate']['type'] == 'volume'
+          assert mounts['/candidate'].get('read_only') is not True
+          assert mounts['/candidate']['source'] == 'restore-promotion-candidate-contract'
+          assert production_targets.isdisjoint(mounts)
+          candidate = config['volumes']['restore-promotion-candidate']
+          assert candidate['external'] is True
+          assert candidate['name'] == 'restore-promotion-candidate-contract'
 
           env = Path('.env.example').read_text()
           assert 'RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/etc/master-diagnostics/restore-private-promotion.key' in env
