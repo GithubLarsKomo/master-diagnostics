@@ -1,4 +1,5 @@
 import { createClient } from '@libsql/client';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
@@ -54,6 +55,40 @@ function clearReconciliation(): Readonly<RestorePrivacyReconciliationReport> {
   });
 }
 
+function replayReconciliation(
+  approval: Awaited<ReturnType<typeof approveAthleteAnonymization>>,
+  execution: Awaited<ReturnType<typeof prepareAthleteAnonymizationExecution>>,
+  dbCommittedAt: string,
+): Readonly<RestorePrivacyReconciliationReport> {
+  return Object.freeze({
+    reportVersion: 1,
+    backupCutoff: '2026-08-01T00:00:00.000Z',
+    status: 'REPLAY_REQUIRED',
+    reconciliationReady: true,
+    promotionAllowed: false,
+    ledger: Object.freeze({
+      generatedAt: '2026-08-07T00:00:00.000Z',
+      entriesFingerprint: `sha256:${'2'.repeat(64)}`,
+      entryCount: 1,
+    }),
+    journalMarkerCount: 2,
+    obligations: Object.freeze([Object.freeze({
+      tenantId: execution.tenantId,
+      athleteId: execution.athleteId,
+      executionId: execution.id,
+      approvalId: approval.id,
+      deletionRequestId: approval.deletionRequestId,
+      executionVersion: execution.executionVersion,
+      policyVersion: approval.policyVersion,
+      scopeFingerprint: approval.scopeFingerprint,
+      capabilityFingerprint: approval.capabilityFingerprint,
+      dbCommittedAt,
+      sources: Object.freeze(['LEDGER', 'JOURNAL'] as const),
+    })]),
+    blockers: Object.freeze([]),
+  });
+}
+
 async function evidence(db: Database, reconciliation: Readonly<RestorePrivacyReconciliationReport>) {
   const manifest = await buildRestorePrivacyArtifactReplayManifest(db, reconciliation);
   return { manifest, result: restorePrivacyArtifactReplayResultForManifest(manifest) };
@@ -98,6 +133,63 @@ async function seedReadyAthlete(db: Database): Promise<void> {
   });
 }
 
+async function seedNormalizedReplay(
+  db: Database,
+  normalizationBackupCutoff = '2026-08-01T00:00:00.000Z',
+) {
+  await seedReadyAthlete(db);
+  const approval = await approveAthleteAnonymization(
+    db, 'tenant-a', 'athlete-a', adminActor, disabledCapabilities, '2026-08-05T13:00:00.000Z',
+  );
+  const execution = await prepareAthleteAnonymizationExecution(
+    db, 'tenant-a', 'athlete-a', approval.id, adminActor, disabledCapabilities,
+    '2026-08-05T13:10:00.000Z',
+  );
+  const dbCommittedAt = '2026-08-06T12:00:00.000Z';
+  const reconciliation = replayReconciliation(approval, execution, dbCommittedAt);
+
+  await db.insert(schema.restorePrivacyReplayAuthorizations).values({
+    executionId: execution.id,
+    tenantId: execution.tenantId,
+    athleteId: execution.athleteId,
+    approvalId: approval.id,
+    deletionRequestId: approval.deletionRequestId,
+    executionVersion: execution.executionVersion,
+    policyVersion: approval.policyVersion,
+    scopeFingerprint: approval.scopeFingerprint,
+    capabilityFingerprint: approval.capabilityFingerprint,
+    dbCommittedAt,
+    status: 'ACTIVE',
+    appliedAt: null,
+    createdAt: '2026-08-08T08:00:00.000Z',
+    updatedAt: '2026-08-08T08:00:00.000Z',
+  });
+  await db.update(schema.restorePrivacyReplayAuthorizations).set({
+    status: 'APPLIED',
+    appliedAt: '2026-08-08T09:00:00.000Z',
+    updatedAt: '2026-08-08T09:00:00.000Z',
+  }).where(eq(schema.restorePrivacyReplayAuthorizations.executionId, execution.id));
+
+  await db.insert(schema.restorePrivateRecoveryNormalizations).values({
+    executionId: execution.id,
+    tenantId: execution.tenantId,
+    athleteId: execution.athleteId,
+    backupCutoff: normalizationBackupCutoff,
+    planFingerprint: `sha256:${'4'.repeat(64)}`,
+    actionsFingerprint: `sha256:${'5'.repeat(64)}`,
+    intentSignature: `hmac-sha256:${'6'.repeat(64)}`,
+    recoveryStartedAt: '2026-08-08T10:00:00.000Z',
+    snapshotStatus: 'PREPARING',
+    action: 'PURGE_REPLAYED_ARTIFACTS_AND_NORMALIZE',
+    effectBasis: 'POST_BACKUP_COMMITTED',
+    sourceDbCommittedAt: dbCommittedAt,
+    normalizedAt: '2026-08-08T10:30:00.000Z',
+    createdAt: '2026-08-08T10:30:00.000Z',
+  });
+
+  return { approval, execution, reconciliation, dbCommittedAt };
+}
+
 describe('restore private healthcheck', () => {
   it('passes a clean private restore state but still grants no promotion', async () => {
     const db = await createTestDatabase();
@@ -119,6 +211,7 @@ describe('restore private healthcheck', () => {
       artifactReplayVerified: true,
       blockers: [],
       transientExecutions: [],
+      normalizedTransientExecutions: [],
     });
     expect(report.storage).toEqual([
       { kind: 'REPORT', databaseReferenceCount: 0, activeFileCount: 0, quarantineFileCount: 0, symlinkCount: 0, specialEntryCount: 0 },
@@ -187,6 +280,7 @@ describe('restore private healthcheck', () => {
     const report = await assessRestorePrivateHealthcheck(db, reconciliation, manifest, result, roots);
 
     expect(report.status).toBe('BLOCKED');
+    expect(report.normalizedTransientExecutions).toEqual([]);
     expect(report.transientExecutions).toEqual([{
       executionId: execution.id,
       tenantId: 'tenant-a',
@@ -200,5 +294,53 @@ describe('restore private healthcheck', () => {
       executionId: execution.id,
       executionStatus: 'PREPARING',
     });
+  });
+
+  it('accepts an immutable recovery normalization that exactly matches the current reconciliation obligation', async () => {
+    const db = await createTestDatabase();
+    const roots = await storageRoots();
+    const { execution, reconciliation, dbCommittedAt } = await seedNormalizedReplay(db);
+    const { manifest, result } = await evidence(db, reconciliation);
+
+    const report = await assessRestorePrivateHealthcheck(db, reconciliation, manifest, result, roots);
+
+    expect(report.status).toBe('HEALTHY');
+    expect(report.healthcheckPassed).toBe(true);
+    expect(report.readyForPromotionReview).toBe(true);
+    expect(report.promotionAllowed).toBe(false);
+    expect(report.transientExecutions).toEqual([]);
+    expect(report.normalizedTransientExecutions).toEqual([{
+      executionId: execution.id,
+      tenantId: 'tenant-a',
+      athleteId: 'athlete-a',
+      snapshotStatus: 'PREPARING',
+      sourceDbCommittedAt: dbCommittedAt,
+      recoveryStartedAt: '2026-08-08T10:00:00.000Z',
+      normalizedAt: '2026-08-08T10:30:00.000Z',
+      planFingerprint: `sha256:${'4'.repeat(64)}`,
+    }]);
+    expect(report.blockers).toEqual([]);
+  });
+
+  it('keeps a historical transient blocked when recovery normalization belongs to a different backup cutoff', async () => {
+    const db = await createTestDatabase();
+    const roots = await storageRoots();
+    const { execution, reconciliation } = await seedNormalizedReplay(db, '2026-07-31T00:00:00.000Z');
+    const { manifest, result } = await evidence(db, reconciliation);
+
+    const report = await assessRestorePrivateHealthcheck(db, reconciliation, manifest, result, roots);
+    const codes = report.blockers.map((item) => item.code);
+
+    expect(report.status).toBe('BLOCKED');
+    expect(report.normalizedTransientExecutions).toEqual([]);
+    expect(report.transientExecutions).toEqual([{
+      executionId: execution.id,
+      tenantId: 'tenant-a',
+      athleteId: 'athlete-a',
+      status: 'PREPARING',
+    }]);
+    expect(codes).toContain('RECOVERY_NORMALIZATION_INVALID');
+    expect(codes).toContain('ANONYMIZATION_EXECUTION_TRANSIENT');
+    expect(report.promotionAllowed).toBe(false);
   });
 });
