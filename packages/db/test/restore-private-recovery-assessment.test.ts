@@ -1,4 +1,5 @@
 import { createClient } from '@libsql/client';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
@@ -84,16 +85,29 @@ async function seedExecution(
   });
   await db.insert(schema.athleteAnonymizationExecutions).values({
     id: executionId, tenantId: 'tenant-a', athleteId: 'athlete-a', approvalId: 'approval-a',
-    executionVersion: 1, status, preparedByUserId: 'admin-a', preparedAt: createdAt,
-    artifactsStagedAt: status === 'PREPARING' ? null : '2026-07-31T23:55:00.000Z',
-    dbCommittedAt: status === 'DB_COMMITTED' ? (options.dbCommittedAt ?? '2026-07-31T23:59:00.000Z') : null,
-    completedAt: null, abortedAt: null, createdAt, updatedAt: createdAt,
+    executionVersion: 1, status: 'PREPARING', preparedByUserId: 'admin-a', preparedAt: createdAt,
+    artifactsStagedAt: null, dbCommittedAt: null, completedAt: null, abortedAt: null,
+    createdAt, updatedAt: createdAt,
   });
   if (options.withReport) {
     await db.insert(schema.athleteAnonymizationExecutionArtifacts).values({
       id: 'artifact-a', tenantId: 'tenant-a', executionId, kind: 'REPORT',
       storageReference: reportReference, createdAt, updatedAt: createdAt,
     });
+  }
+  if (status !== 'PREPARING') {
+    await db.update(schema.athleteAnonymizationExecutions).set({
+      status: 'ARTIFACTS_STAGED',
+      artifactsStagedAt: '2026-07-31T23:55:00.000Z',
+      updatedAt: '2026-07-31T23:55:00.000Z',
+    }).where(eq(schema.athleteAnonymizationExecutions.id, executionId));
+  }
+  if (status === 'DB_COMMITTED') {
+    await db.update(schema.athleteAnonymizationExecutions).set({
+      status: 'DB_COMMITTED',
+      dbCommittedAt: options.dbCommittedAt ?? '2026-07-31T23:59:00.000Z',
+      updatedAt: options.dbCommittedAt ?? '2026-07-31T23:59:00.000Z',
+    }).where(eq(schema.athleteAnonymizationExecutions.id, executionId));
   }
 }
 
