@@ -4,14 +4,15 @@
 
 Eine private Restore-Kopie darf erst promotionsfähig werden, nachdem Reconciliation, DB-Replay, Artifact-Replay, gegebenenfalls Recovery und ein frischer Healthcheck vollständig konsistent sind. Die produktive Umschaltung bleibt davon bewusst getrennt.
 
-Die aktuelle Promotion-Kette besteht aus vier Stufen:
+Die aktuelle Promotion-Kette besteht aus fünf Stufen:
 
 1. **Promotion Readiness v1** bewertet aktuelle Restore-Evidence read-only.
 2. **Signed Promotion Intent v1** bindet eine positive Readiness immutable und signiert.
 3. **Promotion-Intent CLI** berechnet Readiness direkt aus Roh-Evidence und persistiert den Intent im selben Prozess.
-4. **Isoliertes Promotion-Intent Wiring** stellt dafür einen expliziten Host-Befehl, einen eigenen Secret-Key und einen minimal beschreibbaren Compose-Service bereit.
+4. **Isoliertes Promotion-Intent Wiring** stellt einen expliziten Host-Befehl, einen eigenen Secret-Key und einen minimal beschreibbaren Compose-Service bereit.
+5. **Promotion Execution Preflight v1** rekonstruiert unmittelbar vor einer späteren Produktivmutation dieselbe Roh-Evidence erneut und akzeptiert den signierten Intent nur, wenn er noch exakt dazu passt.
 
-Keine dieser Stufen führt eine produktive Promotion aus.
+Keine dieser Stufen führt bereits eine produktive Promotion aus.
 
 ## Promotion Readiness v1
 
@@ -50,6 +51,26 @@ Bei erkannter Recovery müssen Recovery Plan v1, signierter PENDING Recovery Int
 Der `evidenceFingerprint` bindet deterministisch die autorisierungsrelevante Restore-Evidence, unter anderem Backup-Cutoff, Reconciliation-/Ledger-/Journal-Evidence, Replay-Obligations, Artifact-Evidence, den frisch berechneten Healthcheck sowie gegebenenfalls Recovery-Plan-/Intent-/Receipt-Evidence.
 
 Ändert sich ein gebundener Input, entsteht ein anderer Evidence Fingerprint.
+
+## Gemeinsame Roh-Evidence-Rekonstruktion
+
+Autorisierung und Execution Preflight verwenden denselben Service:
+
+```text
+restore-private-promotion-storage.ts
+```
+
+Er rekonstruiert Promotion Readiness ausschließlich aus den aktuellen technischen Quellen:
+
+- Staging-Manifest,
+- signiertem Restore Privacy Ledger,
+- Privacy Effect Journal,
+- Artifact-Replay-Manifest/-Result,
+- privater Restore-DB,
+- privaten Artifact-Roots,
+- optionaler Recovery-Evidence.
+
+Die Umgebungsvariablen werden ebenfalls durch eine gemeinsame kanonische Mapping-Funktion in absolute Pfade überführt. Dadurch können Autorisierungs-CLI und Preflight nicht versehentlich unterschiedliche Interpretationen derselben Restore-Evidence entwickeln.
 
 ## Signed Promotion Intent v1
 
@@ -98,7 +119,7 @@ Der operative Einstiegspunkt im Container lautet:
 pnpm --filter @masters/db backup:restore-promotion-intent
 ```
 
-Der CLI akzeptiert keine gespeicherte Readiness-Datei. Er rekonstruiert im selben Prozess Backup-Cutoff, signierte Reconciliation, Artifact-Replay-Evidence, Recovery-Evidence, private DB-/Artifact-Zustände und daraus die aktuelle Promotion Readiness.
+Der CLI akzeptiert keine gespeicherte Readiness-Datei. Er rekonstruiert im selben Prozess die aktuelle Roh-Evidence und daraus Promotion Readiness.
 
 Bei Blockade liefert er Exit `3` mit:
 
@@ -122,7 +143,7 @@ Ein Retry berechnet Readiness erneut und reused nur einen weiterhin exakt passen
 
 ## Unabhängiger Promotion-Key
 
-Die Club-Konfiguration enthält nun einen fünften unabhängigen Restore-/Privacy-Key:
+Die Club-Konfiguration enthält einen fünften unabhängigen Restore-/Privacy-Key:
 
 ```text
 RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/etc/master-diagnostics/restore-private-promotion.key
@@ -136,7 +157,7 @@ openssl rand -base64 32
 
 Dieser Key darf nicht mit Backup-, Restore-Ledger-, Privacy-Effect-Journal- oder Recovery-Intent-Key identisch sein.
 
-## Isoliertes Compose-Wiring
+## Isoliertes Promotion-Intent Wiring
 
 Der Promotion-Intent-Service liegt in einem separaten Override:
 
@@ -150,87 +171,117 @@ Service:
 backup-restore-promotion-intent
 ```
 
-Er nutzt ausschließlich die private Restore-DB über `backup-privacy-replay-db` und ausschließlich das interne Netzwerk `restore-internal`.
+Er nutzt ausschließlich die private Restore-DB und `restore-internal`. Der gesamte per-staging Restore-Workspace wird read-only gemountet; ausschließlich `/restore-replay/promotion` wird als engerer RW-Bind überlagert. Produktive DB-, Report-, Export-, Delivery- und Caddy-Targets werden nicht gemountet.
 
-### Mount-Grenze
+Der Recovery-Key wird nicht statisch exponiert. Ein sicher vorhandener Key wird vom Host-Befehl dynamisch read-only eingebunden; ohne Key bleibt erkannte Recovery fail-closed.
 
-Read-only eingebunden werden:
-
-- Restore-Staging,
-- Restore Privacy Ledger,
-- Ledger-Key,
-- Privacy Effect Journal,
-- Journal-Key,
-- Promotion-Key,
-- der komplette private per-staging Restore-Workspace unter `/restore-replay`.
-
-Nur ein engerer Unterpfad überlagert den read-only Workspace schreibbar:
-
-```text
-/restore-replay/promotion
-```
-
-Damit kann der Service den signierten Promotion Intent schreiben, aber weder private DB-Dateien noch Reports, Tenant-Exports, Betroffenenexporte, Artifact-Replay-Evidence, Recovery-Plan oder Recovery-Receipt verändern.
-
-Produktive Targets wie `/var/lib/sqld`, `/var/lib/masters/reports`, `/var/lib/masters/exports`, `/var/lib/masters/data-subject-delivery-packages`, Caddy `/data` oder `/config` werden nicht gemountet.
-
-Der Recovery-Key wird absichtlich **nicht statisch** in den Service gemountet. Er wird vom Host-Wrapper nur dann zusätzlich read-only exponiert, wenn eine sichere Key-Datei vorhanden ist. Fehlt der Key trotz Recovery-Evidence, bleibt das Readiness-Gate fail-closed.
-
-## Expliziter Host-Befehl
-
-Promotion-Autorisierung ist ein separater operativer Schritt:
+Promotion-Autorisierung ist ein separater Schritt:
 
 ```bash
 bash infra/backup/authorize-club-restore-promotion.sh restore-<timestamp>-<uuid>
 ```
 
-Der Wrapper:
+Der Wrapper führt keine Artifact-Replay-Planung, keinen DB-Replay, keinen Artifact-Replay und keine Recovery erneut aus.
 
-1. validiert den exakten Restore-Staging-Namen,
-2. lädt die vertrauenswürdige `.env`,
-3. prüft Staging-Manifest und bestehenden privaten Restore-Workspace,
-4. verlangt vorhandene Artifact-Replay-Manifest/-Result-Evidence,
-5. prüft Promotion-Key und vorhandene Recovery-Evidence auf non-symlink reguläre Pfade,
-6. erzeugt nur `${workspace}/promotion` als `0700`,
-7. startet/migriert ausschließlich die private Restore-DB,
-8. ruft ausschließlich `backup-restore-promotion-intent` auf.
+## Promotion Execution Preflight v1
 
-Er führt **keine** Artifact-Replay-Planung, keinen DB-Replay, keinen Artifact-Replay und keine Recovery erneut aus. Damit kann ein bereits autorisierungsreifer Workspace nicht während der Autorisierung neu klassifiziert oder verändert werden.
+Eine einmal erteilte Promotion-Autorisierung ist **kein zeitlich unbegrenztes Ticket**. Zwischen `authorizedAt` und einer späteren Downtime können sich private Restore-Evidence, externe Ledger-/Journal-Evidence oder der Workspace ändern.
 
-Ein sicher vorhandener Recovery-Key wird dynamisch read-only in den CLI-Container gemountet. Ist kein Recovery-Key vorhanden, läuft der CLI ohne ihn; erkannte Recovery oder partielle Recovery-Evidence führt dann im Readiness-Gate zu einer Blockade statt zu einer heuristischen Freigabe.
+Deshalb muss ein späterer Promotion-Executor unmittelbar vor der ersten Produktivmutation den Execution Preflight ausführen.
+
+Service:
+
+```text
+assessRestorePrivatePromotionExecutionPreflight(...)
+```
+
+CLI:
+
+```bash
+pnpm --filter @masters/db backup:restore-promotion-preflight
+```
+
+### Ablauf
+
+Der Preflight:
+
+1. rekonstruiert Promotion Readiness erneut aus aktueller Roh-Evidence,
+2. verlangt erneut `PROMOTION_READY`,
+3. liest den durable Promotion Intent,
+4. verifiziert HMAC, Dateipfad und Intent-Struktur,
+5. bindet den Intent erneut an den **aktuellen** Readiness-Evidence-Fingerprint,
+6. bestätigt weiterhin `promotionExecuted=false`,
+7. erzeugt ausschließlich einen read-only `executionFingerprint`.
+
+Der Preflight schreibt keine Datei und ändert weder private noch produktive Daten.
+
+### Erfolgszustand
+
+Nur bei vollständiger Übereinstimmung entsteht:
+
+```text
+status = EXECUTION_READY
+authorizationScope = PRIVATE_RESTORE_PROMOTION
+promotionAllowed = true
+authorizationPersisted = true
+promotionExecuted = false
+```
+
+Zusätzlich werden gebunden:
+
+- Backup-Cutoff,
+- aktueller Readiness-Evidence-Fingerprint,
+- aktueller Healthcheck-Fingerprint,
+- Intent-Signatur,
+- ursprünglicher `authorizedAt`,
+- deterministischer `executionFingerprint`.
+
+Zwei Preflights über unveränderte Evidence und denselben Intent liefern denselben Execution Fingerprint.
+
+### Stale-Intent-Schutz
+
+Wenn sich nach der Autorisierung die Roh-Evidence ändert, wird nicht versucht, den alten Intent an einen neuen Zustand anzupassen.
+
+Beispiel aus dem Server-Contract:
+
+```text
+Promotion Intent gültig
+-> Artifact-Replay-Result wird entfernt
+-> frische Readiness = BLOCKED
+-> Preflight Exit 3
+-> keine Execution-Freigabe
+```
+
+Der Executor darf in diesem Fall weder Downtime beginnen noch produktive Volumes verändern. Zuerst müsste die Restore-Evidence wieder vollständig hergestellt und eine passende Autorisierung erzeugt werden.
 
 ## Server-Contracts
 
-`Restore Promotion Intent Contract` prüft den CLI mit echter libSQL-DB, Migrationen und signierter Restore-Evidence. Er beweist unter anderem Blockade ohne Persistenz und idempotente Intent-Wiederverwendung.
+`Restore Promotion Intent Contract` prüft mit echter libSQL-DB und signierter Restore-Evidence:
 
-`Restore Promotion Wiring Contract` prüft zusätzlich statisch:
+- Blockade ohne Persistenz,
+- idempotente Promotion-Intent-Wiederverwendung,
+- zwei identische erfolgreiche Execution Preflights,
+- identische Execution Fingerprints bei unveränderter Evidence,
+- sofortige Blockade desselben Intents nach Veränderung der Roh-Evidence.
 
-- Bash-Syntax und explizite Host-Grenze,
-- Migration vor Autorisierung,
-- keine erneute Replay-/Recovery-Ausführung,
-- private Restore-DB als einzige Service-Abhängigkeit,
-- ausschließlich `restore-internal`,
-- gesamter Restore-Workspace read-only,
-- nur `/restore-replay/promotion` schreibbar,
-- Promotion-Key read-only,
-- Recovery-Key nicht statisch gemountet,
-- keine produktiven Volume-Targets.
+`Restore Promotion Wiring Contract` prüft die isolierte Host-/Compose-Grenze, insbesondere read-only Restore-Workspace, ausschließlich schreibbares `promotion/`, fehlende Produktiv-Mounts und keine Replay-/Recovery-Neuausführung.
 
 ## Aktuelle Sicherheitsgrenze
 
-Der aktuelle Stand kann eine Promotion prüfen und durable autorisieren, aber nicht ausführen. Insbesondere:
+Der aktuelle Stand kann eine Promotion prüfen, durable autorisieren und unmittelbar vor einer späteren Ausführung erneut read-only freigeben, aber noch nicht ausführen. Insbesondere:
 
 - keine produktiven Dienste werden gestoppt,
 - keine produktiven DB-/Report-/Export-Volumes werden verändert,
 - keine Caddy-Umschaltung erfolgt,
-- kein Promotion-Executor existiert,
+- kein mutierender Promotion-Executor existiert,
 - `promotionExecuted` bleibt immer `false`.
 
 Als nächste Slices folgen:
 
-1. separat kontrollierter Promotion-Executor mit erneuter Intent-/Workspace-Verifikation und crash-sicherer Umschaltung,
-2. Restore-/Promotion-Audit,
-3. praktischer Restore-/RTO-Drill.
+1. produktive Promotion-Architektur mit versionierten Kandidaten-/Rollback-Volumes und expliziter Umschaltgrenze,
+2. mutierender Promotion-Executor erst auf Basis dieser Architektur und eines unmittelbar grünen Preflights,
+3. Restore-/Promotion-Audit,
+4. praktischer Restore-/RTO-Drill.
 
 Bis Promotion-Executor, Audit und RTO-Drill implementiert und praktisch verifiziert sind, bleibt:
 

@@ -1,14 +1,12 @@
 import { isAbsolute } from 'node:path';
 import { createDatabase } from './client';
-import {
-  ensureSignedRestorePrivatePromotionIntent,
-} from './services/restore-private-promotion-intent';
+import { assessRestorePrivatePromotionExecutionPreflight } from './services/restore-private-promotion-execution-preflight';
 import {
   assessRestorePrivatePromotionReadinessFromStorage,
   restorePrivatePromotionStoragePathsFromEnvironment,
 } from './services/restore-private-promotion-storage';
 
-const RESTORE_PRIVATE_PROMOTION_INTENT_CLI_MODE = 'ISOLATED_RESTORE_PROMOTION_INTENT' as const;
+const MODE = 'ISOLATED_RESTORE_PROMOTION_EXECUTION_PREFLIGHT' as const;
 
 function requireAbsoluteEnvironmentPath(name: string): string {
   const value = process.env[name]?.trim();
@@ -25,7 +23,7 @@ async function main(): Promise<void> {
 
   if (!readiness.promotionAllowed || readiness.status !== 'PROMOTION_READY') {
     process.stdout.write(`${JSON.stringify({
-      mode: RESTORE_PRIVATE_PROMOTION_INTENT_CLI_MODE,
+      mode: MODE,
       status: 'BLOCKED',
       promotionAllowed: false,
       authorizationPersisted: false,
@@ -36,32 +34,22 @@ async function main(): Promise<void> {
     return;
   }
 
-  const promotionIntentDir = requireAbsoluteEnvironmentPath('RESTORE_PRIVATE_PROMOTION_INTENT_DIR');
-  const promotionKeyFile = requireAbsoluteEnvironmentPath('RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE');
-  const intent = await ensureSignedRestorePrivatePromotionIntent({
-    targetDir: promotionIntentDir,
-    keyFile: promotionKeyFile,
+  const intentFile = requireAbsoluteEnvironmentPath('RESTORE_PRIVATE_PROMOTION_INTENT_FILE');
+  const intentKeyFile = requireAbsoluteEnvironmentPath('RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE');
+  const preflight = await assessRestorePrivatePromotionExecutionPreflight(
     readiness,
-    authorizedAt: new Date().toISOString(),
-  });
+    intentFile,
+    intentKeyFile,
+  );
 
   process.stdout.write(`${JSON.stringify({
-    mode: RESTORE_PRIVATE_PROMOTION_INTENT_CLI_MODE,
-    status: 'AUTHORIZED',
-    backupCutoff: readiness.backupCutoff,
-    promotionAllowed: true,
-    authorizationPersisted: true,
-    promotionExecuted: false,
-    evidenceFingerprint: readiness.evidenceFingerprint,
-    intentCreated: intent.created,
-    intentReused: !intent.created,
-    authorizedAt: intent.envelope.record.authorizedAt,
-    intentSignature: intent.envelope.signature,
+    mode: MODE,
+    ...preflight,
   })}\n`);
 }
 
 main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : 'Restore private promotion intent authorization failed';
+  const message = error instanceof Error ? error.message : 'Restore private promotion execution preflight failed';
   process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });
