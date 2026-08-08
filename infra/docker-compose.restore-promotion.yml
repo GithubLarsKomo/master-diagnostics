@@ -83,7 +83,7 @@ services:
       dockerfile: apps/web/Dockerfile
       target: migrator
     restart: "no"
-    command: ["pnpm", "--filter", "@masters/db", "backup:restore-promotion-candidate-copy"]
+    command: ["pnpm", "--silent", "--filter", "@masters/db", "backup:restore-promotion-candidate-copy"]
     volumes:
       - ${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-restore-unset}:/restore-replay:ro
       - restore-promotion-candidate:/candidate
