@@ -100,6 +100,7 @@ describe('restore private promotion intent', () => {
       authorizedAt,
     });
     expect(first.created).toBe(true);
+    expect(first.path).toBe(join(fixture.targetDir, RESTORE_PRIVATE_PROMOTION_INTENT_FILE_NAME));
     expect(first.envelope.record).toMatchObject({
       intentVersion: 1,
       phase: 'AUTHORIZED',
