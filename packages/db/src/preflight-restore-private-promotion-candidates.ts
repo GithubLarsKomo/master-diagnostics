@@ -7,7 +7,7 @@ import {
   restorePrivatePromotionStoragePathsFromEnvironment,
 } from './services/restore-private-promotion-storage';
 
-const MODE = 'ISOLATED_RESTORE_PROMOTION_CANDIDATE_PREPARATION' as const;
+const MODE = 'ISOLATED_RESTORE_PROMOTION_CANDIDATE_SET_PREFLIGHT' as const;
 const DOCKER_VOLUME_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 
 function requireAbsoluteEnvironmentPath(name: string): string {
@@ -42,6 +42,7 @@ async function main(): Promise<void> {
     process.stdout.write(`${JSON.stringify({
       mode: MODE,
       status: 'BLOCKED',
+      evidenceRecomputed: true,
       candidateMutationAllowed: false,
       productionMutationAllowed: false,
       promotionExecuted: false,
@@ -60,9 +61,9 @@ async function main(): Promise<void> {
 
   process.stdout.write(`${JSON.stringify({
     mode: MODE,
-    status: 'CANDIDATE_COPY_AUTHORIZED',
+    status: 'CANDIDATE_SET_CHECK_READY',
     evidenceRecomputed: true,
-    candidateMutationAllowed: true,
+    candidateMutationAllowed: false,
     productionMutationAllowed: false,
     promotionExecuted: false,
     backupCutoff: verified.plan.record.backupCutoff,
@@ -76,7 +77,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : 'Restore promotion candidate preparation authorization failed';
+  const message = error instanceof Error ? error.message : 'Restore promotion candidate-set preflight failed';
   process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });

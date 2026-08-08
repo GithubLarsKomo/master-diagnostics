@@ -8,6 +8,7 @@ on:
       - 'infra/backup/authorize-club-restore-promotion.sh'
       - 'infra/backup/prepare-club-restore-promotion-plan.sh'
       - 'infra/backup/prepare-club-restore-promotion-candidates.sh'
+      - 'infra/backup/check-club-restore-promotion-candidates.sh'
       - 'infra/backup/resolve-active-club-volumes.py'
       - 'infra/docker-compose.club.yml'
       - 'infra/docker-compose.restore-promotion.yml'
@@ -15,6 +16,7 @@ on:
       - 'docs/restore-private-promotion.md'
       - 'docs/restore-private-promotion-execution-plan.md'
       - 'docs/restore-private-promotion-candidates.md'
+      - 'docs/restore-private-promotion-candidate-healthcheck.md'
   push:
     branches: [main]
     paths:
@@ -23,6 +25,7 @@ on:
       - 'infra/backup/authorize-club-restore-promotion.sh'
       - 'infra/backup/prepare-club-restore-promotion-plan.sh'
       - 'infra/backup/prepare-club-restore-promotion-candidates.sh'
+      - 'infra/backup/check-club-restore-promotion-candidates.sh'
       - 'infra/backup/resolve-active-club-volumes.py'
       - 'infra/docker-compose.club.yml'
       - 'infra/docker-compose.restore-promotion.yml'
@@ -30,6 +33,7 @@ on:
       - 'docs/restore-private-promotion.md'
       - 'docs/restore-private-promotion-execution-plan.md'
       - 'docs/restore-private-promotion-candidates.md'
+      - 'docs/restore-private-promotion-candidate-healthcheck.md'
 
 jobs:
   contract:
@@ -213,6 +217,48 @@ jobs:
               assert token not in active
           PY
 
+      - name: Verify candidate-set healthcheck host read-only boundary
+        run: |
+          bash -n infra/backup/check-club-restore-promotion-candidates.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          script = Path('infra/backup/check-club-restore-promotion-candidates.sh').read_text()
+          active = '\n'.join(line for line in script.splitlines() if not line.lstrip().startswith('#'))
+          assert 'promotion-intent.json' in active
+          assert 'promotion-execution-plan.json' in active
+          assert 'backup:restore-promotion-candidates-preflight' in active
+          assert 'CANDIDATE_SET_CHECK_READY' in active
+          assert 'candidateMutationAllowed' in active
+          assert 'productionMutationAllowed' in active
+          assert 'cleanup_private_db' in active
+          assert 'docker volume inspect' in active
+          assert 'docker ps -aq --filter "volume=${candidate_volume}"' in active
+          assert 'com.master-diagnostics.restore.plan-fingerprint' in active
+          assert 'com.master-diagnostics.restore.rollback-volume' in active
+          assert 'backup-restore-promotion-candidate-check' in active
+          assert 'CANDIDATE_SET_HEALTHY' in active
+          assert 'candidateSetFingerprint' in active
+          preflight = active.index('backup:restore-promotion-candidates-preflight')
+          stop_db = active.index('cleanup_private_db', preflight)
+          inspect_volume = active.index('docker volume inspect', stop_db)
+          check_candidate = active.rindex('backup-restore-promotion-candidate-check')
+          assert preflight < stop_db < inspect_volume < check_candidate
+          for token in (
+              'docker volume create',
+              'docker volume rm',
+              'docker cp ',
+              'docker compose down',
+              'backup:restore-promotion-candidates-authorize',
+              'backup-restore-promotion-candidate-copy',
+              'backup-privacy-artifact-plan',
+              'backup-privacy-replay ',
+              'backup-privacy-artifact-replay',
+              'backup-restore-recovery-execute',
+              '-v "${active_',
+          ):
+              assert token not in active
+          PY
+
       - name: Verify isolated promotion Compose contract
         run: |
           cp .env.example .env
@@ -291,19 +337,26 @@ jobs:
           ):
               assert forbidden_env not in plan['environment']
 
-          copy = config['services']['backup-restore-promotion-candidate-copy']
-          assert copy['command'][-1] == 'backup:restore-promotion-candidate-copy'
-          assert '--silent' in copy['command']
-          assert copy.get('network_mode') == 'none'
-          assert not copy.get('depends_on')
-          mounts = {volume.get('target'): volume for volume in copy.get('volumes', [])}
-          assert set(mounts) == {'/restore-replay', '/candidate'}
-          assert mounts['/restore-replay']['type'] == 'bind'
-          assert mounts['/restore-replay']['read_only'] is True
-          assert mounts['/candidate']['type'] == 'volume'
-          assert mounts['/candidate'].get('read_only') is not True
-          assert mounts['/candidate']['source'] == 'restore-promotion-candidate'
-          assert production_targets.isdisjoint(mounts)
+          for service_name, command, candidate_ro in (
+              ('backup-restore-promotion-candidate-copy', 'backup:restore-promotion-candidate-copy', False),
+              ('backup-restore-promotion-candidate-check', 'backup:restore-promotion-candidate-check', True),
+          ):
+              service = config['services'][service_name]
+              assert service['command'][-1] == command
+              assert '--silent' in service['command']
+              assert service.get('network_mode') == 'none'
+              assert not service.get('depends_on')
+              mounts = {volume.get('target'): volume for volume in service.get('volumes', [])}
+              assert set(mounts) == {'/restore-replay', '/candidate'}
+              assert mounts['/restore-replay']['type'] == 'bind'
+              assert mounts['/restore-replay']['read_only'] is True
+              assert mounts['/candidate']['type'] == 'volume'
+              if candidate_ro:
+                  assert mounts['/candidate'].get('read_only') is True
+              else:
+                  assert mounts['/candidate'].get('read_only') is not True
+              assert mounts['/candidate']['source'] == 'restore-promotion-candidate'
+              assert production_targets.isdisjoint(mounts)
           candidate = config['volumes']['restore-promotion-candidate']
           assert candidate['external'] is True
           assert candidate['name'] == 'restore-promotion-candidate-contract'

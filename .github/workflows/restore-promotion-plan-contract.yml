@@ -7,6 +7,7 @@ on:
       - 'packages/db/**'
       - 'docs/restore-private-promotion-execution-plan.md'
       - 'docs/restore-private-promotion-candidates.md'
+      - 'docs/restore-private-promotion-candidate-healthcheck.md'
   push:
     branches: [main]
     paths:
@@ -14,6 +15,7 @@ on:
       - 'packages/db/**'
       - 'docs/restore-private-promotion-execution-plan.md'
       - 'docs/restore-private-promotion-candidates.md'
+      - 'docs/restore-private-promotion-candidate-healthcheck.md'
 
 jobs:
   contract:
@@ -145,7 +147,6 @@ jobs:
           second = json.loads(Path('/tmp/promotion-plan-second.json').read_text())
           plan_path = Path('/tmp/restore-promotion-plan-contract/replay/promotion/promotion-execution-plan.json')
           plan = json.loads(plan_path.read_text())
-
           assert first['mode'] == 'ISOLATED_RESTORE_PROMOTION_EXECUTION_PLAN'
           assert first['status'] == 'PREPARED'
           assert first['promotionAllowed'] is True
@@ -218,6 +219,48 @@ jobs:
           assert auth['candidateSetId'] == plan['record']['candidateSetId']
           assert auth['activeVolumeSetFingerprint'] == plan['record']['activeVolumeSetFingerprint']
           assert auth['volumes'] == plan['record']['volumes']
+          PY
+
+      - name: Verify candidate-set healthcheck preflight is read-only and plan-bound
+        run: |
+          env \
+            RESTORE_STAGING_MANIFEST=/tmp/restore-promotion-plan-contract/staging/restore-ci/manifest.json \
+            RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-promotion-plan-contract/ledger \
+            RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-promotion-plan-contract/ledger.key \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-promotion-plan-contract/journal \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-promotion-plan-contract/journal.key \
+            RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE=/tmp/restore-promotion-plan-contract/replay/artifact-replay-manifest.json \
+            RESTORE_PRIVACY_ARTIFACT_RESULT_FILE=/tmp/restore-promotion-plan-contract/replay/artifact-replay-result.json \
+            RESTORE_PRIVACY_REPORT_ROOT=/tmp/restore-promotion-plan-contract/replay/reports \
+            RESTORE_PRIVACY_TENANT_EXPORT_ROOT=/tmp/restore-promotion-plan-contract/replay/tenant-exports \
+            RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT=/tmp/restore-promotion-plan-contract/replay/data-subject-delivery \
+            RESTORE_PRIVATE_RECOVERY_PLAN_FILE=/tmp/restore-promotion-plan-contract/replay/recovery-plan.json \
+            RESTORE_PRIVATE_RECOVERY_INTENT_DIR=/tmp/restore-promotion-plan-contract/replay/recovery-execution \
+            RESTORE_PRIVATE_PROMOTION_INTENT_FILE=/tmp/restore-promotion-plan-contract/replay/promotion/promotion-intent.json \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-promotion-plan-contract/promotion.key \
+            RESTORE_PRIVATE_PROMOTION_EXECUTION_PLAN_FILE=/tmp/restore-promotion-plan-contract/replay/promotion/promotion-execution-plan.json \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME=infra_libsql-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME=infra_report-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME=infra_export-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME=infra_data-subject-delivery-data \
+            pnpm --silent --filter @masters/db backup:restore-promotion-candidates-preflight >/tmp/promotion-candidates-preflight.json
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          check = json.loads(Path('/tmp/promotion-candidates-preflight.json').read_text())
+          plan = json.loads(Path('/tmp/restore-promotion-plan-contract/replay/promotion/promotion-execution-plan.json').read_text())
+          assert check['mode'] == 'ISOLATED_RESTORE_PROMOTION_CANDIDATE_SET_PREFLIGHT'
+          assert check['status'] == 'CANDIDATE_SET_CHECK_READY'
+          assert check['evidenceRecomputed'] is True
+          assert check['candidateMutationAllowed'] is False
+          assert check['productionMutationAllowed'] is False
+          assert check['promotionExecuted'] is False
+          assert check['planFingerprint'] == plan['record']['planFingerprint']
+          assert check['planSignature'] == plan['signature']
+          assert check['candidateSetId'] == plan['record']['candidateSetId']
+          assert check['activeVolumeSetFingerprint'] == plan['record']['activeVolumeSetFingerprint']
+          assert check['volumes'] == plan['record']['volumes']
           PY
 
       - name: Verify active volume drift invalidates the existing plan
