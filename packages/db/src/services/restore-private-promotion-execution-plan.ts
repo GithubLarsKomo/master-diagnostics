@@ -313,7 +313,7 @@ function canonicalPayload(record: Readonly<RestorePrivatePromotionExecutionPlanR
 }
 
 function signRecord(key: Buffer, record: Readonly<RestorePrivatePromotionExecutionPlanRecord>): `hmac-sha256:${string}` {
-  return `${SIGNATURE_PREFIX}${createHmac('sha256').update(canonicalPayload(record)).digest('hex')}`;
+  return `${SIGNATURE_PREFIX}${createHmac('sha256', key).update(canonicalPayload(record)).digest('hex')}`;
 }
 
 export function createRestorePrivatePromotionExecutionPlanRecord(
