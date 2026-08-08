@@ -1,0 +1,59 @@
+services:
+  backup-restore-assessment-work:
+    profiles: [backup]
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    environment:
+      RESTORE_STAGING_ROOT: /restore-staging
+      RESTORE_WORK_ROOT: /restore-work
+    command: ["pnpm", "--filter", "@masters/db", "backup:privacy-assessment-work"]
+    volumes:
+      - ${RESTORE_STAGING_HOST_DIR:-/var/lib/master-diagnostics/restore-staging}:/restore-staging:ro
+      - ${RESTORE_WORK_HOST_DIR:-/var/lib/master-diagnostics/restore-work}:/restore-work
+
+  backup-restore-assessment-db:
+    profiles: [backup]
+    image: ghcr.io/tursodatabase/libsql-server:3ec6803
+    restart: "no"
+    environment:
+      SQLD_NODE: primary
+    volumes:
+      - ${RESTORE_WORK_HOST_DIR:-/var/lib/master-diagnostics/restore-work}/${RESTORE_WORK_NAME:-invalid}/libsql:/var/lib/sqld
+    networks: [restore-assessment]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  backup-privacy-assess:
+    profiles: [backup]
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    environment:
+      DATABASE_URL: http://backup-restore-assessment-db:8080
+      RESTORE_PRIVACY_LEDGER_DIR: /privacy-ledger
+      RESTORE_PRIVACY_LEDGER_KEY_FILE: /run/secrets/restore-privacy-ledger.key
+      RESTORE_PRIVACY_EFFECT_JOURNAL_DIR: /privacy-effect-journal
+      RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE: /run/secrets/restore-privacy-effect-journal.key
+    command: ["pnpm", "--filter", "@masters/db", "backup:privacy-assess"]
+    volumes:
+      - ${RESTORE_STAGING_HOST_DIR:-/var/lib/master-diagnostics/restore-staging}:/restore-staging:ro
+      - ${RESTORE_PRIVACY_LEDGER_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-ledger}:/privacy-ledger:ro
+      - ${RESTORE_PRIVACY_LEDGER_KEY_FILE:-/etc/master-diagnostics/restore-privacy-ledger.key}:/run/secrets/restore-privacy-ledger.key:ro
+      - ${RESTORE_PRIVACY_EFFECT_JOURNAL_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-effect-journal}:/privacy-effect-journal:ro
+      - ${RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE:-/etc/master-diagnostics/restore-privacy-effect-journal.key}:/run/secrets/restore-privacy-effect-journal.key:ro
+    depends_on:
+      backup-restore-assessment-db:
+        condition: service_healthy
+    networks: [restore-assessment]
+
+networks:
+  restore-assessment:
+    internal: true
