@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { chmod, link, lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, isAbsolute, join } from 'node:path';
 
@@ -96,7 +96,11 @@ const ROLE_DEFINITIONS = Object.freeze([
 ]);
 
 function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (value === null || typeof value !== 'object') {
+    const encoded = JSON.stringify(value);
+    if (encoded === undefined) throw new Error('Unsupported canonical JSON value');
+    return encoded;
+  }
   if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(',')}]`;
   const object = value as Record<string, unknown>;
   return `{${Object.keys(object)
@@ -106,7 +110,7 @@ function canonicalJson(value: unknown): string {
 }
 
 function sha256(value: string): `sha256:${string}` {
-  return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
 }
 
 function assertSha256(value: string, label: string): asserts value is `sha256:${string}` {
@@ -391,7 +395,7 @@ export async function persistSignedRestorePrivatePromotionSwitchIntent(
   }) satisfies SignedRestorePrivatePromotionSwitchIntentEnvelope;
   const serialized = `${JSON.stringify(envelope, null, 2)}\n`;
   const finalPath = join(targetDir, RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE_NAME);
-  const tempPath = join(targetDir, `.${RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE_NAME}.${crypto.randomUUID()}.tmp`);
+  const tempPath = join(targetDir, `.${RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE_NAME}.${randomUUID()}.tmp`);
   await writeFile(tempPath, serialized, { flag: 'wx', mode: 0o600 });
   try {
     try {
