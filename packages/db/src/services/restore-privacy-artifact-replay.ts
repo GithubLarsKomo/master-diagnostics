@@ -145,12 +145,14 @@ async function verifiedRoots(roots: Readonly<RestorePrivacyArtifactReplayRoots>)
     roots.dataSubjectDeliveryRoot,
     'Restore privacy data subject delivery root',
   );
-  const values = [reportRoot, tenantExportRoot, dataSubjectDeliveryRoot];
-  for (let left = 0; left < values.length; left += 1) {
-    for (let right = left + 1; right < values.length; right += 1) {
-      if (nestedPath(values[left], values[right]) || nestedPath(values[right], values[left])) {
-        throw new Error('Restore privacy artifact roots must be distinct non-overlapping directories');
-      }
+  const pairs: readonly (readonly [string, string])[] = [
+    [reportRoot, tenantExportRoot],
+    [reportRoot, dataSubjectDeliveryRoot],
+    [tenantExportRoot, dataSubjectDeliveryRoot],
+  ];
+  for (const [left, right] of pairs) {
+    if (nestedPath(left, right) || nestedPath(right, left)) {
+      throw new Error('Restore privacy artifact roots must be distinct non-overlapping directories');
     }
   }
   return Object.freeze({ reportRoot, tenantExportRoot, dataSubjectDeliveryRoot });
@@ -184,8 +186,8 @@ async function inspectArtifactPath(
 
   let current = root;
   const parts = entry.storageReference.split('/');
-  for (let index = 0; index < parts.length; index += 1) {
-    current = join(current, parts[index]);
+  for (const [index, part] of parts.entries()) {
+    current = join(current, part);
     const stat = await lstatIfPresent(current);
     if (!stat) return Object.freeze({ target, exists: false });
     if (stat.isSymbolicLink()) {
