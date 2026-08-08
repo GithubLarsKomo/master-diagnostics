@@ -74,7 +74,6 @@ export async function assessRestorePrivatePromotionExecutionPreflight(
 
   const body = canonicalPreflightBody(readiness, intent);
   return Object.freeze({
-    preflightVersion: RESTORE_PRIVATE_PROMOTION_EXECUTION_PREFLIGHT_VERSION,
     status: 'EXECUTION_READY',
     ...body,
     executionFingerprint: sha256(JSON.stringify(body)),
