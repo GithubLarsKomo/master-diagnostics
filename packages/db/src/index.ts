@@ -26,6 +26,7 @@ export * from './services/restore-privacy-replay-assessment';
 export * from './services/restore-privacy-db-replay';
 export * from './services/restore-privacy-artifact-replay-manifest';
 export * from './services/restore-privacy-artifact-replay';
+export * from './services/restore-private-healthcheck';
 export * from './services/club-bootstrap';
 export * from './services/factory-protocol-templates';
 export * from './services/protocol-templates';
