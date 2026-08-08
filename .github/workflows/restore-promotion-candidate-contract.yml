@@ -108,7 +108,7 @@ jobs:
           assert second['sourceFingerprint'] != first['sourceFingerprint']
           assert second['fileCount'] == 2
           assert second['directoryCount'] == 2
-          assert second['byteCount'] == 12
+          assert second['byteCount'] == 11
           PY
 
       - name: Reject symlinks before candidate mutation
@@ -145,6 +145,7 @@ jobs:
               config = json.load(handle)
           service = config['services']['backup-restore-promotion-candidate-copy']
           assert service['command'][-1] == 'backup:restore-promotion-candidate-copy'
+          assert '--silent' in service['command']
           assert service.get('network_mode') == 'none'
           assert not service.get('depends_on')
           mounts = {item['target']: item for item in service.get('volumes', [])}
@@ -153,7 +154,7 @@ jobs:
           assert mounts['/restore-replay']['read_only'] is True
           assert mounts['/candidate']['type'] == 'volume'
           assert mounts['/candidate'].get('read_only') is not True
-          assert mounts['/candidate']['source'] == 'master-diagnostics-restore-candidate-ci-reports'
+          assert mounts['/candidate']['source'] == 'restore-promotion-candidate'
           forbidden = {
               '/var/run/docker.sock',
               '/var/lib/sqld',
