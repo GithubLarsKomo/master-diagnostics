@@ -1,4 +1,4 @@
-name: Restore Artifact Replay Contract
+name: Restore Privacy Replay Contract
 
 on:
   pull_request:
@@ -10,6 +10,7 @@ on:
       - 'packages/db/**'
       - 'docs/restore-privacy-reconciliation.md'
       - 'docs/restore-privacy-artifact-replay.md'
+      - 'docs/restore-private-healthcheck.md'
   push:
     branches: [main]
     paths:
@@ -20,6 +21,7 @@ on:
       - 'packages/db/**'
       - 'docs/restore-privacy-reconciliation.md'
       - 'docs/restore-privacy-artifact-replay.md'
+      - 'docs/restore-private-healthcheck.md'
 
 jobs:
   contract:
@@ -45,7 +47,7 @@ jobs:
       - name: Verify replay wrapper syntax
         run: bash -n infra/backup/replay-club-restore-privacy-db.sh
 
-      - name: Verify private artifact replay Compose contract
+      - name: Verify private restore Compose contract
         run: |
           cp .env.example .env
           sed -i 's/diagnostics.example.org/localhost/g' .env
@@ -60,6 +62,7 @@ jobs:
           plan = config['services']['backup-privacy-artifact-plan']
           replay = config['services']['backup-privacy-replay']
           artifact = config['services']['backup-privacy-artifact-replay']
+          health = config['services']['backup-restore-healthcheck']
           replay_db = config['services']['backup-privacy-replay-db']
           migrate = config['services']['backup-privacy-replay-migrate']
 
@@ -68,16 +71,17 @@ jobs:
           assert plan['depends_on']['backup-privacy-replay-migrate']['condition'] == 'service_completed_successfully'
           assert replay['depends_on']['backup-privacy-artifact-plan']['condition'] == 'service_completed_successfully'
           assert artifact['depends_on']['backup-privacy-replay']['condition'] == 'service_completed_successfully'
-          assert artifact['environment']['RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE'] == '/restore-replay/artifact-replay-manifest.json'
-          assert artifact['environment']['RESTORE_PRIVACY_ARTIFACT_RESULT_FILE'] == '/restore-replay/artifact-replay-result.json'
-          assert artifact['environment']['RESTORE_PRIVACY_REPORT_ROOT'] == '/restore-replay/reports'
-          assert artifact['environment']['RESTORE_PRIVACY_TENANT_EXPORT_ROOT'] == '/restore-replay/tenant-exports'
-          assert artifact['environment']['RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT'] == '/restore-replay/data-subject-delivery'
-          assert set(plan.get('networks', {})) == {'restore-internal'}
-          assert set(replay.get('networks', {})) == {'restore-internal'}
-          assert set(artifact.get('networks', {})) == {'restore-internal'}
-          assert set(replay_db.get('networks', {})) == {'restore-internal'}
-          assert set(migrate.get('networks', {})) == {'restore-internal'}
+          assert health['depends_on']['backup-privacy-artifact-replay']['condition'] == 'service_completed_successfully'
+          assert health['environment']['DATABASE_URL'] == 'http://backup-privacy-replay-db:8080'
+          for service in (artifact, health):
+              assert service['environment']['RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE'] == '/restore-replay/artifact-replay-manifest.json'
+              assert service['environment']['RESTORE_PRIVACY_ARTIFACT_RESULT_FILE'] == '/restore-replay/artifact-replay-result.json'
+              assert service['environment']['RESTORE_PRIVACY_REPORT_ROOT'] == '/restore-replay/reports'
+              assert service['environment']['RESTORE_PRIVACY_TENANT_EXPORT_ROOT'] == '/restore-replay/tenant-exports'
+              assert service['environment']['RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT'] == '/restore-replay/data-subject-delivery'
+
+          for service in (plan, replay, artifact, health, replay_db, migrate):
+              assert set(service.get('networks', {})) == {'restore-internal'}
           assert config['networks']['restore-internal']['internal'] is True
 
           expected_targets = {
@@ -99,6 +103,12 @@ jobs:
                   else:
                       assert volume.get('read_only') is True
 
+          health_mounts = {volume.get('target'): volume for volume in health.get('volumes', [])}
+          assert set(health_mounts) == expected_targets
+          assert all(volume.get('read_only') is True for volume in health_mounts.values())
+          assert health_mounts['/restore-replay']['type'] == 'bind'
+          assert health_mounts['/restore-replay']['source'].endswith('/restore-privacy-replay/restore-unset')
+
           production_targets = {
               '/var/lib/sqld',
               '/var/lib/masters/reports',
@@ -107,8 +117,9 @@ jobs:
               '/data',
               '/config',
           }
-          artifact_mounts = {volume.get('target') for volume in artifact.get('volumes', [])}
-          assert production_targets.isdisjoint(artifact_mounts)
+          for service in (artifact, health):
+              mounted_targets = {volume.get('target') for volume in service.get('volumes', [])}
+              assert production_targets.isdisjoint(mounted_targets)
           assert replay_db['volumes'][0]['target'] == '/var/lib/sqld'
           assert replay_db['volumes'][0]['source'].endswith('/restore-privacy-replay/restore-unset/libsql')
           PY
@@ -232,4 +243,56 @@ jobs:
           assert result['promotionAllowed'] is False
           assert (result_path.stat().st_mode & 0o777) == 0o600
           assert (result_path.parent.stat().st_mode & 0o777) == 0o700
+          PY
+
+      - name: Verify read-only healthy restore healthcheck CLI
+        run: |
+          sha256sum \
+            /tmp/restore-replay/artifact-replay-manifest.json \
+            /tmp/restore-replay/artifact-replay-result.json \
+            >/tmp/restore-healthcheck-evidence-before.sha256
+          for attempt in first second; do
+            env \
+              DATABASE_URL="file:${{ github.workspace }}/restore-artifact-plan-ci.db" \
+              DATABASE_AUTH_TOKEN='' \
+              RESTORE_STAGING_MANIFEST=/tmp/restore-staging/restore-ci/manifest.json \
+              RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-privacy-ledger \
+              RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-privacy-ledger.key \
+              RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-privacy-effect-journal \
+              RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-privacy-effect-journal.key \
+              RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE=/tmp/restore-replay/artifact-replay-manifest.json \
+              RESTORE_PRIVACY_ARTIFACT_RESULT_FILE=/tmp/restore-replay/artifact-replay-result.json \
+              RESTORE_PRIVACY_REPORT_ROOT=/tmp/restore-replay/reports \
+              RESTORE_PRIVACY_TENANT_EXPORT_ROOT=/tmp/restore-replay/tenant-exports \
+              RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT=/tmp/restore-replay/data-subject-delivery \
+              pnpm --silent --filter @masters/db backup:restore-healthcheck >"/tmp/restore-healthcheck-${attempt}.json"
+          done
+          sha256sum \
+            /tmp/restore-replay/artifact-replay-manifest.json \
+            /tmp/restore-replay/artifact-replay-result.json \
+            >/tmp/restore-healthcheck-evidence-after.sha256
+          diff -u /tmp/restore-healthcheck-evidence-before.sha256 /tmp/restore-healthcheck-evidence-after.sha256
+          cmp /tmp/restore-healthcheck-first.json /tmp/restore-healthcheck-second.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path('/tmp/restore-healthcheck-first.json').read_text())
+          assert report['mode'] == 'ISOLATED_RESTORE_HEALTHCHECK'
+          assert report['healthcheckVersion'] == 1
+          assert report['status'] == 'HEALTHY'
+          assert report['healthcheckPassed'] is True
+          assert report['readyForPromotionReview'] is True
+          assert report['promotionAllowed'] is False
+          assert report['reconciliationStatus'] == 'CLEAR'
+          assert report['databaseStatus'] == 'DATABASE_SATISFIED'
+          assert report['artifactManifestVerified'] is True
+          assert report['artifactReplayVerified'] is True
+          assert report['blockers'] == []
+          assert report['transientExecutions'] == []
+          assert report['storage'] == [
+              {'kind': 'REPORT', 'databaseReferenceCount': 0, 'activeFileCount': 0, 'quarantineFileCount': 0, 'symlinkCount': 0, 'specialEntryCount': 0},
+              {'kind': 'TENANT_EXPORT', 'databaseReferenceCount': 0, 'activeFileCount': 0, 'quarantineFileCount': 0, 'symlinkCount': 0, 'specialEntryCount': 0},
+              {'kind': 'DATA_SUBJECT_DELIVERY', 'databaseReferenceCount': 0, 'activeFileCount': 0, 'quarantineFileCount': 0, 'symlinkCount': 0, 'specialEntryCount': 0},
+          ]
           PY

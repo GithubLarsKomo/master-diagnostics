@@ -78,15 +78,41 @@ Wichtige Felder:
 
 Der CLI-Prozess endet bei `BLOCKED` mit einem Fehlerstatus, bleibt aber vollständig read-only.
 
+## Isolierte Compose-Ausführung
+
+Der Healthcheck ist als eigener `backup-restore-healthcheck`-Service im internen Netzwerk `restore-internal` verdrahtet. Er startet ausschließlich nach erfolgreich abgeschlossenem `backup-privacy-artifact-replay`.
+
+Der operative Ablauf lautet damit:
+
+```text
+private workspace copy
+  -> backup-privacy-replay-migrate
+  -> backup-privacy-artifact-plan
+  -> backup-privacy-replay
+  -> backup-privacy-artifact-replay
+  -> backup-restore-healthcheck
+```
+
+Für den Healthcheck gelten zusätzliche Schreibschutzgrenzen:
+
+- Restore-Staging: read-only,
+- Privacy Ledger: read-only,
+- Privacy-Effect-Journal: read-only,
+- beide Signing Keys: read-only,
+- kompletter privater `/restore-replay`-Workspace: read-only,
+- Zugriff auf die private libSQL-Kopie ausschließlich über `backup-privacy-replay-db`,
+- keine produktiven libSQL-, Report-, Export-, Betroffenenexport- oder Caddy-Volumes.
+
+Auch die Manifest-/Result-Verifikation im Healthcheck selbst führt keine `chmod`-Normalisierung oder andere Evidence-Mutation aus. CI führt denselben `HEALTHY`-Check zweimal aus und verifiziert dabei identischen Output sowie unveränderte SHA-256-Hashes von `artifact-replay-manifest.json` und `artifact-replay-result.json`.
+
 ## Scope-Grenze
 
-Dieser Slice definiert und testet ausschließlich den Healthcheck-Vertrag und die CLI. Die operative Compose-/Wrapper-Verkettung folgt separat, damit der neue Betriebsablauf erst nach grünem Contract verdrahtet wird.
+Damit ist der read-only Healthcheck nicht nur als Domain-/CLI-Vertrag vorhanden, sondern als letzter isolierter Schritt der privaten Restore-Replay-Kette verdrahtet. Ein grüner Healthcheck ist weiterhin nur eine Voraussetzung für eine spätere Promotion-Entscheidung; er bewirkt selbst keine Promotion.
 
-Danach bleiben als nächste Schritte:
+Noch offen bleiben:
 
-1. Healthcheck im isolierten Restore-Stack direkt hinter Artifact-Replay verdrahten,
-2. eine explizite Recovery-Policy für historische Transient-/Quarantäne-Zustände festlegen,
-3. kontrolliertes Promotion-Gate bauen,
-4. praktischen Restore-/RTO-Drill durchführen.
+1. eine explizite Recovery-Policy für historische `PREPARING`-, `ARTIFACTS_STAGED`-, `DB_COMMITTED`- und Quarantäne-Zustände,
+2. ein kontrolliertes Promotion-Gate, das Reconciliation, DB-Replay, Artifact-Replay, Healthcheck und Recovery-Evidenz gemeinsam bindet,
+3. Restore-Audit und praktischer Restore-/RTO-Drill.
 
 Bis diese Schritte abgeschlossen sind, bleibt `PRIVACY_BACKUP_STATE=DISABLED`.
