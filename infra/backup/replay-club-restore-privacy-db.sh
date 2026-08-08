@@ -31,6 +31,7 @@ replay_root="${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/rest
 source_root="${staging_root}/${staging_name}"
 manifest_path="${source_root}/manifest.json"
 workspace="${replay_root}/${staging_name}"
+recovery_plan_path="${workspace}/recovery-plan.json"
 required_sources=(libsql reports tenant-exports data-subject-delivery)
 
 if [[ ! -f "${manifest_path}" ]]; then
@@ -81,6 +82,7 @@ trap cleanup EXIT
   backup-privacy-artifact-plan \
   backup-privacy-replay \
   backup-privacy-artifact-replay \
+  backup-restore-recovery-plan \
   backup-restore-healthcheck
 "${compose[@]}" --profile backup run --rm backup-privacy-replay-migrate
 "${compose[@]}" --profile backup run --rm \
@@ -92,6 +94,15 @@ trap cleanup EXIT
 "${compose[@]}" --profile backup run --rm \
   -e "RESTORE_STAGING_MANIFEST=/restore-staging/${staging_name}/manifest.json" \
   backup-privacy-artifact-replay
+"${compose[@]}" --profile backup run --rm \
+  -e "RESTORE_STAGING_MANIFEST=/restore-staging/${staging_name}/manifest.json" \
+  backup-restore-recovery-plan
+
+if [[ -f "${recovery_plan_path}" ]]; then
+  echo "Restore privacy recovery plan is ready; no recovery mutation is implemented in this release: ${recovery_plan_path}" >&2
+  exit 4
+fi
+
 "${compose[@]}" --profile backup run --rm \
   -e "RESTORE_STAGING_MANIFEST=/restore-staging/${staging_name}/manifest.json" \
   backup-restore-healthcheck

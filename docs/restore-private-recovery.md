@@ -148,14 +148,33 @@ Technische/strukturelle Fehler bleiben Exit `1`.
 
 Der CLI darf **nur vor der ersten Recovery-Mutation** zur Neuplanung verwendet werden. Nach einem Crash mitten in einer späteren Recovery darf nicht erneut aus dem veränderten Filesystem klassifiziert werden; dann muss der Executor den bereits persistierten und gegen die aktuelle signierte Reconciliation verifizierten Plan fortsetzen.
 
+## Isoliertes Compose-/Host-Wiring
+
+`backup-restore-recovery-plan` läuft ausschließlich im internen Restore-Netz. Der Service erhält:
+
+- die private Restore-libSQL-DB,
+- Staging-Manifest, Ledger, Journal und beide Schlüssel nur read-only,
+- Artifact-Replay-Manifest/-Result aus dem privaten Workspace,
+- die drei privaten Artifact-Roots,
+- `/restore-replay/recovery-plan.json` als einziges neues Evidence-Ziel.
+
+Nur `/restore-replay` ist für diesen Service schreibbar. Es werden keine produktiven DB-, Report-, Export-, Delivery-, Caddy- oder sonstigen Produktiv-Volumes gemountet.
+
+Der Host-Workflow `replay-club-restore-privacy-db.sh` führt nach Artifact-Replay zuerst den Recovery-Planer aus:
+
+- `BLOCKED` aus dem Planer beendet den Ablauf mit Exit `3`.
+- Wenn `recovery-plan.json` entsteht, beendet der Wrapper bewusst mit Exit `4`: Recovery ist eindeutig geplant, aber in diesem Release wird **keine** Recovery-Mutation ausgeführt.
+- Wenn kein Plan erforderlich ist, folgt weiterhin der unabhängige read-only Healthcheck und muss `HEALTHY` melden.
+
+Damit kann ein recoverbarer historischer Zwischenzustand nicht mehr bloß am roten Healthcheck enden, ohne dass seine sichere Richtung durable gebunden wird; gleichzeitig kann der aktuelle Release noch keinen geplanten Zustand automatisch verändern oder als erfolgreichen Restore ausgeben.
+
 ## Scope-Grenze
 
-Der aktuelle Stand umfasst Assessment, den durable Recovery-Plan-Vertrag und einen eigenständigen Recovery-Plan-CLI. Noch nicht enthalten sind:
+Der aktuelle Stand umfasst Assessment, durable Recovery-Plan, CLI und isoliertes Compose-/Host-Wiring. Noch nicht enthalten sind:
 
-1. Compose-/Host-Wrapper-Verdrahtung des Plan-Schritts,
-2. mutierende Ausführung der persistierten Recovery-Aktionen,
-3. erneuter Healthcheck nach Recovery,
-4. kontrolliertes Promotion-Gate,
-5. Restore-Audit und praktischer RTO-Drill.
+1. mutierende Ausführung der persistierten Recovery-Aktionen,
+2. erneuter Healthcheck nach Recovery,
+3. kontrolliertes Promotion-Gate,
+4. Restore-Audit und praktischer RTO-Drill.
 
 Bis diese Schritte abgeschlossen sind, bleibt `PRIVACY_BACKUP_STATE=DISABLED`.

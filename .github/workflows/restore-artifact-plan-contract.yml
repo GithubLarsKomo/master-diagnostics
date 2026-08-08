@@ -11,6 +11,7 @@ on:
       - 'docs/restore-privacy-reconciliation.md'
       - 'docs/restore-privacy-artifact-replay.md'
       - 'docs/restore-private-healthcheck.md'
+      - 'docs/restore-private-recovery.md'
   push:
     branches: [main]
     paths:
@@ -22,6 +23,7 @@ on:
       - 'docs/restore-privacy-reconciliation.md'
       - 'docs/restore-privacy-artifact-replay.md'
       - 'docs/restore-private-healthcheck.md'
+      - 'docs/restore-private-recovery.md'
 
 jobs:
   contract:
@@ -45,7 +47,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Verify replay wrapper syntax
-        run: bash -n infra/backup/replay-club-restore-privacy-db.sh
+        run: |
+          bash -n infra/backup/replay-club-restore-privacy-db.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          script = Path('infra/backup/replay-club-restore-privacy-db.sh').read_text()
+          assert 'backup-restore-recovery-plan' in script
+          assert 'recovery_plan_path="${workspace}/recovery-plan.json"' in script
+          assert 'exit 4' in script
+          assert script.rfind('backup-privacy-artifact-replay') < script.rfind('backup-restore-recovery-plan')
+          assert script.rfind('backup-restore-recovery-plan') < script.rfind('backup-restore-healthcheck')
+          PY
 
       - name: Verify private restore Compose contract
         run: |
@@ -62,6 +74,7 @@ jobs:
           plan = config['services']['backup-privacy-artifact-plan']
           replay = config['services']['backup-privacy-replay']
           artifact = config['services']['backup-privacy-artifact-replay']
+          recovery = config['services']['backup-restore-recovery-plan']
           health = config['services']['backup-restore-healthcheck']
           replay_db = config['services']['backup-privacy-replay-db']
           migrate = config['services']['backup-privacy-replay-migrate']
@@ -71,16 +84,19 @@ jobs:
           assert plan['depends_on']['backup-privacy-replay-migrate']['condition'] == 'service_completed_successfully'
           assert replay['depends_on']['backup-privacy-artifact-plan']['condition'] == 'service_completed_successfully'
           assert artifact['depends_on']['backup-privacy-replay']['condition'] == 'service_completed_successfully'
+          assert recovery['depends_on']['backup-privacy-artifact-replay']['condition'] == 'service_completed_successfully'
           assert health['depends_on']['backup-privacy-artifact-replay']['condition'] == 'service_completed_successfully'
+          assert recovery['environment']['DATABASE_URL'] == 'http://backup-privacy-replay-db:8080'
+          assert recovery['environment']['RESTORE_PRIVATE_RECOVERY_PLAN_FILE'] == '/restore-replay/recovery-plan.json'
           assert health['environment']['DATABASE_URL'] == 'http://backup-privacy-replay-db:8080'
-          for service in (artifact, health):
+          for service in (artifact, recovery, health):
               assert service['environment']['RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE'] == '/restore-replay/artifact-replay-manifest.json'
               assert service['environment']['RESTORE_PRIVACY_ARTIFACT_RESULT_FILE'] == '/restore-replay/artifact-replay-result.json'
               assert service['environment']['RESTORE_PRIVACY_REPORT_ROOT'] == '/restore-replay/reports'
               assert service['environment']['RESTORE_PRIVACY_TENANT_EXPORT_ROOT'] == '/restore-replay/tenant-exports'
               assert service['environment']['RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT'] == '/restore-replay/data-subject-delivery'
 
-          for service in (plan, replay, artifact, health, replay_db, migrate):
+          for service in (plan, replay, artifact, recovery, health, replay_db, migrate):
               assert set(service.get('networks', {})) == {'restore-internal'}
           assert config['networks']['restore-internal']['internal'] is True
 
@@ -92,7 +108,7 @@ jobs:
               '/run/secrets/restore-privacy-effect-journal.key',
               '/restore-replay',
           }
-          for service in (plan, artifact):
+          for service in (plan, artifact, recovery):
               mounts = {volume.get('target'): volume for volume in service.get('volumes', [])}
               assert set(mounts) == expected_targets
               for target, volume in mounts.items():
@@ -117,7 +133,7 @@ jobs:
               '/data',
               '/config',
           }
-          for service in (artifact, health):
+          for service in (artifact, recovery, health):
               mounted_targets = {volume.get('target') for volume in service.get('volumes', [])}
               assert production_targets.isdisjoint(mounted_targets)
           assert replay_db['volumes'][0]['target'] == '/var/lib/sqld'
@@ -243,6 +259,42 @@ jobs:
           assert result['promotionAllowed'] is False
           assert (result_path.stat().st_mode & 0o777) == 0o600
           assert (result_path.parent.stat().st_mode & 0o777) == 0o700
+          PY
+
+      - name: Verify healthy restore recovery plan CLI
+        run: |
+          rm -f /tmp/restore-replay/recovery-plan.json
+          for attempt in first second; do
+            env \
+              DATABASE_URL="file:${{ github.workspace }}/restore-artifact-plan-ci.db" \
+              DATABASE_AUTH_TOKEN='' \
+              RESTORE_STAGING_MANIFEST=/tmp/restore-staging/restore-ci/manifest.json \
+              RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-privacy-ledger \
+              RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-privacy-ledger.key \
+              RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-privacy-effect-journal \
+              RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-privacy-effect-journal.key \
+              RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE=/tmp/restore-replay/artifact-replay-manifest.json \
+              RESTORE_PRIVACY_ARTIFACT_RESULT_FILE=/tmp/restore-replay/artifact-replay-result.json \
+              RESTORE_PRIVACY_REPORT_ROOT=/tmp/restore-replay/reports \
+              RESTORE_PRIVACY_TENANT_EXPORT_ROOT=/tmp/restore-replay/tenant-exports \
+              RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT=/tmp/restore-replay/data-subject-delivery \
+              RESTORE_PRIVATE_RECOVERY_PLAN_FILE=/tmp/restore-replay/recovery-plan.json \
+              pnpm --silent --filter @masters/db backup:restore-recovery-plan >"/tmp/restore-recovery-plan-${attempt}.json"
+          done
+          cmp /tmp/restore-recovery-plan-first.json /tmp/restore-recovery-plan-second.json
+          test ! -e /tmp/restore-replay/recovery-plan.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          result = json.loads(Path('/tmp/restore-recovery-plan-first.json').read_text())
+          assert result['mode'] == 'ISOLATED_RESTORE_RECOVERY_PLAN'
+          assert result['status'] == 'NOT_REQUIRED'
+          assert result['promotionAllowed'] is False
+          assert result['planCreated'] is False
+          assert result['plan'] is None
+          assert result['healthcheck']['status'] == 'HEALTHY'
+          assert result['assessment']['status'] == 'NOT_REQUIRED'
           PY
 
       - name: Verify read-only healthy restore healthcheck CLI
