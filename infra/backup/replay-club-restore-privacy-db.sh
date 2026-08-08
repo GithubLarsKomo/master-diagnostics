@@ -38,6 +38,7 @@ source_root="${staging_root}/${staging_name}"
 manifest_path="${source_root}/manifest.json"
 workspace="${replay_root}/${staging_name}"
 recovery_plan_path="${workspace}/recovery-plan.json"
+recovery_intent_dir="${workspace}/recovery-execution"
 required_sources=(libsql reports tenant-exports data-subject-delivery)
 
 if [[ ! -f "${manifest_path}" ]]; then
@@ -75,6 +76,14 @@ else
   done
 fi
 chmod 0700 "${workspace}"
+if [[ -L "${recovery_plan_path}" ]]; then
+  echo "Restore recovery plan must not be a symlink: ${recovery_plan_path}" >&2
+  exit 1
+fi
+if [[ -e "${recovery_intent_dir}" && ( ! -d "${recovery_intent_dir}" || -L "${recovery_intent_dir}" ) ]]; then
+  echo "Restore recovery intent path exists but is unsafe: ${recovery_intent_dir}" >&2
+  exit 1
+fi
 
 export RESTORE_STAGING_NAME="${staging_name}"
 compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" -f "${RECOVERY_COMPOSE_FILE}")
@@ -93,6 +102,8 @@ require_recovery_intent_key() {
 
 run_recovery_executor() {
   require_recovery_intent_key
+  mkdir -p "${recovery_intent_dir}"
+  chmod 0700 "${recovery_intent_dir}"
   "${compose[@]}" --profile backup run --rm \
     -e "RESTORE_STAGING_MANIFEST=/restore-staging/${staging_name}/manifest.json" \
     backup-restore-recovery-execute
@@ -135,6 +146,10 @@ fi
   -e "RESTORE_STAGING_MANIFEST=/restore-staging/${staging_name}/manifest.json" \
   backup-restore-recovery-plan
 
+if [[ -L "${recovery_plan_path}" ]]; then
+  echo "Restore recovery plan must not be a symlink: ${recovery_plan_path}" >&2
+  exit 1
+fi
 if [[ -f "${recovery_plan_path}" ]]; then
   run_recovery_executor
 fi
