@@ -6,6 +6,7 @@ import {
   ensureSignedRestorePrivateRecoveryIntent,
 } from './services/restore-private-recovery-intent';
 import type { RestorePrivateRecoveryPlan } from './services/restore-private-recovery-plan';
+import { ensureSignedRestorePrivateRecoveryReceipt } from './services/restore-private-recovery-receipt';
 import { createRestorePrivacyReconciliationReportFromStorage } from './services/restore-privacy-reconciliation-report';
 
 const CANONICAL_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -88,11 +89,23 @@ async function main(): Promise<void> {
     intentKeyFile,
     roots: { reportRoot, tenantExportRoot, dataSubjectDeliveryRoot },
   });
+  const receipt = await ensureSignedRestorePrivateRecoveryReceipt({
+    targetDir: intentDir,
+    keyFile: intentKeyFile,
+    intentFile: intent.path,
+    plan,
+    reconciliation,
+    executionResult: result,
+    completedAt: new Date().toISOString(),
+  });
 
   process.stdout.write(`${JSON.stringify({
     ...result,
     intentCreated: intent.created,
     intentReused: !intent.created,
+    receiptCreated: receipt.created,
+    receiptReused: !receipt.created,
+    recoveryCompletedAt: receipt.envelope.record.recoveryCompletedAt,
   })}\n`);
 }
 
