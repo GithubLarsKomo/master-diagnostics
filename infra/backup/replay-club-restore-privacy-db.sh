@@ -76,7 +76,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"${compose[@]}" --profile backup build backup-privacy-replay-migrate backup-privacy-artifact-plan backup-privacy-replay
+"${compose[@]}" --profile backup build \
+  backup-privacy-replay-migrate \
+  backup-privacy-artifact-plan \
+  backup-privacy-replay \
+  backup-privacy-artifact-replay
 "${compose[@]}" --profile backup run --rm backup-privacy-replay-migrate
 "${compose[@]}" --profile backup run --rm \
   -e "RESTORE_STAGING_MANIFEST=/restore-staging/${staging_name}/manifest.json" \
@@ -84,3 +88,6 @@ trap cleanup EXIT
 "${compose[@]}" --profile backup run --rm \
   -e "RESTORE_STAGING_MANIFEST=/restore-staging/${staging_name}/manifest.json" \
   backup-privacy-replay
+"${compose[@]}" --profile backup run --rm \
+  -e "RESTORE_STAGING_MANIFEST=/restore-staging/${staging_name}/manifest.json" \
+  backup-privacy-artifact-replay

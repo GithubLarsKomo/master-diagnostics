@@ -2,9 +2,9 @@
 
 ## Zweck
 
-Der Restore-DB-Replay entfernt absichtlich Report-, Tenant-Export- und Betroffenenexport-Metadaten aus der privaten Restore-Datenbank. Die zugehörigen Dateien liegen jedoch in separaten Storage-Verzeichnissen. Deshalb müssen deren technischen Storage-Referenzen **vor** dem DB-Replay unveränderlich festgehalten werden, damit ein späterer Artifact-Replay die privaten Restore-Kopien vollständig bereinigen kann.
+Der Restore-DB-Replay entfernt absichtlich Report-, Tenant-Export- und Betroffenenexport-Metadaten aus der privaten Restore-Datenbank. Die zugehörigen Dateien liegen jedoch in separaten Storage-Verzeichnissen. Deshalb werden deren technische Storage-Referenzen **vor** dem DB-Replay unveränderlich festgehalten und **nach** dem erfolgreichen DB-Replay ausschließlich auf der privaten Restore-Kopie entfernt.
 
-Der Artifact-Plan ist kein Promotion-Gate und löscht in diesem Slice noch keine Datei.
+Dieser Pfad bleibt ein Vorbereitungs- und Verifikationsschritt. Er erlaubt noch keine Promotion.
 
 ## Private Restore-Arbeitskopie
 
@@ -54,13 +54,51 @@ Das entspricht dem Datenbank-Replay, der die zugehörigen Tenant-Export-Metadate
 
 ## Fail-closed Pfadvalidierung
 
-Storage-Referenzen werden vor Aufnahme in den Plan gegen dieselben technischen Konventionen wie die produktiven Storage-Adapter geprüft:
+Storage-Referenzen werden bereits bei der Manifest-Erzeugung gegen die produktiven technischen Konventionen geprüft. Der eigentliche Artifact-Replay validiert zusätzlich vor jeder Mutation:
 
-- Reports: relative `.pdf`-Pfade ohne Traversal; zusätzlich Tenant-/Test-Scope aus der Restore-DB,
-- Tenant-Exports: sichere `.mde`-Referenzen,
-- Betroffenenexporte: UUID-basierte `.mdse`-Referenzen.
+- alle drei Storage-Roots sind absolute, existierende, voneinander getrennte Nicht-Symlink-Verzeichnisse,
+- Reports bleiben relative `.pdf`-Pfade im gebundenen Tenant-Scope,
+- Tenant-Exports bleiben sichere `.mde`-Referenzen,
+- Betroffenenexporte bleiben UUID-basierte `.mdse`-Referenzen,
+- kein Referenzpfad ist absolut, enthält `..` oder Windows-Backslashes,
+- kein existierender Pfadbestandteil vom Storage-Root bis zum Ziel ist ein Symlink,
+- ein vorhandenes Ziel muss eine reguläre Datei sein.
 
-Absolute Pfade, `..`, Scope-Abweichungen oder unbekannte Typen blockieren die Planerstellung.
+Damit kann ein manipuliertes oder unerwartetes Verzeichnislayout den Replay nicht aus der privaten Storage-Kopie herausführen.
+
+## Replay und idempotente Abwesenheit
+
+`backup:privacy-artifact-replay` startet erst nach erfolgreichem `backup-privacy-replay`.
+
+Für jeden manifestierten Eintrag gilt:
+
+1. Zielpfad im passenden privaten Storage-Root erneut validieren.
+2. Vorhandene reguläre Datei löschen.
+3. Bereits fehlende Datei als idempotent erfüllte Privacy-Anforderung akzeptieren.
+4. Nach dem gesamten Durchlauf jeden Manifest-Eintrag erneut prüfen und nur fortfahren, wenn alle gebundenen Zielartefakte tatsächlich abwesend sind.
+
+Nicht manifestierte Dateien werden nicht angefasst. Insbesondere werden `.anonymization-quarantine`-Bestände aus einem bereits zum Backup-Zeitpunkt laufenden Anonymisierungsvorgang in diesem Slice bewusst **nicht** pauschal gelöscht. Deren Konsistenz gehört in den nachfolgenden Restore-Healthcheck, weil sie den Datenbankzustand am Backup-Cutoff widerspiegeln können.
+
+## Artifact Replay Result v1
+
+Nach vollständig verifizierter Abwesenheit schreibt der Replay deterministisch:
+
+```text
+artifact-replay-result.json
+```
+
+Der technische Abschlussnachweis enthält nur:
+
+- Result-/Manifest-Version,
+- Backup-Cutoff und Reconciliation-Status,
+- Obligation-Anzahl und -Fingerprint,
+- Entry-Anzahl und -Fingerprint,
+- Anzahl der als abwesend verifizierten Manifest-Einträge,
+- `promotionAllowed: false`.
+
+Er enthält absichtlich keinen Laufzeitstempel und keine variablen „gelöscht vs. schon fehlend“-Zähler. Dadurch ist der persistierte Nachweis bei jedem Retry byte-identisch. Der erste Write erfolgt mit `0600` im `0700`-Workspace; identische Wiederholungen sind idempotent, abweichender bestehender Inhalt blockiert fail-closed.
+
+Die CLI-Ausgabe darf für die aktuelle Ausführung zusätzlich `removedCount` und `alreadyAbsentCount` melden; diese Werte sind nicht Teil des unveränderlichen Abschlussnachweises.
 
 ## Determinismus und Retry
 
@@ -71,33 +109,36 @@ Beim ersten Lauf wird es mit Dateimodus `0600` in einem privaten `0700`-Workspac
 1. Existiert noch kein Manifest, wird es aus der privaten Restore-DB vor dem DB-Replay aufgebaut.
 2. Existiert bereits ein Manifest, wird es ausschließlich gegen die aktuell verifizierte Ledger-/Journal-Reconciliation validiert.
 3. Stimmt die Evidenzbindung, wird der bestehende Plan unverändert wiederverwendet.
-4. Abweichende Evidenz, Fingerprints, Entries oder Scope-Bindungen blockieren fail-closed.
+4. Vor dem Artifact-Replay wird ein vorhandenes `artifact-replay-result.json` ebenfalls gegen genau dieses verifizierte Manifest geprüft.
+5. Der Dateireplay selbst ist idempotent: bereits abwesende Zielartefakte bleiben ein erfüllter Zustand.
+6. Abweichende Evidenz, Fingerprints, Entries, Scope-Bindungen oder ein widersprüchlicher Abschlussnachweis blockieren fail-closed.
 
-Damit bleibt der gesamte Restore-Replay auch nach einem bereits erfolgreich angewandten DB-Replay idempotent wiederholbar.
+Damit bleibt der gesamte Restore-Replay auch nach einem bereits erfolgreich angewandten DB- und Artifact-Replay wiederholbar.
 
 ## Compose-Reihenfolge
 
-Der private Restore-Pfad lautet:
+Der private Restore-Pfad lautet jetzt:
 
 ```text
 private workspace copy
   -> backup-privacy-replay-migrate
   -> backup-privacy-artifact-plan
   -> backup-privacy-replay
+  -> backup-privacy-artifact-replay
 ```
 
-`backup-privacy-artifact-plan` läuft ausschließlich im internen Netzwerk `restore-internal`, liest Restore-Manifest, Ledger, Journal und Keys read-only und besitzt genau einen schreibbaren Restore-Mount: den privaten Workspace auf `/restore-replay`.
+`backup-privacy-artifact-plan` und `backup-privacy-artifact-replay` laufen ausschließlich im internen Netzwerk `restore-internal`. Restore-Manifest, Ledger, Journal und Keys sind read-only eingebunden. Der einzige schreibbare Restore-Mount ist jeweils der private Workspace auf `/restore-replay`.
 
-Produktive libSQL-, Report-, Export-, Betroffenenexport- oder Caddy-Volumes werden nicht eingebunden.
+Der Artifact-Replay erhält keine produktiven libSQL-, Report-, Export-, Betroffenenexport- oder Caddy-Volumes. Seine drei löschbaren Storage-Roots liegen ausschließlich unter `/restore-replay`.
 
 ## Scope-Grenze
 
-Dieser Slice bewahrt nur die Löschinformation und die privaten Artifact-Kopien. Er entfernt noch keine Artifact-Dateien und setzt `promotionAllowed` nicht auf `true`.
+Mit diesem Slice sind post-backup Privacy-Obligations auf der privaten Restore-Kopie sowohl in der Datenbank als auch für die vor dem DB-Replay inventarisierten aktiven Storage-Artefakte replaybar und technisch nachweisbar.
 
-Nächster Slice:
+Noch offen bleiben insbesondere:
 
-1. `artifact-replay-manifest.json` verifizieren,
-2. referenzierte Dateien ausschließlich in `reports/`, `tenant-exports/` und `data-subject-delivery/` des privaten Workspaces entfernen oder ihre Abwesenheit idempotent nachweisen,
-3. ein technisches Artifact-Replay-Ergebnis mit verbleibenden Blockern erzeugen.
+1. Healthcheck des vollständigen privaten Restore-Zustands, einschließlich transienter/quarantänierter Artifact-Zustände am Backup-Cutoff,
+2. kontrolliertes Promotion-Gate, das DB-Replay, Artifact-Replay und Healthcheck gemeinsam bindet,
+3. Restore-Audit und praktischer RTO-Drill.
 
-Erst danach folgen Healthcheck, kontrollierte Promotion, Restore-Audit und praktischer RTO-Drill. Bis dahin bleibt `PRIVACY_BACKUP_STATE=DISABLED`.
+Bis diese Punkte abgeschlossen sind, bleibt `PRIVACY_BACKUP_STATE=DISABLED` und jeder Artifact-Replay-Output enthält `promotionAllowed: false`.

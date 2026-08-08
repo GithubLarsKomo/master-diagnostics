@@ -1,4 +1,4 @@
-name: Restore Artifact Plan Contract
+name: Restore Artifact Replay Contract
 
 on:
   pull_request:
@@ -9,6 +9,7 @@ on:
       - 'infra/docker-compose.club.yml'
       - 'packages/db/**'
       - 'docs/restore-privacy-reconciliation.md'
+      - 'docs/restore-privacy-artifact-replay.md'
   push:
     branches: [main]
     paths:
@@ -18,6 +19,7 @@ on:
       - 'infra/docker-compose.club.yml'
       - 'packages/db/**'
       - 'docs/restore-privacy-reconciliation.md'
+      - 'docs/restore-privacy-artifact-replay.md'
 
 jobs:
   contract:
@@ -43,7 +45,7 @@ jobs:
       - name: Verify replay wrapper syntax
         run: bash -n infra/backup/replay-club-restore-privacy-db.sh
 
-      - name: Verify private artifact-plan Compose contract
+      - name: Verify private artifact replay Compose contract
         run: |
           cp .env.example .env
           sed -i 's/diagnostics.example.org/localhost/g' .env
@@ -57,6 +59,7 @@ jobs:
 
           plan = config['services']['backup-privacy-artifact-plan']
           replay = config['services']['backup-privacy-replay']
+          artifact = config['services']['backup-privacy-artifact-replay']
           replay_db = config['services']['backup-privacy-replay-db']
           migrate = config['services']['backup-privacy-replay-migrate']
 
@@ -64,14 +67,20 @@ jobs:
           assert plan['environment']['RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE'] == '/restore-replay/artifact-replay-manifest.json'
           assert plan['depends_on']['backup-privacy-replay-migrate']['condition'] == 'service_completed_successfully'
           assert replay['depends_on']['backup-privacy-artifact-plan']['condition'] == 'service_completed_successfully'
+          assert artifact['depends_on']['backup-privacy-replay']['condition'] == 'service_completed_successfully'
+          assert artifact['environment']['RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE'] == '/restore-replay/artifact-replay-manifest.json'
+          assert artifact['environment']['RESTORE_PRIVACY_ARTIFACT_RESULT_FILE'] == '/restore-replay/artifact-replay-result.json'
+          assert artifact['environment']['RESTORE_PRIVACY_REPORT_ROOT'] == '/restore-replay/reports'
+          assert artifact['environment']['RESTORE_PRIVACY_TENANT_EXPORT_ROOT'] == '/restore-replay/tenant-exports'
+          assert artifact['environment']['RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT'] == '/restore-replay/data-subject-delivery'
           assert set(plan.get('networks', {})) == {'restore-internal'}
           assert set(replay.get('networks', {})) == {'restore-internal'}
+          assert set(artifact.get('networks', {})) == {'restore-internal'}
           assert set(replay_db.get('networks', {})) == {'restore-internal'}
           assert set(migrate.get('networks', {})) == {'restore-internal'}
           assert config['networks']['restore-internal']['internal'] is True
 
-          mounts = {volume.get('target'): volume for volume in plan.get('volumes', [])}
-          assert set(mounts) == {
+          expected_targets = {
               '/restore-staging',
               '/privacy-ledger',
               '/run/secrets/restore-privacy-ledger.key',
@@ -79,13 +88,16 @@ jobs:
               '/run/secrets/restore-privacy-effect-journal.key',
               '/restore-replay',
           }
-          for target, volume in mounts.items():
-              if target == '/restore-replay':
-                  assert volume.get('read_only') is not True
-                  assert volume.get('type') == 'bind'
-                  assert volume['source'].endswith('/restore-privacy-replay/restore-unset')
-              else:
-                  assert volume.get('read_only') is True
+          for service in (plan, artifact):
+              mounts = {volume.get('target'): volume for volume in service.get('volumes', [])}
+              assert set(mounts) == expected_targets
+              for target, volume in mounts.items():
+                  if target == '/restore-replay':
+                      assert volume.get('read_only') is not True
+                      assert volume.get('type') == 'bind'
+                      assert volume['source'].endswith('/restore-privacy-replay/restore-unset')
+                  else:
+                      assert volume.get('read_only') is True
 
           production_targets = {
               '/var/lib/sqld',
@@ -95,7 +107,8 @@ jobs:
               '/data',
               '/config',
           }
-          assert production_targets.isdisjoint(mounts)
+          artifact_mounts = {volume.get('target') for volume in artifact.get('volumes', [])}
+          assert production_targets.isdisjoint(artifact_mounts)
           assert replay_db['volumes'][0]['target'] == '/var/lib/sqld'
           assert replay_db['volumes'][0]['source'].endswith('/restore-privacy-replay/restore-unset/libsql')
           PY
@@ -104,7 +117,13 @@ jobs:
         run: |
           rm -f "${{ github.workspace }}/restore-artifact-plan-ci.db"
           pnpm --silent --filter @masters/db db:migrate
-          mkdir -p /tmp/restore-staging/restore-ci /tmp/restore-privacy-ledger /tmp/restore-privacy-effect-journal /tmp/restore-replay
+          mkdir -p \
+            /tmp/restore-staging/restore-ci \
+            /tmp/restore-privacy-ledger \
+            /tmp/restore-privacy-effect-journal \
+            /tmp/restore-replay/reports \
+            /tmp/restore-replay/tenant-exports \
+            /tmp/restore-replay/data-subject-delivery
           cat >/tmp/restore-staging/restore-ci/manifest.json <<'JSON'
           {
             "bundleVersion": 1,
@@ -167,4 +186,50 @@ jobs:
           assert manifest['entryCount'] == 0
           assert (manifest_path.stat().st_mode & 0o777) == 0o600
           assert (manifest_path.parent.stat().st_mode & 0o777) == 0o700
+          PY
+
+      - name: Verify deterministic artifact replay CLI
+        run: |
+          for attempt in first second; do
+            env \
+              RESTORE_STAGING_MANIFEST=/tmp/restore-staging/restore-ci/manifest.json \
+              RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-privacy-ledger \
+              RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-privacy-ledger.key \
+              RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-privacy-effect-journal \
+              RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-privacy-effect-journal.key \
+              RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE=/tmp/restore-replay/artifact-replay-manifest.json \
+              RESTORE_PRIVACY_ARTIFACT_RESULT_FILE=/tmp/restore-replay/artifact-replay-result.json \
+              RESTORE_PRIVACY_REPORT_ROOT=/tmp/restore-replay/reports \
+              RESTORE_PRIVACY_TENANT_EXPORT_ROOT=/tmp/restore-replay/tenant-exports \
+              RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT=/tmp/restore-replay/data-subject-delivery \
+              pnpm --silent --filter @masters/db backup:privacy-artifact-replay >"/tmp/artifact-replay-${attempt}.json"
+          done
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          first = json.loads(Path('/tmp/artifact-replay-first.json').read_text())
+          second = json.loads(Path('/tmp/artifact-replay-second.json').read_text())
+          result_path = Path('/tmp/restore-replay/artifact-replay-result.json')
+          result = json.loads(result_path.read_text())
+
+          assert first['mode'] == 'ISOLATED_RESTORE_ARTIFACT_REPLAY'
+          assert first['reconciliationStatus'] == 'CLEAR'
+          assert first['entryCount'] == 0
+          assert first['removedCount'] == 0
+          assert first['alreadyAbsentCount'] == 0
+          assert first['verifiedAbsentCount'] == 0
+          assert first['resultCreated'] is True
+          assert first['resultReused'] is False
+          assert first['promotionAllowed'] is False
+          assert second['resultCreated'] is False
+          assert second['resultReused'] is True
+          assert second['entriesFingerprint'] == first['entriesFingerprint']
+          assert second['obligationsFingerprint'] == first['obligationsFingerprint']
+          assert result['resultVersion'] == 1
+          assert result['manifestVersion'] == 1
+          assert result['verifiedAbsentCount'] == 0
+          assert result['promotionAllowed'] is False
+          assert (result_path.stat().st_mode & 0o777) == 0o600
+          assert (result_path.parent.stat().st_mode & 0o777) == 0o700
           PY
