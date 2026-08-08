@@ -42,13 +42,8 @@ jobs:
           bash -n infra/backup/authorize-club-restore-promotion.sh
           python3 - <<'PY'
           from pathlib import Path
-
           script = Path('infra/backup/authorize-club-restore-promotion.sh').read_text()
-          active = '\n'.join(
-              line for line in script.splitlines()
-              if not line.lstrip().startswith('#')
-          )
-
+          active = '\n'.join(line for line in script.splitlines() if not line.lstrip().startswith('#'))
           assert 'docker-compose.restore-promotion.yml' in active
           assert 'backup-restore-promotion-intent' in active
           assert 'backup-privacy-replay-migrate' in active
@@ -57,20 +52,15 @@ jobs:
           assert 'promotion_dir="${workspace}/promotion"' in active
           assert 'chmod 0700 "${promotion_dir}"' in active
           assert 'RESTORE_STAGING_MANIFEST=/restore-staging/${staging_name}/manifest.json' in active
-
-          forbidden_services = (
+          for service in (
               'backup-privacy-artifact-plan',
               'backup-privacy-replay ',
               'backup-privacy-artifact-replay',
               'backup-restore-recovery-plan',
               'backup-restore-recovery-execute',
-          )
-          for service in forbidden_services:
+          ):
               assert service not in active
-
-          migrate = active.rindex('backup-privacy-replay-migrate')
-          authorize = active.rindex('backup-restore-promotion-intent')
-          assert migrate < authorize
+          assert active.rindex('backup-privacy-replay-migrate') < active.rindex('backup-restore-promotion-intent')
           PY
 
       - name: Verify read-only active volume resolver
@@ -78,7 +68,6 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-
           root = Path('/tmp/restore-volume-resolution')
           root.mkdir(parents=True, exist_ok=True)
           compose = {
@@ -124,7 +113,6 @@ jobs:
           root.joinpath('app.json').write_text(json.dumps(app))
           root.joinpath('libsql.json').write_text(json.dumps(libsql))
           PY
-
           python3 infra/backup/resolve-active-club-volumes.py \
             --compose-json /tmp/restore-volume-resolution/compose.json \
             --app-inspect-json /tmp/restore-volume-resolution/app.json \
@@ -137,7 +125,6 @@ jobs:
           infra_data-subject-delivery-data
           EOF
           ) /tmp/resolved-volumes.txt
-
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -159,12 +146,8 @@ jobs:
           bash -n infra/backup/prepare-club-restore-promotion-plan.sh
           python3 - <<'PY'
           from pathlib import Path
-
           script = Path('infra/backup/prepare-club-restore-promotion-plan.sh').read_text()
-          active = '\n'.join(
-              line for line in script.splitlines()
-              if not line.lstrip().startswith('#')
-          )
+          active = '\n'.join(line for line in script.splitlines() if not line.lstrip().startswith('#'))
           assert 'config --format json' in active
           assert 'ps -q "${service}"' in active
           assert 'docker inspect "${app_container_id}"' in active
@@ -177,8 +160,7 @@ jobs:
           assert 'RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME' in active
           assert 'RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME' in active
           assert 'promotion-intent.json' in active
-
-          forbidden = (
+          for token in (
               'docker volume create',
               'docker volume rm',
               'docker cp ',
@@ -187,10 +169,8 @@ jobs:
               'backup-privacy-replay ',
               'backup-privacy-artifact-replay',
               'backup-restore-recovery-execute',
-          )
-          for token in forbidden:
+          ):
               assert token not in active
-
           assert active.rindex('backup-privacy-replay-migrate') < active.rindex('backup-restore-promotion-plan')
           PY
 
@@ -199,12 +179,8 @@ jobs:
           bash -n infra/backup/prepare-club-restore-promotion-candidates.sh
           python3 - <<'PY'
           from pathlib import Path
-
           script = Path('infra/backup/prepare-club-restore-promotion-candidates.sh').read_text()
-          active = '\n'.join(
-              line for line in script.splitlines()
-              if not line.lstrip().startswith('#')
-          )
+          active = '\n'.join(line for line in script.splitlines() if not line.lstrip().startswith('#'))
           assert 'promotion-intent.json' in active
           assert 'promotion-execution-plan.json' in active
           assert 'backup:restore-promotion-candidates-authorize' in active
@@ -219,14 +195,12 @@ jobs:
           assert 'com.master-diagnostics.restore.rollback-volume' in active
           assert 'backup-restore-promotion-candidate-copy' in active
           assert '--no-deps' in active
-
           authorize = active.index('backup:restore-promotion-candidates-authorize')
           stop_db = active.index('cleanup_private_db', authorize)
           create_volume = active.index('docker volume create', stop_db)
           copy_candidate = active.rindex('backup-restore-promotion-candidate-copy')
           assert authorize < stop_db < create_volume < copy_candidate
-
-          forbidden = (
+          for token in (
               'docker volume rm',
               'docker cp ',
               'docker compose down',
@@ -235,8 +209,7 @@ jobs:
               'backup-privacy-artifact-replay',
               'backup-restore-recovery-execute',
               '-v "${active_',
-          )
-          for token in forbidden:
+          ):
               assert token not in active
           PY
 
@@ -253,10 +226,8 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-
           with open('/tmp/restore-promotion-compose.json', encoding='utf-8') as handle:
               config = json.load(handle)
-
           expected_targets = {
               '/restore-staging',
               '/privacy-ledger',
@@ -276,7 +247,6 @@ jobs:
               '/config',
               '/var/run/docker.sock',
           }
-
           for service_name, command in (
               ('backup-restore-promotion-intent', 'backup:restore-promotion-intent'),
               ('backup-restore-promotion-plan', 'backup:restore-promotion-plan'),
@@ -298,7 +268,6 @@ jobs:
               assert config['networks']['restore-internal']['internal'] is True
               assert set(service.get('depends_on', {})) == {'backup-privacy-replay-db'}
               assert service['depends_on']['backup-privacy-replay-db']['condition'] == 'service_healthy'
-
               mounts = {volume.get('target'): volume for volume in service.get('volumes', [])}
               assert set(mounts) == expected_targets
               for target, volume in mounts.items():
@@ -324,6 +293,7 @@ jobs:
 
           copy = config['services']['backup-restore-promotion-candidate-copy']
           assert copy['command'][-1] == 'backup:restore-promotion-candidate-copy'
+          assert '--silent' in copy['command']
           assert copy.get('network_mode') == 'none'
           assert not copy.get('depends_on')
           mounts = {volume.get('target'): volume for volume in copy.get('volumes', [])}
@@ -332,7 +302,7 @@ jobs:
           assert mounts['/restore-replay']['read_only'] is True
           assert mounts['/candidate']['type'] == 'volume'
           assert mounts['/candidate'].get('read_only') is not True
-          assert mounts['/candidate']['source'] == 'restore-promotion-candidate-contract'
+          assert mounts['/candidate']['source'] == 'restore-promotion-candidate'
           assert production_targets.isdisjoint(mounts)
           candidate = config['volumes']['restore-promotion-candidate']
           assert candidate['external'] is True
