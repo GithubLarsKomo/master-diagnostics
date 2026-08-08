@@ -4,6 +4,7 @@ import { createDatabase } from './client';
 import {
   buildRestorePrivacyArtifactReplayManifest,
   persistRestorePrivacyArtifactReplayManifest,
+  readVerifiedRestorePrivacyArtifactReplayManifestIfPresent,
 } from './services/restore-privacy-artifact-replay-manifest';
 import { createRestorePrivacyReconciliationReportFromStorage } from './services/restore-privacy-reconciliation-report';
 
@@ -57,9 +58,11 @@ async function main(): Promise<void> {
     throw new Error(`Restore privacy reconciliation is blocked: ${report.blockers.map((item) => item.code).join(', ')}`);
   }
 
-  const db = createDatabase();
-  const artifactManifest = await buildRestorePrivacyArtifactReplayManifest(db, report);
-  const persisted = await persistRestorePrivacyArtifactReplayManifest(outputFile, artifactManifest);
+  const existing = await readVerifiedRestorePrivacyArtifactReplayManifestIfPresent(outputFile, report);
+  const artifactManifest = existing ?? await buildRestorePrivacyArtifactReplayManifest(createDatabase(), report);
+  const persisted = existing
+    ? { created: false, manifest: artifactManifest }
+    : await persistRestorePrivacyArtifactReplayManifest(outputFile, artifactManifest);
 
   process.stdout.write(`${JSON.stringify({
     mode: 'RESTORE_PRIVACY_ARTIFACT_REPLAY_PLAN',
@@ -70,6 +73,7 @@ async function main(): Promise<void> {
     obligationsFingerprint: artifactManifest.obligationsFingerprint,
     entriesFingerprint: artifactManifest.entriesFingerprint,
     created: persisted.created,
+    reused: existing !== null,
     promotionAllowed: false,
   })}\n`);
 }
