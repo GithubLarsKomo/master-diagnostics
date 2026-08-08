@@ -1,10 +1,7 @@
 import { isAbsolute } from 'node:path';
 import { createDatabase } from './client';
-import {
-  readVerifiedRestorePrivatePromotionExecutionPlan,
-  type RestorePrivatePromotionActiveVolumeSet,
-} from './services/restore-private-promotion-execution-plan';
-import { assessRestorePrivatePromotionExecutionPreflight } from './services/restore-private-promotion-execution-preflight';
+import type { RestorePrivatePromotionActiveVolumeSet } from './services/restore-private-promotion-execution-plan';
+import { verifyRestorePrivatePromotionCandidatePlanFromReadiness } from './services/restore-private-promotion-candidate-plan';
 import {
   assessRestorePrivatePromotionReadinessFromStorage,
   restorePrivatePromotionStoragePathsFromEnvironment,
@@ -54,21 +51,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  const promotionIntentFile = requireAbsoluteEnvironmentPath('RESTORE_PRIVATE_PROMOTION_INTENT_FILE');
-  const promotionKeyFile = requireAbsoluteEnvironmentPath('RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE');
-  const executionPlanFile = requireAbsoluteEnvironmentPath('RESTORE_PRIVATE_PROMOTION_EXECUTION_PLAN_FILE');
-  const activeVolumes = activeVolumesFromEnvironment();
-  const preflight = await assessRestorePrivatePromotionExecutionPreflight(
-    readiness,
-    promotionIntentFile,
-    promotionKeyFile,
-  );
-  const plan = await readVerifiedRestorePrivatePromotionExecutionPlan(
-    executionPlanFile,
-    promotionKeyFile,
-    preflight,
-    activeVolumes,
-  );
+  const verified = await verifyRestorePrivatePromotionCandidatePlanFromReadiness(readiness, {
+    promotionIntentFile: requireAbsoluteEnvironmentPath('RESTORE_PRIVATE_PROMOTION_INTENT_FILE'),
+    promotionKeyFile: requireAbsoluteEnvironmentPath('RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE'),
+    executionPlanFile: requireAbsoluteEnvironmentPath('RESTORE_PRIVATE_PROMOTION_EXECUTION_PLAN_FILE'),
+    activeVolumes: activeVolumesFromEnvironment(),
+  });
 
   process.stdout.write(`${JSON.stringify({
     mode: MODE,
@@ -77,13 +65,13 @@ async function main(): Promise<void> {
     candidateMutationAllowed: true,
     productionMutationAllowed: false,
     promotionExecuted: false,
-    backupCutoff: plan.record.backupCutoff,
-    executionFingerprint: preflight.executionFingerprint,
-    planFingerprint: plan.record.planFingerprint,
-    planSignature: plan.signature,
-    candidateSetId: plan.record.candidateSetId,
-    activeVolumeSetFingerprint: plan.record.activeVolumeSetFingerprint,
-    volumes: plan.record.volumes,
+    backupCutoff: verified.plan.record.backupCutoff,
+    executionFingerprint: verified.preflight.executionFingerprint,
+    planFingerprint: verified.plan.record.planFingerprint,
+    planSignature: verified.plan.signature,
+    candidateSetId: verified.plan.record.candidateSetId,
+    activeVolumeSetFingerprint: verified.plan.record.activeVolumeSetFingerprint,
+    volumes: verified.plan.record.volumes,
   })}\n`);
 }
 
