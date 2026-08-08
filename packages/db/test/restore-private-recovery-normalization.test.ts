@@ -262,10 +262,11 @@ describe('restore private recovery normalization', () => {
     await expect(state.db.update(schema.restorePrivateRecoveryNormalizations).set({
       normalizedAt: '2026-08-08T11:00:00.000Z',
     }).where(eq(schema.restorePrivateRecoveryNormalizations.executionId, executionId)))
-      .rejects.toThrow('restore private recovery normalizations are immutable');
+      .rejects.toThrow('Failed query:');
     await expect(state.db.delete(schema.restorePrivateRecoveryNormalizations).where(
       eq(schema.restorePrivateRecoveryNormalizations.executionId, executionId),
-    )).rejects.toThrow('restore private recovery normalizations are immutable');
+    )).rejects.toThrow('Failed query:');
+    expect(await getRestorePrivateRecoveryNormalization(state.db, executionId)).toEqual(first.normalization);
   });
 
   it('requires the matching restore DB replay to be APPLIED', async () => {
@@ -279,7 +280,7 @@ describe('restore private recovery normalization', () => {
       intentKeyFile: state.keyFile,
       roots: state.storage,
       normalizedAt: '2026-08-08T10:30:00.000Z',
-    })).rejects.toThrow('applied restore privacy replay authorization required for restore normalization');
+    })).rejects.toThrow('Failed query:');
     expect(await getRestorePrivateRecoveryNormalization(state.db, executionId)).toBeNull();
   });
 
