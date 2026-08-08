@@ -247,6 +247,48 @@ if [[ ${#candidate_rows[@]} -ne 4 ]]; then
   exit 1
 fi
 
+verify_candidate_volume() {
+  local role="$1"
+  local active_volume="$2"
+  local candidate_volume="$3"
+  local plan_fingerprint="$4"
+  local candidate_set="$5"
+
+  docker volume inspect "${candidate_volume}" >"${tmp_dir}/volume-inspect.json"
+  python3 - "${tmp_dir}/volume-inspect.json" "${candidate_volume}" "${role}" "${active_volume}" "${plan_fingerprint}" "${candidate_set}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+record = json.loads(Path(sys.argv[1]).read_text())
+if not isinstance(record, list) or len(record) != 1:
+    raise SystemExit('Candidate volume inspect result is invalid')
+volume = record[0]
+if volume.get('Name') != sys.argv[2]:
+    raise SystemExit('Candidate volume inspect returned a different name')
+if volume.get('Driver') != 'local' or volume.get('Scope') != 'local':
+    raise SystemExit('Candidate volume must use the local Docker volume driver/scope')
+labels = volume.get('Labels') or {}
+expected = {
+    'com.master-diagnostics.restore.promotion-candidate': 'true',
+    'com.master-diagnostics.restore.plan-fingerprint': sys.argv[5],
+    'com.master-diagnostics.restore.candidate-set': sys.argv[6],
+    'com.master-diagnostics.restore.role': sys.argv[3],
+    'com.master-diagnostics.restore.rollback-volume': sys.argv[4],
+}
+for key, value in expected.items():
+    if labels.get(key) != value:
+        raise SystemExit(f'Candidate volume label mismatch: {key}')
+PY
+
+  local users=()
+  mapfile -t users < <(docker ps -aq --filter "volume=${candidate_volume}" | awk 'NF')
+  if [[ ${#users[@]} -ne 0 ]]; then
+    echo "Candidate volume is already attached to ${#users[@]} container(s): ${candidate_volume}" >&2
+    exit 1
+  fi
+}
+
 ensure_candidate_volume() {
   local role="$1"
   local active_volume="$2"
@@ -254,37 +296,23 @@ ensure_candidate_volume() {
   local plan_fingerprint="$4"
   local candidate_set="$5"
 
-  if docker volume inspect "${candidate_volume}" >"${tmp_dir}/volume-inspect.json" 2>/dev/null; then
-    python3 - "${tmp_dir}/volume-inspect.json" "${role}" "${active_volume}" "${plan_fingerprint}" "${candidate_set}" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-record = json.loads(Path(sys.argv[1]).read_text())
-if not isinstance(record, list) or len(record) != 1:
-    raise SystemExit('Existing candidate volume inspect result is invalid')
-labels = record[0].get('Labels') or {}
-expected = {
-    'com.master-diagnostics.restore.promotion-candidate': 'true',
-    'com.master-diagnostics.restore.plan-fingerprint': sys.argv[4],
-    'com.master-diagnostics.restore.candidate-set': sys.argv[5],
-    'com.master-diagnostics.restore.role': sys.argv[2],
-    'com.master-diagnostics.restore.rollback-volume': sys.argv[3],
-}
-for key, value in expected.items():
-    if labels.get(key) != value:
-        raise SystemExit(f'Existing candidate volume label mismatch: {key}')
-PY
-    return
+  if ! docker volume inspect "${candidate_volume}" >/dev/null 2>&1; then
+    docker volume create \
+      --label 'com.master-diagnostics.restore.promotion-candidate=true' \
+      --label "com.master-diagnostics.restore.plan-fingerprint=${plan_fingerprint}" \
+      --label "com.master-diagnostics.restore.candidate-set=${candidate_set}" \
+      --label "com.master-diagnostics.restore.role=${role}" \
+      --label "com.master-diagnostics.restore.rollback-volume=${active_volume}" \
+      "${candidate_volume}" >/dev/null
   fi
 
-  docker volume create \
-    --label 'com.master-diagnostics.restore.promotion-candidate=true' \
-    --label "com.master-diagnostics.restore.plan-fingerprint=${plan_fingerprint}" \
-    --label "com.master-diagnostics.restore.candidate-set=${candidate_set}" \
-    --label "com.master-diagnostics.restore.role=${role}" \
-    --label "com.master-diagnostics.restore.rollback-volume=${active_volume}" \
-    "${candidate_volume}" >/dev/null
+  # Verify after creation too, so a concurrent name race cannot make us adopt an unrelated volume.
+  verify_candidate_volume \
+    "${role}" \
+    "${active_volume}" \
+    "${candidate_volume}" \
+    "${plan_fingerprint}" \
+    "${candidate_set}"
 }
 
 for row in "${candidate_rows[@]}"; do
@@ -301,4 +329,5 @@ for row in "${candidate_rows[@]}"; do
     "${compose[@]}" --profile backup run --rm --no-deps \
       -e "RESTORE_PRIVATE_PROMOTION_CANDIDATE_ROLE=${role}" \
       backup-restore-promotion-candidate-copy
- done
+
+done
