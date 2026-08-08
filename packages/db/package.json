@@ -20,6 +20,7 @@
     "backup:stage": "tsx src/stage-backup-restore.ts",
     "backup:privacy-ledger": "tsx src/create-restore-privacy-ledger-snapshot.ts",
     "backup:privacy-reconcile": "tsx src/report-restore-privacy-reconciliation.ts",
+    "backup:privacy-artifact-plan": "tsx src/prepare-restore-privacy-artifact-manifest.ts",
     "backup:privacy-replay-db": "tsx src/replay-restore-privacy-database.ts"
   },
   "dependencies": {
