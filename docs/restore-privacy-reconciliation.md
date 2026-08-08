@@ -33,7 +33,7 @@ Der Report liefert genau einen der folgenden Zustände:
 - `REPLAY_REQUIRED`: Die Nachweise sind konsistent und mindestens eine nach dem Backup privacy-effektiv gewordene Anonymisierung muss auf dem Restore-Staging noch nachgezogen bzw. nachgewiesen werden.
 - `CLEAR`: Die Nachweise sind konsistent und es existiert keine nach dem Backup liegende Replay-Pflicht.
 
-`promotionAllowed` ist in diesem Slice **immer `false`**. Auch `CLEAR` autorisiert keine Promotion; Healthcheck, kontrollierte Promotion und Restore-Audit bleiben separate Gates.
+`promotionAllowed` bleibt auch nach einem erfolgreichen Datenbank-Replay **immer `false`**. Weder `CLEAR` noch `DATABASE_SATISFIED` autorisieren eine Promotion; Artifact-Replay, Healthcheck, kontrollierte Promotion und Restore-Audit bleiben separate Gates.
 
 ## Fail-closed Blocker
 
@@ -48,7 +48,7 @@ Der Report blockiert insbesondere bei:
 
 Ein `COMMITTED`-Journalmarker **nach** `ledger.generatedAt` ist dagegen zulässig und wird als Journal-only Replay-Pflicht übernommen. Genau dadurch bleibt ein Disaster nach dem letzten Ledger-Snapshot rekonstruierbar.
 
-## Ledger-Härtung beim Lesen
+## Ledger- und Journal-Härtung beim Lesen
 
 Vor Verwendung prüft der Report zusätzlich zum HMAC:
 
@@ -58,7 +58,9 @@ Vor Verwendung prüft der Report zusätzlich zum HMAC:
 - eindeutige Execution-IDs,
 - kanonische Entry-Sortierung,
 - den neu berechneten `entriesFingerprint`,
-- Übereinstimmung von Dateiname und signiertem Ledgerinhalt.
+- Übereinstimmung von Dateiname und signiertem Ledgerinhalt,
+- identische technische Identity zwischen `PENDING` und Terminalmarker,
+- monotone Zeitfolge zwischen Intent und Terminalzustand.
 
 Strukturell inkonsistente oder kryptografisch ungültige Dateien führen zu einem harten Fehler statt zu einem verwertbaren Report.
 
@@ -97,40 +99,99 @@ Die **signierte externe Replay-Pflicht selbst** ist dabei der Nachweis, warum di
 
 Der Assessment-Output enthält nur technische IDs, Reason-Codes und Zähler. Er verändert keine Daten.
 
-Wichtig: `DATABASE_SATISFIED` ist **kein vollständiger Replay-Nachweis**. Report-, Tenant-Export- und Betroffenenexportdateien im Staging müssen weiterhin separat geprüft bzw. kontrolliert entfernt werden. `promotionAllowed` bleibt daher auch bei vollständig erfüllter Datenbankhälfte `false`.
+Wichtig: Ein fehlender Athlete-Anker ist **nicht automatisch privacy-sicher**. Er wird als `BLOCKED / ATHLETE_STATE_UNRESOLVED` behandelt, weil die signierte Pflicht ohne eindeutigen Staging-Anker nicht bewiesen werden kann.
 
-## Club-Betrieb
+`DATABASE_SATISFIED` ist **kein vollständiger Replay-Nachweis**. Report-, Tenant-Export- und Betroffenenexportdateien im Staging müssen weiterhin separat geprüft bzw. kontrolliert entfernt werden. `promotionAllowed` bleibt daher auch bei vollständig erfüllter Datenbankhälfte `false`.
+
+## Assessment-gesteuerter Datenbank-Replay
+
+Der CLI-Befehl `backup:privacy-replay-db` verbindet Reconciliation, Assessment und Write-Pfad fail-closed:
+
+1. Der signierte Reconciliation-Report wird erneut erzeugt und muss nicht `BLOCKED` sein.
+2. `assessRestorePrivacyReplayDatabase()` bewertet die private Restore-DB **vor** jedem Write.
+3. Ein `BLOCKED`-Assessment beendet den Lauf ohne Replay.
+4. Bereits `DATABASE_SATISFIED`e Pflichten werden nicht erneut geschrieben.
+5. Nur `DATABASE_REPLAY_REQUIRED`e Pflichten werden sequenziell angewandt.
+6. Nach den Writes wird derselbe read-only Assessment-Vertrag erneut ausgeführt.
+7. Der Lauf gilt nur dann als erfolgreich, wenn der Gesamtstatus anschließend exakt `DATABASE_SATISFIED` ist.
+
+Der Replay verwendet bewusst **nicht** den normalen produktiven Anonymisierungs-Commit. Ein ausgewähltes älteres Backup kann die später entstandenen Approval- und Execution-Zeilen noch gar nicht enthalten. Stattdessen ist jede Operation ausschließlich an die externe, signierte technische Replay-Pflicht gebunden.
+
+Für geschützte immutable Tabellen existiert Migration `0022_restore_privacy_replay`. Sie erlaubt die notwendigen Deletes nur, solange innerhalb derselben DB-Transaktion eine technisch identische `ACTIVE`-Replay-Autorisierung für Tenant und Athlete existiert. Die Autorisierung:
+
+- startet ausschließlich als `ACTIVE`,
+- kann nur `ACTIVE -> APPLIED` wechseln,
+- besitzt immutable technische Identity und Original-`dbCommittedAt`,
+- kann nicht gelöscht werden,
+- wird im Fehlerfall zusammen mit der gesamten DB-Transaktion zurückgerollt.
+
+Damit entsteht kein dauerhafter generischer Delete-Bypass. Bestehende `ARTIFACTS_STAGED`-Triggerpfade für die normale produktive Anonymisierung bleiben unverändert nutzbar.
+
+Der DB-Replay stellt den vom Assessment geforderten privacy-sicheren Endzustand idempotent wieder her:
+
+- Audit-Altbestand wird mit dem bestehenden Privacy-Redaction-Vertrag minimiert,
+- individuelle Test-, Mess-, Diagnostik-, Interpretations- und Reportdaten werden entfernt,
+- Athlete-Snapshots, Coach-Zuordnungen und Guardian-Daten werden entfernt,
+- Consent-Nachweise bleiben als minimierte Compliance-Historie erhalten,
+- Löschworkflow-Freitexte werden redigiert,
+- der Athlet erhält denselben deterministischen Tombstone wie im Produktivpfad,
+- falls ein älteres Backup den Athleten noch aktiv enthält, werden `deletedAt` und `consentBlockedAt` spätestens auf das originale `dbCommittedAt` gesetzt,
+- athletenbezogene Betroffenenexport-Paketmetadaten werden entfernt,
+- alle vollständigen Tenant-Export-Paketmetadaten des betroffenen Tenants werden konservativ invalidiert, weil ein vollständiger Tenant-Export den wiederhergestellten Athleten enthalten kann,
+- der exakt signierte `deletionRequestId` wird als minimierter `COMPLETED`-Anker erhalten oder – falls er nach dem Backup entstanden und deshalb im Staging noch nicht vorhanden ist – ausschließlich mit technischen Bindungen, redigierten Textfeldern und dem originalen `dbCommittedAt` rekonstruiert.
+
+Fehlt der gebundene Athlete-Anker, findet **kein** Replay statt. Eine bereits identisch `APPLIED` quittierte Pflicht ist ein idempotenter `ALREADY_APPLIED`-Retry. Abweichende Receipt- oder Deletion-Request-Identity blockiert fail-closed.
+
+## Private Replay-Arbeitskopie
 
 Der Host-Wrapper
+
+```sh
+bash infra/backup/replay-club-restore-privacy-db.sh restore-<timestamp>-<uuid>
+```
+
+verändert **nicht** das unmittelbar extrahierte Restore-Staging. Er erzeugt zunächst atomar eine private Arbeitskopie von
+
+```text
+RESTORE_STAGING_HOST_DIR/<staging>/libsql
+```
+
+unter
+
+```text
+RESTORE_PRIVACY_REPLAY_HOST_DIR/<staging>/libsql
+```
+
+und setzt Assessment und Replay ausschließlich auf dieser Kopie fort. Ein bereits vorhandener vollständiger Workspace wird für idempotente Wiederholungen wiederverwendet; ein unvollständiger Workspace blockiert fail-closed.
+
+## Isolierter Compose-Stack
+
+Drei Backup-Profile bilden den DB-Replay ab:
+
+1. `backup-privacy-replay-db` startet den gepinnten libSQL-Server ausschließlich auf der privaten Replay-Arbeitskopie.
+2. `backup-privacy-replay-migrate` migriert nur diese Kopie auf das aktuelle Schema und installiert damit auch den begrenzten Restore-Replay-Vertrag.
+3. `backup-privacy-replay` liest Restore-Manifest, Ledger und Journal read-only, führt das Pre-Assessment aus, wendet ausschließlich notwendige Pflichten auf die isolierte DB an und verlangt anschließend `DATABASE_SATISFIED`.
+
+Alle drei Services laufen ausschließlich im internen Netzwerk `restore-internal`. Der Replay-DB-Service mountet genau einen schreibbaren Host-Pfad: die private Replay-Kopie auf `/var/lib/sqld`. Produktive Named Volumes für libSQL, Reports, Tenant-Exporte, Betroffenenexporte oder Caddy werden nicht gemountet. Ledger, Journal, Keys und ursprüngliches Restore-Staging bleiben read-only.
+
+Der bestehende Wrapper
 
 ```sh
 bash infra/backup/reconcile-club-restore-privacy.sh restore-<timestamp>-<uuid>
 ```
 
-startet den Compose-Service `backup-privacy-reconcile`.
-
-Dieser Service besitzt ausschließlich read-only Mounts auf:
-
-- das Restore-Staging,
-- den Restore-Privacy-Ledger,
-- den Ledger-Key,
-- das Privacy-Effect-Journal,
-- den Journal-Key.
-
-Er mountet keine Produktivvolumes und besitzt keine `DATABASE_URL`-Abhängigkeit.
-
-Das DB-Assessment ist als eigener Fachvertrag vorhanden, wird in diesem Slice aber noch **nicht** automatisch gegen den gestagten libSQL-Stand gestartet. Der folgende Betriebs-Slice muss dafür eine private, nicht promotionsfähige Staging-DB-Kopie bereitstellen und ausschließlich diese an den Assessment-/Replay-Pfad anbinden.
+bleibt der vollständig read-only Nachweis vor dem DB-Replay und besitzt weiterhin keine `DATABASE_URL`-Abhängigkeit.
 
 ## Verbleibende Restore-Slices
 
-Als nächste Schritte bleiben:
+Dieser Stand reconciliiert die externen Nachweise, bewertet die Datenbankhälfte read-only und stellt den privacy-sicheren **Datenbankzustand** auf einer privaten Restore-Kopie kontrolliert her. Noch nicht umgesetzt sind externe Storage-Artefakte, deren DB-Referenzen beim Replay entfernt wurden. Deshalb bleibt jede Promotion blockiert.
 
-1. isolierte Staging-DB-Kopie für Assessment/Replay starten,
-2. noch offene DB-Replay-Wirkungen kontrolliert anwenden,
-3. Report-/Exportartefakte im Staging reconciliieren,
-4. Datenbank-/Anwendungs-Healthcheck im Staging,
-5. kontrollierte Promotion/Rückschreibung,
-6. Restore-Audit,
-7. praktischer RTO-Drill.
+Die nächsten getrennten Schritte sind:
+
+1. Report-, Tenant-Export- und Betroffenenexport-Artefakte auf privaten Restore-Arbeitskopien entfernen bzw. als bereits abwesend nachweisen,
+2. Datenbank-/Anwendungs-Healthcheck auf dem vollständig reconciliierten Staging,
+3. kontrollierte Promotion/Rückschreibung,
+4. Restore-Audit,
+5. praktischer RTO-Drill.
 
 Bis diese Schritte praktisch nachgewiesen sind, bleibt `PRIVACY_BACKUP_STATE=DISABLED`.
