@@ -237,6 +237,8 @@ services:
     depends_on:
       backup-privacy-artifact-plan:
         condition: service_completed_successfully
+      backup-privacy-replay-migrate:
+        condition: service_completed_successfully
     networks: [restore-internal]
 
   app:
