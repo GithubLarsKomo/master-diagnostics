@@ -75,3 +75,21 @@ services:
       backup-privacy-replay-db:
         condition: service_healthy
     networks: [restore-internal]
+
+  backup-restore-promotion-candidate-copy:
+    profiles: [backup]
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    command: ["pnpm", "--silent", "--filter", "@masters/db", "backup:restore-promotion-candidate-copy"]
+    volumes:
+      - ${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-restore-unset}:/restore-replay:ro
+      - restore-promotion-candidate:/candidate
+    network_mode: none
+
+volumes:
+  restore-promotion-candidate:
+    external: true
+    name: ${RESTORE_PRIVATE_PROMOTION_CANDIDATE_VOLUME:-restore-promotion-candidate-unset}
