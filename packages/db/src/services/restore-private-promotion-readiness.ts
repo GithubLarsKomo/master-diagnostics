@@ -52,6 +52,7 @@ export interface RestorePrivatePromotionReadinessReport {
   readonly status: RestorePrivatePromotionReadinessStatus;
   readonly promotionAllowed: boolean;
   readonly authorizationScope: 'PRIVATE_RESTORE_PROMOTION';
+  readonly authorizationPersisted: false;
   readonly reconciliationStatus: RestorePrivacyReconciliationReport['status'];
   readonly obligationsFingerprint: `sha256:${string}`;
   readonly artifactEntriesFingerprint: `sha256:${string}` | null;
@@ -118,8 +119,10 @@ function canonicalHealthcheck(report: Readonly<RestorePrivateHealthcheckReport>)
  * Read-only final authorization assessment for a private restore workspace.
  *
  * This function performs no promotion and writes no evidence. `promotionAllowed=true` means only
- * that a later promotion executor may consume this exact evidence set. Any change to reconciliation,
- * replay state, recovery evidence or the freshly recomputed healthcheck requires a new assessment.
+ * that a later promotion executor may consume this exact evidence set. The result is deliberately
+ * non-durable (`authorizationPersisted=false`); a later slice must persist/sign a promotion intent.
+ * Any change to reconciliation, replay state, recovery evidence or the freshly recomputed
+ * healthcheck requires a new assessment.
  */
 export async function assessRestorePrivatePromotionReadiness(
   db: Database,
@@ -267,6 +270,7 @@ export async function assessRestorePrivatePromotionReadiness(
     recoveryReceiptSignature,
     recoveryCompletedAt,
     promotionAllowed,
+    authorizationPersisted: false as const,
   };
 
   return Object.freeze({
@@ -275,6 +279,7 @@ export async function assessRestorePrivatePromotionReadiness(
     status: promotionAllowed ? 'PROMOTION_READY' : 'BLOCKED',
     promotionAllowed,
     authorizationScope: 'PRIVATE_RESTORE_PROMOTION',
+    authorizationPersisted: false,
     reconciliationStatus: reconciliation.status,
     obligationsFingerprint,
     artifactEntriesFingerprint: artifactManifest?.entriesFingerprint ?? null,
