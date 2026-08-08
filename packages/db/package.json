@@ -23,7 +23,8 @@
     "backup:privacy-artifact-plan": "tsx src/prepare-restore-privacy-artifact-manifest.ts",
     "backup:privacy-replay-db": "tsx src/replay-restore-privacy-database.ts",
     "backup:privacy-artifact-replay": "tsx src/apply-restore-privacy-artifacts.ts",
-    "backup:restore-healthcheck": "tsx src/report-restore-private-healthcheck.ts"
+    "backup:restore-healthcheck": "tsx src/report-restore-private-healthcheck.ts",
+    "backup:restore-recovery-plan": "tsx src/prepare-restore-private-recovery-plan.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
