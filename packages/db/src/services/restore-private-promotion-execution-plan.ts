@@ -256,8 +256,8 @@ function validateRecord(record: Readonly<RestorePrivatePromotionExecutionPlanRec
   if (activeVolumeSetFingerprint(active) !== record.activeVolumeSetFingerprint) {
     throw new Error('Restore promotion execution plan active volume fingerprint does not match');
   }
-  const fingerprint = computePlanFingerprint({ ...record, planFingerprint: undefined } as never);
-  if (fingerprint !== record.planFingerprint) {
+  const { planFingerprint: _ignored, ...withoutFingerprint } = record;
+  if (computePlanFingerprint(withoutFingerprint) !== record.planFingerprint) {
     throw new Error('Restore promotion execution plan fingerprint does not match its content');
   }
 }
@@ -313,7 +313,7 @@ function canonicalPayload(record: Readonly<RestorePrivatePromotionExecutionPlanR
 }
 
 function signRecord(key: Buffer, record: Readonly<RestorePrivatePromotionExecutionPlanRecord>): `hmac-sha256:${string}` {
-  return `${SIGNATURE_PREFIX}${createHmac('sha256', key).update(canonicalPayload(record)).digest('hex')}`;
+  return `${SIGNATURE_PREFIX}${createHmac('sha256').update(canonicalPayload(record)).digest('hex')}`;
 }
 
 export function createRestorePrivatePromotionExecutionPlanRecord(
