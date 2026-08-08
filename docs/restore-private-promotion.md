@@ -1,20 +1,19 @@
-# Private Restore Promotion Readiness
+# Private Restore Promotion
 
 ## Zweck
 
 Nach Reconciliation, DB-Replay, Artifact-Replay und gegebenenfalls Recovery kann die private Restore-Kopie technisch gesund sein. Ein grüner Healthcheck allein darf aber noch keine produktive Umschaltung auslösen.
 
-Promotion Readiness v1 ist deshalb ein **rein read-only Autorisierungs-Gate**. Es verändert weder Dateien noch Datenbankzustand, persistiert keinen Promotion-Intent und schaltet keine produktiven Volumes um.
+Die Promotion-Kette trennt deshalb zwei verschiedene Autorisierungsschritte:
 
-Erstmals darf ein Restore-Vertrag `promotionAllowed: true` ausgeben. Diese Aussage bedeutet ausschließlich:
+1. **Promotion Readiness v1** berechnet read-only, ob der aktuelle private Restore-Evidence-Satz promotionsfähig ist.
+2. **Promotion Intent v1** bindet eine positive Readiness anschließend durable, immutable und signiert, bevor ein späterer Promotion-Executor überhaupt existieren darf.
 
-> Ein späterer, separat kontrollierter Promotion-Executor darf genau diesen Evidence-Satz als Kandidat verwenden.
-
-Sie ist selbst noch keine Promotion.
+Keiner dieser Schritte führt selbst eine produktive Promotion aus.
 
 ## Voraussetzung: frischer Healthcheck
 
-Das Gate akzeptiert keinen zuvor gespeicherten Healthcheck-Report. Es berechnet `assessRestorePrivateHealthcheck(...)` bei jeder Prüfung erneut aus:
+Das Readiness-Gate akzeptiert keinen zuvor gespeicherten Healthcheck-Report. Es berechnet `assessRestorePrivateHealthcheck(...)` bei jeder Prüfung erneut aus:
 
 - aktueller signierter Restore-Reconciliation,
 - privater Restore-DB,
@@ -85,22 +84,23 @@ Die `correlationId` jedes Events muss genau dem Recovery-Plan-Fingerprint entspr
 
 Für `PURGE_REPLAYED_ARTIFACTS_AND_NORMALIZE` muss der frisch berechnete Healthcheck genau die im Plan erwarteten normalisierten Executions ausweisen. Jede akzeptierte Normalisierung muss bereits durch den Healthcheck an aktuellen Cutoff, Reconciliation-Obligation und Plan-Fingerprint gebunden sein.
 
-## Promotion-Readiness-Report
+## Promotion Readiness v1
 
-Der Report hat zwei Zustände:
+Der Readiness-Report hat zwei Zustände:
 
 - `PROMOTION_READY`
 - `BLOCKED`
 
 Nur `PROMOTION_READY` besitzt `promotionAllowed = true`.
 
-Die Autorisierung ist auf
+Diese positive Entscheidung ist ausdrücklich **nicht durable**:
 
 ```text
-PRIVATE_RESTORE_PROMOTION
+authorizationScope = PRIVATE_RESTORE_PROMOTION
+authorizationPersisted = false
 ```
 
-begrenzt. Daraus folgt keine allgemeine Runtime- oder Privacy-Autorisierung.
+Daraus folgt keine allgemeine Runtime- oder Privacy-Autorisierung und noch keine Erlaubnis, produktive Volumes zu verändern.
 
 Blocker umfassen unter anderem:
 
@@ -113,7 +113,7 @@ Blocker umfassen unter anderem:
 - `RECOVERY_EVIDENCE_INCOMPLETE`
 - `RECOVERY_EVIDENCE_INVALID`
 
-## Deterministischer Evidence Fingerprint
+### Deterministischer Evidence Fingerprint
 
 Promotion Readiness erzeugt einen `evidenceFingerprint` über den aktuellen autorisierungsrelevanten Evidence-Satz:
 
@@ -127,27 +127,139 @@ Promotion Readiness erzeugt einen `evidenceFingerprint` über den aktuellen auto
 - Fingerprint des frisch berechneten vollständigen Healthchecks,
 - Recovery-Evidence-Status,
 - gegebenenfalls Plan-Fingerprint,
-- Intent-Signatur,
-- Receipt-Signatur,
+- Recovery-Intent-Signatur,
+- Recovery-Receipt-Signatur,
 - Recovery-Abschlusszeitpunkt,
-- finale `promotionAllowed`-Entscheidung.
+- finale `promotionAllowed`-Entscheidung,
+- `authorizationPersisted = false`.
 
 Eine Änderung an einem dieser Inputs erzeugt einen anderen Evidence Fingerprint und verlangt eine neue Readiness-Prüfung.
 
-## Sicherheitsgrenze dieses Slices
+## Signed Promotion Intent v1
 
-Promotion Readiness v1:
+`restore-private-promotion-intent.ts` macht aus einer positiven, noch flüchtigen Readiness einen durable Promotion Intent.
 
-- schreibt keine Datei,
-- ändert keine DB-Zeile,
-- erzeugt keinen Promotion-Intent,
+Der Intent besitzt:
+
+```text
+phase = AUTHORIZED
+authorizationScope = PRIVATE_RESTORE_PROMOTION
+sourceAuthorizationPersisted = false
+promotionExecuted = false
+```
+
+Er bindet:
+
+- Backup-Cutoff,
+- Readiness-Version,
+- Readiness-Evidence-Fingerprint,
+- Healthcheck-Fingerprint,
+- Obligations-Fingerprint,
+- Artifact-Entries-Fingerprint,
+- Recovery-Evidence-Status,
+- gegebenenfalls Recovery-Plan-Fingerprint,
+- Recovery-Intent-Signatur,
+- Recovery-Receipt-Signatur,
+- Recovery-Abschlusszeitpunkt,
+- einen einmaligen `authorizedAt`-Zeitpunkt.
+
+Der Intent darf ausschließlich aus einem intern konsistenten `PROMOTION_READY`-Report entstehen. Insbesondere müssen Readiness und eingebetteter Healthcheck weiterhin ihre unterschiedlichen Rollen behalten:
+
+```text
+Promotion Readiness: promotionAllowed = true
+Healthcheck:          promotionAllowed = false
+```
+
+Ein `BLOCKED`-Report, ein Report mit Blockern oder ein Report, der bereits `authorizationPersisted=true` behauptet, kann nicht in einen neuen Intent umgewandelt werden.
+
+### Recovery-Bindung
+
+`recoveryEvidenceStatus` ist im Promotion Intent nur in zwei terminalen Formen zulässig:
+
+- `NOT_REQUIRED`: alle Recovery-Felder müssen `null` sein.
+- `VERIFIED`: Plan-Fingerprint, Recovery-Intent-Signatur, Completion-Receipt-Signatur und `recoveryCompletedAt` müssen vollständig vorhanden sein.
+
+Eine `MISSING`- oder `INVALID`-Recovery-Evidence kann niemals zur Promotion autorisiert werden.
+
+Zeitlich gilt:
+
+```text
+authorizedAt >= backupCutoff
+```
+
+und bei Recovery zusätzlich:
+
+```text
+authorizedAt >= recoveryCompletedAt
+```
+
+## Signatur und Persistenz
+
+Promotion Intent v1 verwendet HMAC-SHA256 mit einer eigenen Domain Separation:
+
+```text
+masters:restore-private-promotion-intent:v1
+```
+
+Der spätere operative Workflow muss dafür einen **eigenen 32-Byte-Base64-Key** provisionieren. Backup-, Restore-Ledger-, Privacy-Effect-Journal- und Recovery-Key dürfen nicht wiederverwendet werden.
+
+Der Core erzwingt:
+
+- absoluten Key-Pfad,
+- reguläre non-symlink Key-Datei,
+- absolutes non-symlink Target-Verzeichnis,
+- Target-Verzeichnis `0700`,
+- Intent-Datei `0600`,
+- exklusives Erzeugen,
+- HMAC-Prüfung beim Lesen,
+- erneute Bindungsprüfung gegen den übergebenen Readiness-Report.
+
+Der Dateiname ist:
+
+```text
+promotion-intent.json
+```
+
+Ein identischer Retry reused den bestehenden signierten Intent und damit den ursprünglichen `authorizedAt`. Eine Readiness mit verändertem `evidenceFingerprint` kann den vorhandenen Intent nicht übernehmen oder ersetzen.
+
+## Wichtige Trust Boundary
+
+Der Intent-Core **rechnet Promotion Readiness nicht selbst neu aus**. Er validiert die semantische Struktur des übergebenen Reports und bindet dessen Evidence-Fingerprint kryptografisch.
+
+Deshalb muss jeder operative Boundary-Caller unmittelbar vor dem ersten Persistieren:
+
+```text
+aktuelle Roh-Evidence
+  -> assessRestorePrivatePromotionReadiness(...)
+  -> PROMOTION_READY
+  -> ensureSignedRestorePrivatePromotionIntent(...)
+```
+
+ausführen.
+
+Ein späterer Promotion-Intent-CLI muss genau diese Reihenfolge in einem Prozess erzwingen und darf keinen beliebigen gespeicherten Readiness-JSON-Report als Autorisierungsquelle akzeptieren.
+
+## Sicherheitsgrenze des aktuellen Stands
+
+Der aktuelle Promotion-Stand:
+
+- berechnet Readiness read-only,
+- kann die positive Entscheidung immutable/signiert persistieren,
+- ändert keine fachliche DB-Zeile,
 - stoppt keine produktiven Dienste,
 - kopiert keine Restore-Daten in Produktiv-Volumes,
-- ändert keine Compose- oder Caddy-Konfiguration.
+- ändert keine Compose- oder Caddy-Konfiguration,
+- setzt `promotionExecuted` niemals auf `true`.
 
-Der nächste Slice soll die positive Readiness-Entscheidung in einen **immutable/signierten Promotion Intent** binden. Erst ein weiterer, separat kontrollierter Executor darf danach die eigentliche Promotion durchführen.
+Als nächste Slices folgen:
 
-Bis Promotion-Executor, Restore-/Promotion-Audit und praktischer RTO-Drill implementiert und verifiziert sind, bleibt:
+1. Promotion-Intent-CLI mit frischer Readiness-Berechnung und separater Key-Provisionierung,
+2. isoliertes Compose-/Host-Wiring,
+3. separat kontrollierter Promotion-Executor,
+4. Restore-/Promotion-Audit,
+5. praktischer Restore-/RTO-Drill.
+
+Bis Promotion-Executor, Audit und RTO-Drill implementiert und praktisch verifiziert sind, bleibt:
 
 ```text
 PRIVACY_BACKUP_STATE=DISABLED
