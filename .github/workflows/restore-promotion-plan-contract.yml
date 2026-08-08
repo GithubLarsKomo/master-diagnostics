@@ -1,0 +1,210 @@
+name: Restore Promotion Plan Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-promotion-plan-contract.yml'
+      - 'packages/db/**'
+      - 'docs/restore-private-promotion-execution-plan.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-promotion-plan-contract.yml'
+      - 'packages/db/**'
+      - 'docs/restore-private-promotion-execution-plan.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: file:${{ github.workspace }}/restore-promotion-plan-ci.db
+      DATABASE_AUTH_TOKEN: ''
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Prepare authorized healthy private restore
+        run: |
+          rm -f "${{ github.workspace }}/restore-promotion-plan-ci.db"
+          pnpm --silent --filter @masters/db db:migrate
+          rm -rf /tmp/restore-promotion-plan-contract
+          mkdir -p \
+            /tmp/restore-promotion-plan-contract/staging/restore-ci \
+            /tmp/restore-promotion-plan-contract/ledger \
+            /tmp/restore-promotion-plan-contract/journal \
+            /tmp/restore-promotion-plan-contract/replay/reports \
+            /tmp/restore-promotion-plan-contract/replay/tenant-exports \
+            /tmp/restore-promotion-plan-contract/replay/data-subject-delivery
+          cat >/tmp/restore-promotion-plan-contract/staging/restore-ci/manifest.json <<'JSON'
+          {
+            "bundleVersion": 1,
+            "createdAt": "2026-08-01T00:00:00.000Z",
+            "restoreReconciliationRequired": true
+          }
+          JSON
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          root = Path('/tmp/restore-promotion-plan-contract')
+          root.joinpath('ledger.key').write_text(base64.b64encode(bytes([17]) * 32).decode() + '\n')
+          root.joinpath('journal.key').write_text(base64.b64encode(bytes([19]) * 32).decode() + '\n')
+          root.joinpath('promotion.key').write_text(base64.b64encode(bytes([23]) * 32).decode() + '\n')
+          PY
+          chmod 600 \
+            /tmp/restore-promotion-plan-contract/ledger.key \
+            /tmp/restore-promotion-plan-contract/journal.key \
+            /tmp/restore-promotion-plan-contract/promotion.key
+
+          RESTORE_STAGING_MANIFEST=/tmp/restore-promotion-plan-contract/staging/restore-ci/manifest.json \
+          RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-promotion-plan-contract/ledger \
+          RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-promotion-plan-contract/ledger.key \
+            pnpm --silent --filter @masters/db backup:privacy-ledger >/tmp/plan-ledger.json
+
+          env \
+            RESTORE_STAGING_MANIFEST=/tmp/restore-promotion-plan-contract/staging/restore-ci/manifest.json \
+            RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-promotion-plan-contract/ledger \
+            RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-promotion-plan-contract/ledger.key \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-promotion-plan-contract/journal \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-promotion-plan-contract/journal.key \
+            RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE=/tmp/restore-promotion-plan-contract/replay/artifact-replay-manifest.json \
+            pnpm --silent --filter @masters/db backup:privacy-artifact-plan >/tmp/plan-artifact-manifest.json
+
+          env \
+            RESTORE_STAGING_MANIFEST=/tmp/restore-promotion-plan-contract/staging/restore-ci/manifest.json \
+            RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-promotion-plan-contract/ledger \
+            RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-promotion-plan-contract/ledger.key \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-promotion-plan-contract/journal \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-promotion-plan-contract/journal.key \
+            RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE=/tmp/restore-promotion-plan-contract/replay/artifact-replay-manifest.json \
+            RESTORE_PRIVACY_ARTIFACT_RESULT_FILE=/tmp/restore-promotion-plan-contract/replay/artifact-replay-result.json \
+            RESTORE_PRIVACY_REPORT_ROOT=/tmp/restore-promotion-plan-contract/replay/reports \
+            RESTORE_PRIVACY_TENANT_EXPORT_ROOT=/tmp/restore-promotion-plan-contract/replay/tenant-exports \
+            RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT=/tmp/restore-promotion-plan-contract/replay/data-subject-delivery \
+            pnpm --silent --filter @masters/db backup:privacy-artifact-replay >/tmp/plan-artifact-replay.json
+
+          env \
+            RESTORE_STAGING_MANIFEST=/tmp/restore-promotion-plan-contract/staging/restore-ci/manifest.json \
+            RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-promotion-plan-contract/ledger \
+            RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-promotion-plan-contract/ledger.key \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-promotion-plan-contract/journal \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-promotion-plan-contract/journal.key \
+            RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE=/tmp/restore-promotion-plan-contract/replay/artifact-replay-manifest.json \
+            RESTORE_PRIVACY_ARTIFACT_RESULT_FILE=/tmp/restore-promotion-plan-contract/replay/artifact-replay-result.json \
+            RESTORE_PRIVACY_REPORT_ROOT=/tmp/restore-promotion-plan-contract/replay/reports \
+            RESTORE_PRIVACY_TENANT_EXPORT_ROOT=/tmp/restore-promotion-plan-contract/replay/tenant-exports \
+            RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT=/tmp/restore-promotion-plan-contract/replay/data-subject-delivery \
+            RESTORE_PRIVATE_RECOVERY_PLAN_FILE=/tmp/restore-promotion-plan-contract/replay/recovery-plan.json \
+            RESTORE_PRIVATE_RECOVERY_INTENT_DIR=/tmp/restore-promotion-plan-contract/replay/recovery-execution \
+            RESTORE_PRIVATE_PROMOTION_INTENT_DIR=/tmp/restore-promotion-plan-contract/replay/promotion \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-promotion-plan-contract/promotion.key \
+            pnpm --silent --filter @masters/db backup:restore-promotion-intent >/tmp/plan-intent.json
+
+      - name: Verify execution plan creation and retry reuse
+        run: |
+          for attempt in first second; do
+            env \
+              RESTORE_STAGING_MANIFEST=/tmp/restore-promotion-plan-contract/staging/restore-ci/manifest.json \
+              RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-promotion-plan-contract/ledger \
+              RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-promotion-plan-contract/ledger.key \
+              RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-promotion-plan-contract/journal \
+              RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-promotion-plan-contract/journal.key \
+              RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE=/tmp/restore-promotion-plan-contract/replay/artifact-replay-manifest.json \
+              RESTORE_PRIVACY_ARTIFACT_RESULT_FILE=/tmp/restore-promotion-plan-contract/replay/artifact-replay-result.json \
+              RESTORE_PRIVACY_REPORT_ROOT=/tmp/restore-promotion-plan-contract/replay/reports \
+              RESTORE_PRIVACY_TENANT_EXPORT_ROOT=/tmp/restore-promotion-plan-contract/replay/tenant-exports \
+              RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT=/tmp/restore-promotion-plan-contract/replay/data-subject-delivery \
+              RESTORE_PRIVATE_RECOVERY_PLAN_FILE=/tmp/restore-promotion-plan-contract/replay/recovery-plan.json \
+              RESTORE_PRIVATE_RECOVERY_INTENT_DIR=/tmp/restore-promotion-plan-contract/replay/recovery-execution \
+              RESTORE_PRIVATE_PROMOTION_INTENT_FILE=/tmp/restore-promotion-plan-contract/replay/promotion/promotion-intent.json \
+              RESTORE_PRIVATE_PROMOTION_INTENT_DIR=/tmp/restore-promotion-plan-contract/replay/promotion \
+              RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-promotion-plan-contract/promotion.key \
+              RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME=infra_libsql-data \
+              RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME=infra_report-data \
+              RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME=infra_export-data \
+              RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME=infra_data-subject-delivery-data \
+              pnpm --silent --filter @masters/db backup:restore-promotion-plan >"/tmp/promotion-plan-${attempt}.json"
+          done
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          first = json.loads(Path('/tmp/promotion-plan-first.json').read_text())
+          second = json.loads(Path('/tmp/promotion-plan-second.json').read_text())
+          plan_path = Path('/tmp/restore-promotion-plan-contract/replay/promotion/promotion-execution-plan.json')
+          plan = json.loads(plan_path.read_text())
+
+          assert first['mode'] == 'ISOLATED_RESTORE_PROMOTION_EXECUTION_PLAN'
+          assert first['status'] == 'PREPARED'
+          assert first['promotionAllowed'] is True
+          assert first['authorizationPersisted'] is True
+          assert first['productionMutationAllowed'] is False
+          assert first['promotionExecuted'] is False
+          assert first['evidenceRecomputed'] is True
+          assert first['planCreated'] is True
+          assert first['planReused'] is False
+          assert second['planCreated'] is False
+          assert second['planReused'] is True
+          assert second['planFingerprint'] == first['planFingerprint']
+          assert second['planSignature'] == first['planSignature']
+          assert second['candidateSetId'] == first['candidateSetId']
+          assert second['activeVolumeSetFingerprint'] == first['activeVolumeSetFingerprint']
+          assert first['caddyPolicy'] == 'PRESERVE_CURRENT'
+          assert plan['record']['productionMutationAllowed'] is False
+          assert plan['record']['promotionExecuted'] is False
+          assert [item['activeVolumeName'] for item in plan['record']['volumes']] == [
+              'infra_libsql-data',
+              'infra_report-data',
+              'infra_export-data',
+              'infra_data-subject-delivery-data',
+          ]
+          assert all(
+              item['rollbackVolumeName'] == item['activeVolumeName']
+              and item['candidateVolumeName'] != item['activeVolumeName']
+              for item in plan['record']['volumes']
+          )
+          assert (plan_path.stat().st_mode & 0o777) == 0o600
+          PY
+
+      - name: Verify active volume drift invalidates the existing plan
+        run: |
+          plan=/tmp/restore-promotion-plan-contract/replay/promotion/promotion-execution-plan.json
+          before="$(sha256sum "$plan" | cut -d' ' -f1)"
+          set +e
+          env \
+            RESTORE_STAGING_MANIFEST=/tmp/restore-promotion-plan-contract/staging/restore-ci/manifest.json \
+            RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-promotion-plan-contract/ledger \
+            RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-promotion-plan-contract/ledger.key \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-promotion-plan-contract/journal \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-promotion-plan-contract/journal.key \
+            RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE=/tmp/restore-promotion-plan-contract/replay/artifact-replay-manifest.json \
+            RESTORE_PRIVACY_ARTIFACT_RESULT_FILE=/tmp/restore-promotion-plan-contract/replay/artifact-replay-result.json \
+            RESTORE_PRIVACY_REPORT_ROOT=/tmp/restore-promotion-plan-contract/replay/reports \
+            RESTORE_PRIVACY_TENANT_EXPORT_ROOT=/tmp/restore-promotion-plan-contract/replay/tenant-exports \
+            RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT=/tmp/restore-promotion-plan-contract/replay/data-subject-delivery \
+            RESTORE_PRIVATE_RECOVERY_PLAN_FILE=/tmp/restore-promotion-plan-contract/replay/recovery-plan.json \
+            RESTORE_PRIVATE_RECOVERY_INTENT_DIR=/tmp/restore-promotion-plan-contract/replay/recovery-execution \
+            RESTORE_PRIVATE_PROMOTION_INTENT_FILE=/tmp/restore-promotion-plan-contract/replay/promotion/promotion-intent.json \
+            RESTORE_PRIVATE_PROMOTION_INTENT_DIR=/tmp/restore-promotion-plan-contract/replay/promotion \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-promotion-plan-contract/promotion.key \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME=infra_libsql-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME=infra_report-data-v2 \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME=infra_export-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME=infra_data-subject-delivery-data \
+            pnpm --silent --filter @masters/db backup:restore-promotion-plan >/tmp/promotion-plan-drift.json 2>/tmp/promotion-plan-drift.err
+          code=$?
+          set -e
+          test "$code" -eq 1
+          after="$(sha256sum "$plan" | cut -d' ' -f1)"
+          test "$before" = "$after"
+          grep -q 'does not match current preflight or active volumes' /tmp/promotion-plan-drift.err
