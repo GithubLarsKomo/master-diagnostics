@@ -1,16 +1,23 @@
-# Private Restore Recovery Assessment und Plan
+# Private Restore Recovery
 
 ## Zweck
 
-Ein Backup kann eine Anonymisierung mitten in ihrem mehrstufigen Ablauf enthalten. Nach Reconciliation, DB-Replay, Artifact-Replay und Healthcheck können deshalb historische `PREPARING`-, `ARTIFACTS_STAGED`- oder `DB_COMMITTED`-Zeilen sowie `.anonymization-quarantine`-Dateien übrig bleiben.
+Ein Backup kann eine irreversible Anonymisierung mitten in ihrem mehrstufigen Ablauf enthalten. Nach Restore-Reconciliation, DB-Replay und Artifact-Replay können deshalb historische `PREPARING`-, `ARTIFACTS_STAGED`- oder `DB_COMMITTED`-Zeilen sowie `.anonymization-quarantine`-Dateien übrig bleiben.
 
-Recovery Assessment v1 entscheidet ausschließlich **read-only**, welche Recovery-Richtung für jeden solchen technischen Zustand zulässig wäre. Es verändert weder DB noch Dateien, schreibt keine Journal-Marker und erlaubt keine Promotion.
+Die Recovery-Kette arbeitet ausschließlich auf der privaten Restore-Kopie. Produktive DB-, Report-, Export-, Delivery- und Caddy-Volumes werden nicht gemountet.
 
-Recovery Plan v1 macht eine `RECOVERY_READY`-Entscheidung anschließend crash-retrybar. Noch bevor irgendeine Recovery-Mutation erlaubt wird, wird die Entscheidung zusammen mit den exakten immutable Artifact-Referenzen und ihrem erwarteten Ausgangszustand dauerhaft gebunden.
+Der aktuelle Vertrag besteht aus vier getrennten Stufen:
+
+1. **Recovery Assessment** entscheidet read-only, ob und in welche Richtung ein historischer Zwischenzustand auflösbar ist.
+2. **Recovery Plan v1** bindet diese Entscheidung deterministisch und crash-retrybar an exakte Artifact-Referenzen.
+3. **Signed Recovery Intent v1** bindet vor der ersten Mutation genau einen stabilen Recovery-Startzeitpunkt an den Plan.
+4. **Recovery Executor** setzt ausschließlich diesen persistierten Plan auf der privaten Kopie um; danach muss derselbe read-only Healthcheck erneut `HEALTHY` melden.
+
+Keine dieser Stufen erlaubt eine Promotion. `promotionAllowed` bleibt überall `false`.
 
 ## Zentrale Prioritätsregel
 
-Die signierte post-backup Privacy-Evidenz ist autoritativer als der ältere Snapshot-Zustand.
+Signierte post-backup Privacy-Evidenz ist autoritativer als der ältere Snapshot-Zustand.
 
 Beispiel:
 
@@ -21,160 +28,239 @@ aktuelle Evidenz:       Ledger + Journal bestätigen COMMITTED
 Restore-Reconciliation: post-backup Obligation für dieselbe Execution
 ```
 
-In diesem Fall darf der Restore die Quarantäne **niemals** zurückrollen. Das würde bereits wirksam gelöschte personenbezogene Daten wiederherstellen. Die einzige zulässige Richtung ist vorwärts: verbleibende Quarantäne purgen und den historischen Execution-Zustand auf der privaten Kopie normalisieren.
+In diesem Fall darf der Restore die Quarantäne niemals zurückrollen. Das würde bereits wirksam gelöschte personenbezogene Daten wiederherstellen. Die einzige zulässige Richtung ist vorwärts: DB-Replay anwenden, verbleibende Artifact-Kopien purgen und den historischen Snapshot mit immutable Restore-Normalisierungsevidenz abschließen.
 
 ## Recovery-Klassen
 
-Der Assessment-Vertrag kann folgende Aktionen empfehlen:
+Der Assessment-/Plan-Vertrag kennt vier Aktionen:
 
 - `ABORT_PREPARING`: alter PREPARING-Zustand, keine post-backup COMMITTED-Evidenz, alle Manifest-Artefakte noch aktiv.
-- `RESTORE_ARTIFACTS_AND_ABORT`: keine COMMITTED-Evidenz; bereits quarantänierte Manifest-Artefakte müssen vor einem Abort zurück in den aktiven Zustand.
-- `PURGE_ARTIFACTS_AND_COMPLETE`: Snapshot selbst enthält bereits `DB_COMMITTED` mit Commit-Zeitpunkt am oder vor dem Backup-Cutoff; nur Vorwärts-Finalisierung ist zulässig.
-- `PURGE_REPLAYED_ARTIFACTS_AND_NORMALIZE`: signierte post-backup COMMITTED-Obligation wurde bereits in die private Restore-DB replayed; ein älterer PREPARING/ARTIFACTS_STAGED-Snapshot darf nur vorwärts normalisiert werden.
-
-Alle Outputs bleiben bei `promotionAllowed: false`.
-
-## Artifact-State-Beweis
-
-Für jede Recovery-Execution wird das beim ursprünglichen Prepare persistierte technische Artifact-Manifest verwendet. Pro Manifest-Eintrag wird read-only geprüft, ob die Datei:
-
-- aktiv vorhanden,
-- unter `.anonymization-quarantine/<executionId>/...` vorhanden,
-- oder bereits abwesend ist.
-
-Aktiv- und Quarantäne-Datei gleichzeitig, ungültige Referenzen oder nicht reguläre Dateien blockieren fail-closed.
-
-Erwartete Zustände:
-
-- PREPARING ohne Commit-Evidenz: jedes Artifact muss aktiv oder quarantänisiert sein; nichts darf fehlen. Bei mindestens einem Quarantäne-Artifact wird Restore+Abort verlangt.
-- ARTIFACTS_STAGED ohne Commit-Evidenz: alle Manifest-Artefakte müssen quarantänisiert sein.
-- pre-cutoff DB_COMMITTED: aktive Kopien sind verboten; Quarantäne oder bereits abwesend ist zulässig.
-- post-backup COMMITTED: aktive Kopien sind verboten; Quarantäne oder bereits abwesend ist zulässig.
-
-Eine Quarantäne-Datei, die nicht exakt zum persistierten Execution-Manifest gehört, blockiert.
-
-## Healthcheck-Bindung
-
-Recovery Assessment akzeptiert nur einen Healthcheck, dessen Reconciliation-/DB-/Artifact-Evidenz weiterhin verifiziert ist. Nur diese Healthcheck-Blocker sind überhaupt Recovery-fähig:
-
-- `ANONYMIZATION_EXECUTION_TRANSIENT`,
-- `ANONYMIZATION_QUARANTINE_NOT_EMPTY`,
-- `ACTIVE_ARTIFACT_MISSING`.
-
-Root-/Scanfehler, Symlinks, Sonderdateien, Orphans oder kryptografische Evidence-Fehler bleiben nicht recoverbar und blockieren sofort.
-
-## Assessment-Ergebnis
-
-Der technische Report hat genau drei Zustände:
-
-- `NOT_REQUIRED`: Healthcheck ist bereits vollständig gesund.
-- `RECOVERY_READY`: alle historischen Blocker sind eindeutig und deterministisch einer sicheren Recovery-Richtung zugeordnet.
-- `BLOCKED`: mindestens ein Zustand ist nicht eindeutig oder nicht sicher recoverbar.
-
-Die Assessment-Action-Liste ist nach Execution-ID sortiert und enthält nur technische Scope-IDs, Snapshot-Status, Effektbasis, Commit-Zeitpunkt und Artifact-Zähler.
+- `RESTORE_ARTIFACTS_AND_ABORT`: keine COMMITTED-Evidenz; quarantänisierte Manifest-Artefakte werden zuerst in den aktiven Zustand zurückgeführt, danach wird die Execution abgebrochen.
+- `PURGE_ARTIFACTS_AND_COMPLETE`: Snapshot enthält bereits `DB_COMMITTED` am oder vor dem Backup-Cutoff; verbleibende Quarantäne wird zuerst gepurgt, danach wird die Execution `COMPLETED`.
+- `PURGE_REPLAYED_ARTIFACTS_AND_NORMALIZE`: post-backup COMMITTED ist signiert belegt und bereits in die private Restore-DB replayed; verbleibende Artifacts werden gepurgt und anschließend immutable Restore-Normalisierungsevidenz geschrieben. Die historische PREPARING-/ARTIFACTS_STAGED-Zeile wird nicht um erfundene Lifecycle-Zeitstempel ergänzt.
 
 ## Recovery Plan v1
 
-Ein Plan darf ausschließlich aus einem unblocked `RECOVERY_READY` Assessment entstehen. `NOT_REQUIRED` und `BLOCKED` erzeugen keinen mutierbaren Recovery-Plan.
+Ein Plan entsteht ausschließlich aus einem unblocked `RECOVERY_READY` Assessment. `NOT_REQUIRED` und `BLOCKED` erzeugen keinen mutierbaren Plan.
 
-Der Plan bindet:
+Der Plan bindet unter anderem:
 
 - Backup-Cutoff und Reconciliation-Status,
 - Ledger-Generation und Ledger-Entries-Fingerprint,
 - Journal-Markerzahl,
-- Fingerprint aller signierten Replay-Obligations,
-- Assessment-Version und deterministischen Assessment-Fingerprint,
+- Fingerprint der signierten Replay-Obligations,
+- Assessment-Version und Assessment-Fingerprint,
 - jede Recovery-Action,
-- für jede Action alle immutable Execution-Artifact-Referenzen,
+- jede immutable Execution-Artifact-Referenz,
 - deren erwarteten Ausgangszustand `ACTIVE`, `QUARANTINED` oder `ABSENT`,
-- einen Fingerprint der vollständigen Action-Liste,
-- einen Fingerprint des vollständigen Plans.
+- Actions-Fingerprint und Plan-Fingerprint.
 
-Es gibt bewusst keinen Laufzeitstempel. Identische Eingangsevidenz erzeugt byte-identischen Planinhalt.
+`recovery-plan.json` enthält bewusst keinen Laufzeitstempel. Identische Eingangsevidenz erzeugt byte-identischen Inhalt. Die Datei wird exklusiv angelegt (`0600`) und der Workspace bleibt `0700`.
 
-### Warum die exakten Artifact-Referenzen notwendig sind
+### Warum nach einem Crash nicht neu geplant werden darf
 
-Nur Action-Typ und Artifact-Zähler reichen für Crash-Recovery nicht aus. Wenn ein Executor beispielsweise zwei von drei Quarantäne-Dateien bereits zurückkopiert und danach abstürzt, würde ein erneutes read-only Assessment einen anderen Filesystem-Zustand sehen. Ein Recovery-Retry darf dann nicht neu entscheiden, sondern muss den **vor der ersten Mutation persistierten Plan** fortsetzen.
+Wenn ein Executor bereits einen Teil der Dateien verschoben oder gelöscht hat, sieht ein erneutes Assessment einen anderen Filesystem-Zustand. Daraus erneut eine Recovery-Richtung abzuleiten wäre eine neue Entscheidung auf Basis eines bereits mutierten Systems.
 
-Deshalb ist der Plan die Wiederanlauf-Autorisierung für den späteren Executor. Er hält exakt fest, welche immutable Referenzen betroffen waren und welchen Ausgangszustand sie beim Planen hatten.
+Deshalb gilt:
 
-### Pfad- und Scope-Schutz
+> Sobald `recovery-plan.json` existiert, darf derselbe Workspace nicht erneut klassifiziert oder neu geplant werden.
 
-Schon beim Planen werden die privaten Artifact-Roots erneut geprüft:
+Ein Retry muss ausschließlich den bestehenden Plan gegen die aktuelle signierte Reconciliation verifizieren und diesen Plan fortsetzen. Ändert sich die externe Evidenz so, dass der Plan nicht mehr passt, blockiert der Executor fail-closed; er erzeugt keinen Ersatzplan.
 
-- absolute, existierende Nicht-Symlink-Verzeichnisse,
-- drei getrennte, nicht überlappende Roots,
-- keine absoluten Referenzen, kein `..`, keine Windows-Backslashes,
-- produktive Referenzformate für Report, Tenant-Export und Betroffenenexport,
-- Report-Referenzen bleiben an den Tenant gebunden,
-- kein vorhandener Pfadbestandteil darf ein Symlink sein,
-- vorhandene Ziele müssen reguläre Dateien sein,
-- aktive und quarantänisierte Kopie derselben Referenz gleichzeitig blockieren.
+## Signed Recovery Intent v1
 
-### Persistenz und Retry
+Vor der ersten Recovery-Mutation wird im privaten Workspace `recovery-execution/recovery-execution-pending.json` angelegt.
 
-Der Plan wird für den privaten Restore-Workspace als `recovery-plan.json` vorgesehen:
+Der PENDING-Intent bindet:
 
-- Parent-Verzeichnis `0700`,
+- Backup-Cutoff,
+- Plan-Version,
+- Plan-Fingerprint,
+- Actions-Fingerprint,
+- Action-Anzahl,
+- einen einmaligen `startedAt`,
+- `promotionAllowed=false`.
+
+Der Record wird HMAC-SHA256-signiert. Dafür wird ein **vierter unabhängiger 32-Byte-Key** verwendet:
+
+```text
+RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE=/etc/master-diagnostics/restore-private-recovery-intent.key
+```
+
+Erzeugung beispielsweise mit:
+
+```bash
+openssl rand -base64 32
+```
+
+Der Key darf nicht mit Backup-, Restore-Ledger- oder Privacy-Effect-Journal-Key identisch sein.
+
+Persistenzregeln:
+
+- Intent-Verzeichnis `0700`,
 - Datei `0600`,
-- exklusives Erzeugen mit `wx`,
-- identischer Retry ist byte-identisch und idempotent,
-- ein bereits vorhandener anderer Inhalt blockiert fail-closed.
+- exklusives Anlegen,
+- identischer Retry reused den vorhandenen signierten Intent,
+- ein abweichender Intent kann den bestehenden nicht ersetzen,
+- der ursprünglich signierte `startedAt` bleibt über Crash/Retry stabil.
 
-Der Reader verändert beim Verifizieren keine Dateirechte. Dadurch kann ein späterer Executor den Plan auch aus einem read-only Evidence-Mount prüfen.
+Normale Abort-/Completion-Transitions verwenden genau diesen signierten Recovery-Zeitpunkt. Dadurch werden bei einem Retry keine neuen historischen Zeitpunkte erfunden.
 
-Nach einer Teilmutation muss der Plan nicht gegen den inzwischen veränderten Filesystem-Zustand neu erzeugt werden. Er kann weiterhin intern und gegen die erneut kryptografisch verifizierte Restore-Reconciliation geprüft werden.
+## Recovery Executor
 
-## Recovery-Plan CLI
+`pnpm --filter @masters/db backup:restore-recovery-execute` führt keine Planung aus.
 
-`pnpm --filter @masters/db backup:restore-recovery-plan` führt die komplette **nicht-mutierende** Entscheidungsstrecke in einem Prozess aus:
+Der CLI benötigt ausschließlich bereits persistierte/verifizierbare Eingaben:
 
-1. Backup-Cutoff aus dem Staging-Manifest validieren,
-2. Ledger + Privacy-Effect-Journal erneut kryptografisch reconciliieren,
-3. Artifact-Replay-Manifest und -Result einlesen,
-4. privaten Restore-Healthcheck erneut berechnen,
-5. Recovery Assessment ausführen,
-6. nur bei `RECOVERY_READY` den deterministischen Plan exklusiv persistieren.
-
-Erforderliche Pfade werden ausschließlich als absolute Umgebungsvariablen akzeptiert. Zusätzlich zu den bereits für den Healthcheck verwendeten Variablen ist `RESTORE_PRIVATE_RECOVERY_PLAN_FILE` erforderlich.
-
-Das JSON-Ergebnis verwendet `mode: ISOLATED_RESTORE_RECOVERY_PLAN` und hat drei Zustände:
-
-- `NOT_REQUIRED`: Restore ist bereits gesund; Exit `0`, keine Plan-Datei.
-- `PLAN_READY`: Recovery ist eindeutig; Exit `0`, Plan wurde neu erstellt oder byte-identisch wiederverwendet.
-- `BLOCKED`: mindestens ein nicht sicher recoverbarer Zustand; Exit `3`, keine Plan-Datei.
-
-Technische/strukturelle Fehler bleiben Exit `1`.
-
-Der CLI darf **nur vor der ersten Recovery-Mutation** zur Neuplanung verwendet werden. Nach einem Crash mitten in einer späteren Recovery darf nicht erneut aus dem veränderten Filesystem klassifiziert werden; dann muss der Executor den bereits persistierten und gegen die aktuelle signierte Reconciliation verifizierten Plan fortsetzen.
-
-## Isoliertes Compose-/Host-Wiring
-
-`backup-restore-recovery-plan` läuft ausschließlich im internen Restore-Netz. Der Service erhält:
-
-- die private Restore-libSQL-DB,
-- Staging-Manifest, Ledger, Journal und beide Schlüssel nur read-only,
-- Artifact-Replay-Manifest/-Result aus dem privaten Workspace,
+- `RESTORE_STAGING_MANIFEST`,
+- Restore Privacy Ledger + Key,
+- Privacy Effect Journal + Key,
+- `RESTORE_PRIVATE_RECOVERY_PLAN_FILE`,
+- `RESTORE_PRIVATE_RECOVERY_INTENT_DIR`,
+- `RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE`,
 - die drei privaten Artifact-Roots,
-- `/restore-replay/recovery-plan.json` als einziges neues Evidence-Ziel.
+- die private Restore-DB über `DATABASE_URL`.
 
-Nur `/restore-replay` ist für diesen Service schreibbar. Es werden keine produktiven DB-, Report-, Export-, Delivery-, Caddy- oder sonstigen Produktiv-Volumes gemountet.
+Ablauf:
 
-Der Host-Workflow `replay-club-restore-privacy-db.sh` führt nach Artifact-Replay zuerst den Recovery-Planer aus:
+1. Backup-Cutoff aus dem Staging-Manifest validieren.
+2. Ledger + Journal erneut kryptografisch reconciliieren.
+3. Persistierten Recovery Plan einlesen und gegen diese aktuelle Reconciliation verifizieren.
+4. Vor der ersten Mutation einen signierten PENDING-Intent erzeugen oder den bereits vorhandenen verifizieren/reusen.
+5. Den Plan progress-aware ausführen.
+6. Technisches Resultat ausgeben; `promotionAllowed=false` bleibt unverändert.
 
-- `BLOCKED` aus dem Planer beendet den Ablauf mit Exit `3`.
-- Wenn `recovery-plan.json` entsteht, beendet der Wrapper bewusst mit Exit `4`: Recovery ist eindeutig geplant, aber in diesem Release wird **keine** Recovery-Mutation ausgeführt.
-- Wenn kein Plan erforderlich ist, folgt weiterhin der unabhängige read-only Healthcheck und muss `HEALTHY` melden.
+Das Resultat weist zusätzlich aus, ob der Intent neu angelegt (`intentCreated`) oder reused (`intentReused`) wurde.
 
-Damit kann ein recoverbarer historischer Zwischenzustand nicht mehr bloß am roten Healthcheck enden, ohne dass seine sichere Richtung durable gebunden wird; gleichzeitig kann der aktuelle Release noch keinen geplanten Zustand automatisch verändern oder als erfolgreichen Restore ausgeben.
+### Mutationsreihenfolge
 
-## Scope-Grenze
+Rollback-Richtung:
 
-Der aktuelle Stand umfasst Assessment, durable Recovery-Plan, CLI und isoliertes Compose-/Host-Wiring. Noch nicht enthalten sind:
+```text
+RESTORE_ARTIFACTS_AND_ABORT
+  Artifact Restore
+  -> DB Abort
+```
 
-1. mutierende Ausführung der persistierten Recovery-Aktionen,
-2. erneuter Healthcheck nach Recovery,
-3. kontrolliertes Promotion-Gate,
-4. Restore-Audit und praktischer RTO-Drill.
+Forward-Richtung:
 
-Bis diese Schritte abgeschlossen sind, bleibt `PRIVACY_BACKUP_STATE=DISABLED`.
+```text
+PURGE_ARTIFACTS_AND_COMPLETE
+  Artifact Purge
+  -> DB Completion
+```
+
+```text
+PURGE_REPLAYED_ARTIFACTS_AND_NORMALIZE
+  Artifact Purge
+  -> immutable Restore-Normalisierung
+```
+
+Der Executor ist progress-aware. Bereits ausgeführte Dateioperationen und terminale DB-/Normalization-Evidenz werden beim Retry erkannt. Unklare Zustände werden nicht heuristisch repariert.
+
+Normale DB-Terminaltransitionen und technische Audit-Events werden in derselben DB-Transaktion geschrieben. Es wird kein Benutzer erfunden; Recovery-Ereignisse verwenden den technischen Restore-Kontext.
+
+## Isoliertes Compose-Wiring
+
+Der Recovery-Executor liegt bewusst in einem separaten Override:
+
+```text
+infra/docker-compose.restore-recovery.yml
+```
+
+Der Host-Workflow kombiniert:
+
+```bash
+docker compose \
+  -f infra/docker-compose.club.yml \
+  -f infra/docker-compose.restore-recovery.yml
+```
+
+Der Service `backup-restore-recovery-execute` erhält:
+
+- private Restore-libSQL-DB über `backup-privacy-replay-db`,
+- Staging, Ledger, Journal und alle Evidence-Keys read-only,
+- den separaten Recovery-Intent-Key read-only,
+- `recovery-plan.json` separat read-only,
+- ausschließlich `recovery-execution`, `reports`, `tenant-exports` und `data-subject-delivery` aus dem privaten Workspace schreibbar,
+- ausschließlich `restore-internal` als Netzwerk.
+
+Damit kann der Executor weder den persistierten Plan noch andere Replay-Evidence-Dateien im Workspace überschreiben. Nicht gemountet werden produktive Targets wie `/var/lib/sqld`, produktive Reports/Exports/Delivery-Packages oder Caddy-Daten.
+
+Der Executor-Service hängt ausschließlich von der privaten `backup-privacy-replay-db` mit erfolgreichem Healthcheck ab. Er hat absichtlich **keine Abhängigkeit zum Recovery-Planer**. Ein Compose-Retry darf den Planer nicht implizit erneut starten.
+
+## Host-Workflow und Crash-Retry
+
+`infra/backup/replay-club-restore-privacy-db.sh` unterscheidet zwei Wege.
+
+Vor einer Recovery-Ausführung werden zusätzlich der Planpfad und das Intent-Verzeichnis gegen Symlink-/Dateityp-Verwechslungen geschützt. Das Intent-Verzeichnis wird mit `0700` vorbereitet; der Plan selbst bleibt read-only.
+
+### Neuer Restore ohne bestehenden Plan
+
+```text
+private workspace copy
+  -> migrate private DB
+  -> artifact replay plan
+  -> DB replay
+  -> artifact replay
+  -> recovery plan
+     -> kein Plan: read-only healthcheck
+     -> Plan: recovery executor -> read-only healthcheck
+```
+
+### Retry mit bereits vorhandenem `recovery-plan.json`
+
+```text
+existing private workspace
+  -> migrate private DB
+  -> existing plan + existing/new signed intent
+  -> recovery executor resume
+  -> read-only healthcheck
+```
+
+Im Retry-Pfad werden Artifact-Replay-Planung und Recovery-Planung bewusst übersprungen. Das verhindert eine Neuentscheidung auf einem teilweise veränderten Workspace.
+
+Der frühere Zwischenstatus „Plan vorhanden, Exit 4, keine Mutation implementiert“ entfällt. Ein vorhandener Plan wird jetzt ausgeführt. Technische oder kryptografische Fehler bleiben fail-closed.
+
+Der Recovery-Intent-Key wird nur benötigt, wenn tatsächlich ein Recovery-Plan ausgeführt werden muss. Ein bereits gesunder Restore ohne Plan benötigt diesen zusätzlichen Secret-Mount nicht zur Laufzeit.
+
+## Post-Recovery Healthcheck
+
+Nach jeder Recovery-Ausführung muss `backup-restore-healthcheck` erneut erfolgreich laufen.
+
+Der Healthcheck prüft weiterhin read-only:
+
+- aktuelle Reconciliation,
+- DB-Replay-Zustand,
+- Artifact-Replay-Evidenz,
+- aktive Filesystem-/DB-Konsistenz,
+- leere Quarantänen,
+- ungelöste Transient-Executions.
+
+Für den speziellen post-backup Forward-Fall akzeptiert er nur eine immutable Restore-Normalisierung, die erneut exakt an aktuelle Reconciliation, Backup-Cutoff, Execution/Tenant/Athlete und `dbCommittedAt` gebunden ist. Eine fremde oder alte Normalisierung bleibt blockierend.
+
+Ein grüner Healthcheck bedeutet lediglich:
+
+```text
+readyForPromotionReview = true
+promotionAllowed = false
+```
+
+## Aktuelle Scope-Grenze
+
+Damit umfasst Epic 12 nun:
+
+- read-only Recovery Assessment,
+- durable Recovery Plan,
+- signierten crash-stabilen Recovery Intent,
+- mutierenden progress-aware Recovery Executor,
+- isoliertes CLI-/Compose-/Host-Wiring,
+- verpflichtenden Post-Recovery-Healthcheck.
+
+Noch offen bleiben:
+
+1. kontrolliertes Promotion-Gate mit expliziter Evidence-Bindung,
+2. Restore-/Promotion-Audit,
+3. praktischer Restore-/RTO-Drill.
+
+Bis diese Schritte abgeschlossen und praktisch verifiziert sind, bleibt `PRIVACY_BACKUP_STATE=DISABLED`.
