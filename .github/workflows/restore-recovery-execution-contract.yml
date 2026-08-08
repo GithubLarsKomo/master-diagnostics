@@ -42,19 +42,18 @@ jobs:
               line for line in script.splitlines()
               if not line.lstrip().startswith('#')
           )
-          assert 'docker-compose.restore-recovery.yml' in script
-          assert 'backup-restore-recovery-execute' in script
-          assert 'RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE' in script
+          assert 'docker-compose.restore-recovery.yml' in active
+          assert 'backup-restore-recovery-execute' in active
+          assert 'RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE' in active
           assert 'exit 4' not in active
-          assert 'if [[ -f "${recovery_plan_path}" ]]; then' in script
-          retry_guard = script.index('# Crash/retry rule: once a durable plan exists')
-          artifact_plan = script.index('backup-privacy-artifact-plan', retry_guard)
-          retry_execute = script.index('run_recovery_executor', retry_guard)
-          retry_health = script.index('run_healthcheck', retry_execute)
+          retry_guard = active.index('if [[ -f "${recovery_plan_path}" ]]; then')
+          artifact_plan = active.index('backup-privacy-artifact-plan', retry_guard)
+          retry_execute = active.index('run_recovery_executor', retry_guard)
+          retry_health = active.index('run_healthcheck', retry_execute)
           assert retry_execute < retry_health < artifact_plan
-          normal_plan = script.rindex('backup-restore-recovery-plan')
-          normal_execute = script.rindex('run_recovery_executor')
-          normal_health = script.rindex('run_healthcheck')
+          normal_plan = active.rindex('backup-restore-recovery-plan')
+          normal_execute = active.rindex('run_recovery_executor')
+          normal_health = active.rindex('run_healthcheck')
           assert normal_plan < normal_execute < normal_health
           PY
 
