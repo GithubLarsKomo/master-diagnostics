@@ -1,10 +1,12 @@
-# Private Restore Recovery Assessment
+# Private Restore Recovery Assessment und Plan
 
 ## Zweck
 
 Ein Backup kann eine Anonymisierung mitten in ihrem mehrstufigen Ablauf enthalten. Nach Reconciliation, DB-Replay, Artifact-Replay und Healthcheck können deshalb historische `PREPARING`-, `ARTIFACTS_STAGED`- oder `DB_COMMITTED`-Zeilen sowie `.anonymization-quarantine`-Dateien übrig bleiben.
 
 Recovery Assessment v1 entscheidet ausschließlich **read-only**, welche Recovery-Richtung für jeden solchen technischen Zustand zulässig wäre. Es verändert weder DB noch Dateien, schreibt keine Journal-Marker und erlaubt keine Promotion.
+
+Recovery Plan v1 macht eine `RECOVERY_READY`-Entscheidung anschließend crash-retrybar. Noch bevor irgendeine Recovery-Mutation erlaubt wird, wird die Entscheidung zusammen mit den exakten immutable Artifact-Referenzen und ihrem erwarteten Ausgangszustand dauerhaft gebunden.
 
 ## Zentrale Prioritätsregel
 
@@ -13,9 +15,9 @@ Die signierte post-backup Privacy-Evidenz ist autoritativer als der ältere Snap
 Beispiel:
 
 ```text
-Backup-Cutoff:        Execution = ARTIFACTS_STAGED
-nach dem Backup:      dieselbe Execution wird produktiv DB_COMMITTED
-aktuelle Evidenz:     Ledger + Journal bestätigen COMMITTED
+Backup-Cutoff:          Execution = ARTIFACTS_STAGED
+nach dem Backup:        dieselbe Execution wird produktiv DB_COMMITTED
+aktuelle Evidenz:       Ledger + Journal bestätigen COMMITTED
 Restore-Reconciliation: post-backup Obligation für dieselbe Execution
 ```
 
@@ -61,7 +63,7 @@ Recovery Assessment akzeptiert nur einen Healthcheck, dessen Reconciliation-/DB-
 
 Root-/Scanfehler, Symlinks, Sonderdateien, Orphans oder kryptografische Evidence-Fehler bleiben nicht recoverbar und blockieren sofort.
 
-## Ergebnis
+## Assessment-Ergebnis
 
 Der technische Report hat genau drei Zustände:
 
@@ -69,15 +71,68 @@ Der technische Report hat genau drei Zustände:
 - `RECOVERY_READY`: alle historischen Blocker sind eindeutig und deterministisch einer sicheren Recovery-Richtung zugeordnet.
 - `BLOCKED`: mindestens ein Zustand ist nicht eindeutig oder nicht sicher recoverbar.
 
-Die Action-Liste ist nach Execution-ID sortiert und enthält nur technische Scope-IDs, Snapshot-Status, Effektbasis, Commit-Zeitpunkt und Artifact-Zähler.
+Die Assessment-Action-Liste ist nach Execution-ID sortiert und enthält nur technische Scope-IDs, Snapshot-Status, Effektbasis, Commit-Zeitpunkt und Artifact-Zähler.
+
+## Recovery Plan v1
+
+Ein Plan darf ausschließlich aus einem unblocked `RECOVERY_READY` Assessment entstehen. `NOT_REQUIRED` und `BLOCKED` erzeugen keinen mutierbaren Recovery-Plan.
+
+Der Plan bindet:
+
+- Backup-Cutoff und Reconciliation-Status,
+- Ledger-Generation und Ledger-Entries-Fingerprint,
+- Journal-Markerzahl,
+- Fingerprint aller signierten Replay-Obligations,
+- Assessment-Version und deterministischen Assessment-Fingerprint,
+- jede Recovery-Action,
+- für jede Action alle immutable Execution-Artifact-Referenzen,
+- deren erwarteten Ausgangszustand `ACTIVE`, `QUARANTINED` oder `ABSENT`,
+- einen Fingerprint der vollständigen Action-Liste,
+- einen Fingerprint des vollständigen Plans.
+
+Es gibt bewusst keinen Laufzeitstempel. Identische Eingangsevidenz erzeugt byte-identischen Planinhalt.
+
+### Warum die exakten Artifact-Referenzen notwendig sind
+
+Nur Action-Typ und Artifact-Zähler reichen für Crash-Recovery nicht aus. Wenn ein Executor beispielsweise zwei von drei Quarantäne-Dateien bereits zurückkopiert und danach abstürzt, würde ein erneutes read-only Assessment einen anderen Filesystem-Zustand sehen. Ein Recovery-Retry darf dann nicht neu entscheiden, sondern muss den **vor der ersten Mutation persistierten Plan** fortsetzen.
+
+Deshalb ist der Plan die Wiederanlauf-Autorisierung für den späteren Executor. Er hält exakt fest, welche immutable Referenzen betroffen waren und welchen Ausgangszustand sie beim Planen hatten.
+
+### Pfad- und Scope-Schutz
+
+Schon beim Planen werden die privaten Artifact-Roots erneut geprüft:
+
+- absolute, existierende Nicht-Symlink-Verzeichnisse,
+- drei getrennte, nicht überlappende Roots,
+- keine absoluten Referenzen, kein `..`, keine Windows-Backslashes,
+- produktive Referenzformate für Report, Tenant-Export und Betroffenenexport,
+- Report-Referenzen bleiben an den Tenant gebunden,
+- kein vorhandener Pfadbestandteil darf ein Symlink sein,
+- vorhandene Ziele müssen reguläre Dateien sein,
+- aktive und quarantänisierte Kopie derselben Referenz gleichzeitig blockieren.
+
+### Persistenz und Retry
+
+Der Plan wird für den privaten Restore-Workspace als `recovery-plan.json` vorgesehen:
+
+- Parent-Verzeichnis `0700`,
+- Datei `0600`,
+- exklusives Erzeugen mit `wx`,
+- identischer Retry ist byte-identisch und idempotent,
+- ein bereits vorhandener anderer Inhalt blockiert fail-closed.
+
+Der Reader verändert beim Verifizieren keine Dateirechte. Dadurch kann ein späterer Executor den Plan auch aus einem read-only Evidence-Mount prüfen.
+
+Nach einer Teilmutation muss der Plan nicht gegen den inzwischen veränderten Filesystem-Zustand neu erzeugt werden. Er kann weiterhin intern und gegen die erneut kryptografisch verifizierte Restore-Reconciliation geprüft werden.
 
 ## Scope-Grenze
 
-Dieser Slice ist ausschließlich Assessment. Noch nicht enthalten sind:
+Der aktuelle Stand umfasst Assessment und den durable Recovery-Plan-Vertrag. Noch nicht enthalten sind:
 
-1. mutierende Ausführung der klassifizierten Recovery-Aktionen,
-2. erneuter Healthcheck nach Recovery,
-3. kontrolliertes Promotion-Gate,
-4. Restore-Audit und praktischer RTO-Drill.
+1. operative CLI-/Compose-Verdrahtung des Plan-Schritts,
+2. mutierende Ausführung der persistierten Recovery-Aktionen,
+3. erneuter Healthcheck nach Recovery,
+4. kontrolliertes Promotion-Gate,
+5. Restore-Audit und praktischer RTO-Drill.
 
 Bis diese Schritte abgeschlossen sind, bleibt `PRIVACY_BACKUP_STATE=DISABLED`.
