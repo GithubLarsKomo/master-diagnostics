@@ -1,0 +1,93 @@
+name: Restore assessment contract
+
+on:
+  pull_request:
+    paths:
+      - 'infra/backup/assess-club-restore-privacy.sh'
+      - 'infra/docker-compose.restore-assessment.yml'
+      - 'packages/db/src/assess-restore-privacy-replay.ts'
+      - 'packages/db/src/prepare-restore-replay-work.ts'
+      - 'packages/db/src/services/restore-replay-work.ts'
+      - 'packages/db/package.json'
+      - '.github/workflows/restore-assessment-contract.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/backup/assess-club-restore-privacy.sh'
+      - 'infra/docker-compose.restore-assessment.yml'
+      - 'packages/db/src/assess-restore-privacy-replay.ts'
+      - 'packages/db/src/prepare-restore-replay-work.ts'
+      - 'packages/db/src/services/restore-replay-work.ts'
+      - 'packages/db/package.json'
+      - '.github/workflows/restore-assessment-contract.yml'
+
+jobs:
+  verify-restore-assessment-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare deployment environment
+        run: |
+          cp .env.example .env
+          sed -i 's/diagnostics.example.org/localhost/g' .env
+          sed -i 's/replace-with-at-least-32-random-bytes/ci-only-secret-with-at-least-32-characters/' .env
+      - name: Verify host orchestrator syntax
+        run: bash -n infra/backup/assess-club-restore-privacy.sh
+      - name: Verify isolated compose contract
+        run: |
+          docker compose --profile backup \
+            -f infra/docker-compose.club.yml \
+            -f infra/docker-compose.restore-assessment.yml \
+            config --format json > /tmp/restore-assessment-compose.json
+          python3 - <<'PY'
+          import json
+
+          with open('/tmp/restore-assessment-compose.json', encoding='utf-8') as handle:
+              config = json.load(handle)
+
+          services = config['services']
+          prepare = services['backup-restore-assessment-work']
+          database = services['backup-restore-assessment-db']
+          assess = services['backup-privacy-assess']
+
+          assert database['image'] == 'ghcr.io/tursodatabase/libsql-server:3ec6803'
+          assert set(database.get('networks', {})) == {'restore-assessment'}
+          assert config['networks']['restore-assessment']['internal'] is True
+          db_mounts = {v.get('target'): v for v in database.get('volumes', [])}
+          assert set(db_mounts) == {'/var/lib/sqld'}
+          assert '/restore-work/' in db_mounts['/var/lib/sqld']['source']
+          assert db_mounts['/var/lib/sqld'].get('read_only') is not True
+
+          prepare_mounts = {v.get('target'): v for v in prepare.get('volumes', [])}
+          assert set(prepare_mounts) == {'/restore-staging', '/restore-work'}
+          assert prepare_mounts['/restore-staging'].get('read_only') is True
+          assert prepare_mounts['/restore-work'].get('read_only') is not True
+          prepare_command = ' '.join(prepare.get('command', []))
+          assert 'backup:privacy-assessment-work' in prepare_command
+
+          assert assess['environment']['DATABASE_URL'] == 'http://backup-restore-assessment-db:8080'
+          assert set(assess.get('networks', {})) == {'restore-assessment'}
+          assert assess['depends_on']['backup-restore-assessment-db']['condition'] == 'service_healthy'
+          assess_mounts = {v.get('target'): v for v in assess.get('volumes', [])}
+          assert set(assess_mounts) == {
+              '/restore-staging',
+              '/privacy-ledger',
+              '/run/secrets/restore-privacy-ledger.key',
+              '/privacy-effect-journal',
+              '/run/secrets/restore-privacy-effect-journal.key',
+          }
+          assert all(v.get('read_only') is True for v in assess_mounts.values())
+          assess_command = ' '.join(assess.get('command', []))
+          assert 'backup:privacy-assess' in assess_command
+
+          production_targets = {
+              '/var/lib/masters/reports',
+              '/var/lib/masters/exports',
+              '/var/lib/masters/data-subject-delivery-packages',
+              '/data',
+              '/config',
+          }
+          assert production_targets.isdisjoint(prepare_mounts)
+          assert production_targets.isdisjoint(db_mounts)
+          assert production_targets.isdisjoint(assess_mounts)
+          PY
