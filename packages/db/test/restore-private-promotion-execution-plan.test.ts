@@ -91,6 +91,10 @@ describe('restore private promotion execution plan', () => {
         rollbackVolumeName: activeVolumes.dataSubjectDelivery,
       },
     ]);
+    expect(record.volumes.every((item) => (
+      item.rollbackVolumeName === item.activeVolumeName
+      && item.candidateVolumeName !== item.activeVolumeName
+    ))).toBe(true);
   });
 
   it('persists a signed immutable plan and reuses it for the same preflight and active volumes', async () => {
