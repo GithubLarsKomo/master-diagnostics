@@ -45,6 +45,41 @@ function assertAbsolutePath(value: string, label: string): void {
   if (!value.trim() || !isAbsolute(value)) throw new Error(`${label} must be an absolute path`);
 }
 
+function requiredEnvironmentPath(env: NodeJS.ProcessEnv, name: string): string {
+  const value = env[name]?.trim();
+  if (!value) throw new Error(`${name} is required`);
+  assertAbsolutePath(value, name);
+  return value;
+}
+
+function optionalEnvironmentPath(env: NodeJS.ProcessEnv, name: string): string | null {
+  const value = env[name]?.trim();
+  if (!value) return null;
+  assertAbsolutePath(value, name);
+  return value;
+}
+
+/** Canonical environment-to-path mapping shared by authorization and execution preflight CLIs. */
+export function restorePrivatePromotionStoragePathsFromEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+): Readonly<RestorePrivatePromotionStoragePaths> {
+  return Object.freeze({
+    stagingManifestPath: requiredEnvironmentPath(env, 'RESTORE_STAGING_MANIFEST'),
+    ledgerDir: requiredEnvironmentPath(env, 'RESTORE_PRIVACY_LEDGER_DIR'),
+    ledgerKeyFile: requiredEnvironmentPath(env, 'RESTORE_PRIVACY_LEDGER_KEY_FILE'),
+    journalDir: requiredEnvironmentPath(env, 'RESTORE_PRIVACY_EFFECT_JOURNAL_DIR'),
+    journalKeyFile: requiredEnvironmentPath(env, 'RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE'),
+    artifactManifestFile: requiredEnvironmentPath(env, 'RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE'),
+    artifactResultFile: requiredEnvironmentPath(env, 'RESTORE_PRIVACY_ARTIFACT_RESULT_FILE'),
+    reportRoot: requiredEnvironmentPath(env, 'RESTORE_PRIVACY_REPORT_ROOT'),
+    tenantExportRoot: requiredEnvironmentPath(env, 'RESTORE_PRIVACY_TENANT_EXPORT_ROOT'),
+    dataSubjectDeliveryRoot: requiredEnvironmentPath(env, 'RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT'),
+    recoveryPlanFile: requiredEnvironmentPath(env, 'RESTORE_PRIVATE_RECOVERY_PLAN_FILE'),
+    recoveryExecutionDir: requiredEnvironmentPath(env, 'RESTORE_PRIVATE_RECOVERY_INTENT_DIR'),
+    recoveryKeyFile: optionalEnvironmentPath(env, 'RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE'),
+  });
+}
+
 function assertPaths(paths: Readonly<RestorePrivatePromotionStoragePaths>): void {
   const required: readonly (readonly [string, string])[] = [
     [paths.stagingManifestPath, 'Restore staging manifest path'],
