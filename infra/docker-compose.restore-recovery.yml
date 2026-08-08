@@ -1,0 +1,31 @@
+services:
+  backup-restore-recovery-execute:
+    profiles: [backup]
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    environment:
+      DATABASE_URL: http://backup-privacy-replay-db:8080
+      DATABASE_AUTH_TOKEN: ""
+      RESTORE_PRIVACY_LEDGER_DIR: /privacy-ledger
+      RESTORE_PRIVACY_LEDGER_KEY_FILE: /run/secrets/restore-privacy-ledger.key
+      RESTORE_PRIVACY_EFFECT_JOURNAL_DIR: /privacy-effect-journal
+      RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE: /run/secrets/restore-privacy-effect-journal.key
+      RESTORE_PRIVATE_RECOVERY_PLAN_FILE: /restore-replay/recovery-plan.json
+      RESTORE_PRIVATE_RECOVERY_INTENT_DIR: /restore-replay/recovery-execution
+      RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE: /run/secrets/restore-private-recovery-intent.key
+      RESTORE_PRIVACY_REPORT_ROOT: /restore-replay/reports
+      RESTORE_PRIVACY_TENANT_EXPORT_ROOT: /restore-replay/tenant-exports
+      RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT: /restore-replay/data-subject-delivery
+    command: ["pnpm", "--filter", "@masters/db", "backup:restore-recovery-execute"]
+    volumes:
+      - ${RESTORE_STAGING_HOST_DIR:-/var/lib/master-diagnostics/restore-staging}:/restore-staging:ro
+      - ${RESTORE_PRIVACY_LEDGER_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-ledger}:/privacy-ledger:ro
+      - ${RESTORE_PRIVACY_LEDGER_KEY_FILE:-/etc/master-diagnostics/restore-privacy-ledger.key}:/run/secrets/restore-privacy-ledger.key:ro
+      - ${RESTORE_PRIVACY_EFFECT_JOURNAL_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-effect-journal}:/privacy-effect-journal:ro
+      - ${RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE:-/etc/master-diagnostics/restore-privacy-effect-journal.key}:/run/secrets/restore-privacy-effect-journal.key:ro
+      - ${RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE:-/etc/master-diagnostics/restore-private-recovery-intent.key}:/run/secrets/restore-private-recovery-intent.key:ro
+      - ${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-restore-unset}:/restore-replay
+    networks: [restore-internal]
