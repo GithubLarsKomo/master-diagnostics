@@ -32,6 +32,7 @@ export * from './services/restore-private-recovery-plan';
 export * from './services/restore-private-recovery-planning';
 export * from './services/restore-private-recovery-intent';
 export * from './services/restore-private-recovery-normalization';
+export * from './services/restore-private-recovery-executor';
 export * from './services/club-bootstrap';
 export * from './services/factory-protocol-templates';
 export * from './services/protocol-templates';
