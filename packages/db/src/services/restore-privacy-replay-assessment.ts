@@ -7,7 +7,6 @@ import {
   athleteGuardians,
   athleteSnapshots,
   athletes,
-  auditEvents,
   coachAthleteAssignments,
   tenantExportPackages,
   tests,
@@ -36,8 +35,7 @@ export type RestorePrivacyReplayDatabaseReason =
   | 'DATA_SUBJECT_EXPORT_METADATA_REMAINS'
   | 'TENANT_EXPORT_METADATA_REMAINS'
   | 'DELETION_REQUEST_STATE_UNRESOLVED'
-  | 'DELETION_REQUEST_TEXT_NOT_REDACTED'
-  | 'COMMIT_PROOF_MISSING';
+  | 'DELETION_REQUEST_TEXT_NOT_REDACTED';
 
 export interface RestorePrivacyReplayDatabaseCounts {
   readonly tests: number;
@@ -47,7 +45,6 @@ export interface RestorePrivacyReplayDatabaseCounts {
   readonly dataSubjectExportPackages: number;
   readonly tenantExportPackages: number;
   readonly deletionRequestsWithUnredactedText: number;
-  readonly matchingCommitProofs: number;
 }
 
 export interface RestorePrivacyReplayDatabaseObligationAssessment {
@@ -91,22 +88,6 @@ function tombstoneMatches(row: typeof athletes.$inferSelect): boolean {
     && row.trainingStatus === expected.trainingStatus;
 }
 
-function validCommitProof(
-  row: Pick<typeof auditEvents.$inferSelect, 'occurredAt' | 'afterJson'>,
-  obligation: Readonly<RestorePrivacyReplayObligation>,
-): boolean {
-  if (row.occurredAt !== obligation.dbCommittedAt || !row.afterJson) return false;
-  try {
-    const parsed: unknown = JSON.parse(row.afterJson);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
-    const value = parsed as Record<string, unknown>;
-    return value.athleteId === obligation.athleteId
-      && value.policyVersion === obligation.policyVersion;
-  } catch {
-    return false;
-  }
-}
-
 async function assessObligation(
   db: Database,
   obligation: Readonly<RestorePrivacyReplayObligation>,
@@ -136,7 +117,6 @@ async function assessObligation(
     tenantExportCount,
     deletionRequests,
     boundDeletionRequest,
-    commitProofRows,
   ] = await Promise.all([
     scalarCount(db, tests, and(eq(tests.tenantId, obligation.tenantId), eq(tests.athleteId, obligation.athleteId))),
     scalarCount(db, athleteSnapshots, and(
@@ -170,14 +150,6 @@ async function assessObligation(
         eq(athleteDeletionRequests.athleteId, obligation.athleteId),
       ))
       .limit(1),
-    db.select({ occurredAt: auditEvents.occurredAt, afterJson: auditEvents.afterJson })
-      .from(auditEvents)
-      .where(and(
-        eq(auditEvents.tenantId, obligation.tenantId),
-        eq(auditEvents.action, 'athlete.anonymization_db_committed'),
-        eq(auditEvents.entityType, 'athlete_anonymization_execution'),
-        eq(auditEvents.entityId, obligation.executionId),
-      )),
   ]);
 
   const unredactedDeletionRequestCount = deletionRequests.filter((row) => (
@@ -186,7 +158,6 @@ async function assessObligation(
   )).length;
   const deletionRequestResolved = boundDeletionRequest.length === 1
     && boundDeletionRequest[0]?.status === 'COMPLETED';
-  const commitProofCount = commitProofRows.filter((row) => validCommitProof(row, obligation)).length;
 
   const counts = Object.freeze({
     tests: testCount,
@@ -196,7 +167,6 @@ async function assessObligation(
     dataSubjectExportPackages: subjectExportCount,
     tenantExportPackages: tenantExportCount,
     deletionRequestsWithUnredactedText: unredactedDeletionRequestCount,
-    matchingCommitProofs: commitProofCount,
   });
 
   const reasons: RestorePrivacyReplayDatabaseReason[] = [];
@@ -209,7 +179,6 @@ async function assessObligation(
   if (tenantExportCount > 0) reasons.push('TENANT_EXPORT_METADATA_REMAINS');
   if (!deletionRequestResolved) reasons.push('DELETION_REQUEST_STATE_UNRESOLVED');
   if (unredactedDeletionRequestCount > 0) reasons.push('DELETION_REQUEST_TEXT_NOT_REDACTED');
-  if (commitProofCount < 1) reasons.push('COMMIT_PROOF_MISSING');
 
   return Object.freeze({
     executionId: obligation.executionId,
@@ -223,6 +192,10 @@ async function assessObligation(
 
 /**
  * Assesses only the database half of restore privacy replay.
+ *
+ * The signed external reconciliation obligation is the authorization/evidence source for why the
+ * privacy effect must hold. The restored database can predate the original anonymization commit,
+ * so this assessment deliberately does not require the original post-backup audit event to exist.
  *
  * The caller must connect this service exclusively to an isolated restore-staging database or a
  * private copy of it. This function is read-only and intentionally does not claim that filesystem
