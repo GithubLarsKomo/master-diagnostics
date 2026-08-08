@@ -27,7 +27,8 @@
     "backup:restore-recovery-plan": "tsx src/prepare-restore-private-recovery-plan.ts",
     "backup:restore-recovery-execute": "tsx src/execute-restore-private-recovery.ts",
     "backup:restore-promotion-intent": "tsx src/authorize-restore-private-promotion.ts",
-    "backup:restore-promotion-preflight": "tsx src/preflight-restore-private-promotion.ts"
+    "backup:restore-promotion-preflight": "tsx src/preflight-restore-private-promotion.ts",
+    "backup:restore-promotion-plan": "tsx src/prepare-restore-private-promotion-execution-plan.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",

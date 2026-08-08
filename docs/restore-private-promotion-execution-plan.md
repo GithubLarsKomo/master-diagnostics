@@ -42,13 +42,129 @@ Für jede Rolle werden gebunden:
 
 `rollbackVolumeName` muss exakt `activeVolumeName` entsprechen.
 
-## Host-Auflösung statt Vermutung
+## Read-only Host-Auflösung
 
-Der Plan-Core kennt keine Compose-Projektpräfixe und errät keine produktiven Docker-Volume-Namen. Die konkreten aktuell aktiven Namen werden dem Plan als technische Host-Evidence übergeben.
+Der Plan-Core kennt keine Compose-Projektpräfixe und errät keine produktiven Docker-Volume-Namen.
 
-Sie werden validiert und gemeinsam als `activeVolumeSetFingerprint` gebunden. Ändert sich bis zur späteren Ausführung auch nur ein aktiver Volume-Name, kann der vorhandene Plan nicht mehr verifiziert werden.
+Der Host-Resolver
 
-Der nächste operative Slice muss diese vier Namen read-only aus dem tatsächlich gerenderten/running Club-Stack auflösen und erst danach den Plan persistieren.
+```text
+infra/backup/resolve-active-club-volumes.py
+```
+
+vergleicht zwei unabhängige technische Quellen:
+
+1. `docker compose config --format json` des aktuellen Club-Stacks,
+2. `docker inspect` der tatsächlich laufenden `app`- und `libsql`-Container.
+
+Für jede der vier Datenrollen muss im gerenderten Compose genau ein Named-Volume-Mount am erwarteten Ziel existieren. Im laufenden Container muss genau ein beschreibbarer Docker-Volume-Mount am selben Ziel existieren.
+
+Zusätzlich werden geprüft:
+
+- `com.docker.compose.service` des laufenden Containers,
+- `com.docker.compose.project`, sofern der gerenderte Compose-Name vorhanden ist,
+- Top-Level-Deklaration des logischen Compose-Volumes,
+- optionaler expliziter Compose-Volume-Name,
+- eingeschränktes Docker-Volume-Namensformat,
+- Eindeutigkeit aller vier logischen Rollen,
+- Eindeutigkeit aller vier tatsächlich aktiven Docker-Volumes.
+
+Der Resolver führt ausschließlich Leseoperationen aus. Er erstellt, löscht oder mountet kein Docker-Volume.
+
+### Warum gerenderter und laufender Zustand gemeinsam geprüft werden
+
+Nur `docker compose config` würde lediglich den Sollzustand beschreiben. Nur `docker inspect` würde zwar den Istzustand zeigen, aber nicht beweisen, dass die Mount-Ziele noch dem aktuellen Club-Vertrag entsprechen.
+
+Die Kombination verhindert insbesondere, dass ein veralteter oder fremder Container-Mount unbemerkt als Rollback-Basis in den Execution Plan eingeht.
+
+## Host-Befehl
+
+Die Plan-Erstellung ist ein eigener expliziter Schritt:
+
+```bash
+bash infra/backup/prepare-club-restore-promotion-plan.sh restore-<timestamp>-<uuid>
+```
+
+Der Wrapper:
+
+1. validiert Staging-Name und private Restore-Pfade,
+2. verlangt bereits vorhandenes `promotion-intent.json`,
+3. prüft Artifact- und optionale Recovery-Evidence auf sichere Pfade,
+4. rendert den aktuellen Club-Compose-Stack read-only,
+5. verlangt genau einen laufenden `app`- und `libsql`-Container,
+6. liest deren Mounts mit `docker inspect`,
+7. lässt die vier aktiven Docker-Volume-Namen durch den Resolver validieren,
+8. startet ausschließlich die private Restore-DB und deren idempotente Migration,
+9. übergibt die vier validierten Volume-Namen als Environment-Werte an den isolierten Plan-Service.
+
+Der Wrapper enthält ausdrücklich keine Befehle für:
+
+- `docker volume create`,
+- `docker volume rm`,
+- `docker cp`,
+- produktive `docker compose down`-/Switch-Operationen,
+- erneuten DB-/Artifact-Replay,
+- erneute Recovery-Ausführung.
+
+## Plan-CLI
+
+Container-Einstiegspunkt:
+
+```bash
+pnpm --filter @masters/db backup:restore-promotion-plan
+```
+
+Der CLI akzeptiert keinen gespeicherten Preflight als Autorisierungsquelle. Er:
+
+1. rekonstruiert Promotion Readiness erneut aus aktueller Raw Evidence,
+2. verifiziert den signierten Promotion Intent erneut,
+3. berechnet dadurch einen frischen Promotion Execution Preflight,
+4. validiert die vier hostseitig aufgelösten aktiven Docker-Volume-Namen,
+5. persistiert erst dann den signierten Execution Plan.
+
+Bei Erfolg bleibt die Sicherheitsgrenze ausdrücklich:
+
+```text
+status = PREPARED
+promotionAllowed = true
+authorizationPersisted = true
+productionMutationAllowed = false
+promotionExecuted = false
+evidenceRecomputed = true
+```
+
+Der Output enthält außerdem:
+
+- `executionFingerprint`,
+- `planFingerprint`,
+- `planSignature`,
+- `candidateSetId`,
+- `activeVolumeSetFingerprint`,
+- `caddyPolicy`,
+- alle vier gebundenen Volume-Rollen.
+
+Ein identischer Retry reused den bestehenden Plan. Ändert sich nur ein aktiver Volume-Name, wird der vorhandene Plan nicht ersetzt oder angepasst, sondern fail-closed abgelehnt.
+
+## Isolierter Plan-Service
+
+`infra/docker-compose.restore-promotion.yml` enthält zusätzlich:
+
+```text
+backup-restore-promotion-plan
+```
+
+Der Service:
+
+- nutzt nur `backup-privacy-replay-db`,
+- läuft nur auf `restore-internal`,
+- sieht den gesamten privaten Restore-Workspace read-only,
+- darf ausschließlich `/restore-replay/promotion` schreiben,
+- liest Promotion-Key, Ledger und Journal nur read-only,
+- erhält keinen Docker-Socket,
+- erhält keine produktiven Named Volumes,
+- erhält die vier aktiven Namen nur als bereits hostseitig validierte Environment-Werte.
+
+Damit kann der Container zwar den signierten Plan erzeugen, aber weder Docker selbst steuern noch produktive Daten verändern.
 
 ## Deterministische Kandidaten
 
@@ -96,7 +212,7 @@ Caddy-TLS-/Runtime-State wird bewusst nicht auf den Backup-Zeitpunkt zurückgese
 caddyPolicy = PRESERVE_CURRENT
 ```
 
-Die Backup-Bundles enthalten zwar Caddy-Daten, aber die Privacy-Replay-Kette mutiert nur die vier fachlichen App-Datenbereiche. Eine Promotion dieser privaten Restore-Kopie darf deshalb nicht nebenbei ältere Zertifikats-/Caddy-Daten aktivieren.
+Eine Promotion der privaten Restore-Kopie darf nicht nebenbei ältere Zertifikats-/Caddy-Daten aktivieren.
 
 ## Bindung an die Promotion-Evidence
 
@@ -113,13 +229,7 @@ Der Plan bindet:
 - Safety-Policies,
 - `planFingerprint`.
 
-Vor der späteren Mutation muss der Executor erneut:
-
-1. aktuelle Raw Evidence bewerten,
-2. Promotion Preflight neu ausführen,
-3. den Promotion Intent verifizieren,
-4. die aktuell aktiven Docker-Volumes erneut auflösen,
-5. den Execution Plan gegen **beides** verifizieren.
+Vor der späteren Mutation muss der Executor erneut aktuelle Raw Evidence bewerten, den Promotion Preflight ausführen, den Promotion Intent verifizieren, die aktuell aktiven Docker-Volumes erneut auflösen und den Execution Plan gegen **beides** verifizieren.
 
 ## Signatur und Persistenz
 
@@ -136,8 +246,6 @@ HMAC-SHA256
 masters:restore-private-promotion-execution-plan:v1
 ```
 
-Der bereits separate Promotion-Key wird mit eigener Domain Separation verwendet. Der Plan-Key ist damit kryptografisch vom Promotion Intent getrennt, obwohl dieselbe geheime Schlüsseldatei genutzt wird.
-
 Persistenzregeln:
 
 - Target-Verzeichnis `0700`,
@@ -147,32 +255,40 @@ Persistenzregeln:
 - geänderter Preflight oder aktiver Volume-Satz kann den bestehenden Plan nicht übernehmen,
 - Tampering wird durch Struktur-, Fingerprint- und HMAC-Prüfung erkannt.
 
-## Safety Policies
+## Server-Contracts
 
-Execution Plan v1 verlangt exakt:
+`Restore Promotion Plan Contract` prüft mit echter libSQL-Restore-DB und signierter Restore-Evidence:
 
-```text
-switchStrategy = VERSIONED_EXTERNAL_NAMED_VOLUMES
-rollbackStrategy = KEEP_PREVIOUS_ACTIVE_VOLUMES
-caddyPolicy = PRESERVE_CURRENT
-productionMutationAllowed = false
-promotionExecuted = false
-```
+- frische Readiness-/Intent-/Preflight-Kette bis zum Plan,
+- Plan-Erstellung und idempotente Wiederverwendung,
+- `productionMutationAllowed=false`,
+- unveränderte aktive Volumes als Rollback-Satz,
+- keine Kandidaten-/Aktiv-Kollision,
+- Plan-Datei `0600`,
+- Active-Volume-Drift blockiert und verändert den vorhandenen Plan nicht.
 
-Abweichende Policies machen den Plan unverifizierbar.
+`Restore Promotion Wiring Contract` prüft zusätzlich:
+
+- Resolver gegen synthetische Compose-/Inspect-Evidence,
+- Ablehnung eines Containers aus einem anderen Compose-Projekt,
+- Bash-Syntax und read-only Host-Auflösung,
+- keine Docker-Volume-Mutation im Wrapper,
+- kein Docker-Socket im Plan-Service,
+- keine produktiven Volume-Mounts im Plan-Service,
+- nur `/restore-replay/promotion` schreibbar.
 
 ## Noch nicht implementiert
 
-Dieser Slice:
+Der aktuelle Stand:
 
-- erstellt keine Docker-Volumes,
-- kopiert keine Restore-Daten,
+- erstellt keine Kandidaten-Volumes,
+- kopiert keine Restore-Daten in Kandidaten,
 - stoppt keine produktiven Dienste,
 - verändert keine Compose-Selectoren,
 - schaltet keinen Kandidaten aktiv,
 - löscht keinen Rollback-Satz.
 
-Als nächstes folgt die **read-only Host-Auflösung der aktuell aktiven Volume-Namen plus Plan-CLI/Persistenz**. Erst danach werden Kandidaten erstellt und befüllt; die eigentliche Produktionsumschaltung bleibt ein weiterer separater Schritt.
+Als nächster Slice folgt die **Erzeugung und Befüllung der vier neuen Kandidaten-Volumes**, weiterhin ohne produktive Umschaltung. Danach braucht es einen Kandidaten-Healthcheck; erst ein weiterer Schritt darf den produktiven Selector wechseln.
 
 Bis Promotion-Executor, Audit und praktischer RTO-Drill abgeschlossen sind, bleibt:
 
