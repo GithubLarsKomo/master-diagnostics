@@ -11,6 +11,7 @@ export interface RestorePrivatePromotionExecutionPreflight {
   readonly preflightVersion: typeof RESTORE_PRIVATE_PROMOTION_EXECUTION_PREFLIGHT_VERSION;
   readonly status: 'EXECUTION_READY';
   readonly authorizationScope: 'PRIVATE_RESTORE_PROMOTION';
+  readonly evidenceRecomputed: true;
   readonly backupCutoff: string;
   readonly readinessEvidenceFingerprint: `sha256:${string}`;
   readonly healthcheckFingerprint: `sha256:${string}`;
@@ -33,6 +34,7 @@ function canonicalPreflightBody(
   return {
     preflightVersion: RESTORE_PRIVATE_PROMOTION_EXECUTION_PREFLIGHT_VERSION,
     authorizationScope: 'PRIVATE_RESTORE_PROMOTION' as const,
+    evidenceRecomputed: true as const,
     backupCutoff: readiness.backupCutoff,
     readinessEvidenceFingerprint: readiness.evidenceFingerprint,
     healthcheckFingerprint: readiness.healthcheckFingerprint,
