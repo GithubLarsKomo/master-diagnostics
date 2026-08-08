@@ -48,6 +48,7 @@ export interface PersistedRestorePrivacyArtifactReplayManifest {
 const REPORT_REFERENCE = /^[a-zA-Z0-9/_-]+\.pdf$/;
 const TENANT_EXPORT_REFERENCE = /^[a-f0-9-]+\.mde$/;
 const DATA_SUBJECT_REFERENCE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.mdse$/i;
+const SHA256_FINGERPRINT = /^sha256:[0-9a-f]{64}$/;
 
 function sha256(value: string): `sha256:${string}` {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`;
@@ -75,12 +76,19 @@ function canonicalObligations(obligations: readonly Readonly<RestorePrivacyRepla
     }));
 }
 
-function assertSafeReportReference(reference: string, tenantId: string, testId: string): void {
+export function restorePrivacyObligationsFingerprint(
+  obligations: readonly Readonly<RestorePrivacyReplayObligation>[],
+): `sha256:${string}` {
+  return sha256(JSON.stringify(canonicalObligations(obligations)));
+}
+
+function assertSafeReportReference(reference: string, tenantId: string, testId?: string): void {
+  const expectedPrefix = testId ? `${tenantId}/${testId}/` : `${tenantId}/`;
   if (
     !REPORT_REFERENCE.test(reference)
     || reference.startsWith('/')
     || reference.includes('..')
-    || !reference.startsWith(`${tenantId}/${testId}/`)
+    || !reference.startsWith(expectedPrefix)
   ) {
     throw new Error('Restore privacy report storage reference is unsafe or outside its subject scope');
   }
@@ -123,6 +131,96 @@ function mergeEntry(
 
 function pairKey(tenantId: string, athleteId: string): string {
   return `${tenantId}\u0000${athleteId}`;
+}
+
+function assertManifestEntry(
+  entry: Readonly<RestorePrivacyArtifactReplayEntry>,
+  obligationsByExecution: ReadonlyMap<string, Readonly<RestorePrivacyReplayObligation>>,
+): void {
+  if (!entry.tenantId?.trim() || !entry.storageReference?.trim()) {
+    throw new Error('Restore privacy artifact replay manifest entry is incomplete');
+  }
+  if (!Array.isArray(entry.executionIds) || entry.executionIds.length === 0) {
+    throw new Error('Restore privacy artifact replay manifest entry has no bound execution');
+  }
+  const canonicalExecutionIds = [...new Set(entry.executionIds)].sort();
+  if (JSON.stringify(canonicalExecutionIds) !== JSON.stringify(entry.executionIds)) {
+    throw new Error('Restore privacy artifact replay manifest execution IDs are not canonical');
+  }
+
+  for (const executionId of entry.executionIds) {
+    const obligation = obligationsByExecution.get(executionId);
+    if (!obligation) throw new Error('Restore privacy artifact replay manifest references an unknown execution');
+    if (obligation.tenantId !== entry.tenantId) {
+      throw new Error('Restore privacy artifact replay manifest entry crosses tenant scope');
+    }
+    if (entry.kind !== 'TENANT_EXPORT' && obligation.athleteId !== entry.athleteId) {
+      throw new Error('Restore privacy artifact replay manifest entry crosses athlete scope');
+    }
+  }
+
+  if (entry.kind === 'REPORT') {
+    if (!entry.athleteId) throw new Error('Restore privacy report replay entry requires an athlete scope');
+    assertSafeReportReference(entry.storageReference, entry.tenantId);
+    return;
+  }
+  if (entry.kind === 'DATA_SUBJECT_DELIVERY') {
+    if (!entry.athleteId) throw new Error('Restore privacy data subject replay entry requires an athlete scope');
+    assertSafeDataSubjectReference(entry.storageReference);
+    return;
+  }
+  if (entry.kind === 'TENANT_EXPORT') {
+    if (entry.athleteId !== null) throw new Error('Restore privacy tenant export replay entry must be tenant-scoped');
+    assertSafeTenantExportReference(entry.storageReference);
+    return;
+  }
+  throw new Error('Restore privacy artifact replay manifest entry kind is unsupported');
+}
+
+export function verifyRestorePrivacyArtifactReplayManifest(
+  manifest: Readonly<RestorePrivacyArtifactReplayManifest>,
+  report: Readonly<RestorePrivacyReconciliationReport>,
+): void {
+  if (report.status === 'BLOCKED') {
+    throw new Error('Restore privacy artifact replay manifest cannot be verified against blocked reconciliation');
+  }
+  if (manifest.manifestVersion !== RESTORE_PRIVACY_ARTIFACT_REPLAY_MANIFEST_VERSION) {
+    throw new Error('Restore privacy artifact replay manifest version is unsupported');
+  }
+  if (manifest.backupCutoff !== report.backupCutoff || manifest.reconciliationStatus !== report.status) {
+    throw new Error('Restore privacy artifact replay manifest does not match the selected reconciliation');
+  }
+  if (
+    manifest.ledgerGeneratedAt !== (report.ledger?.generatedAt ?? null)
+    || manifest.ledgerEntriesFingerprint !== (report.ledger?.entriesFingerprint ?? null)
+    || manifest.journalMarkerCount !== report.journalMarkerCount
+    || manifest.obligationCount !== report.obligations.length
+    || manifest.obligationsFingerprint !== restorePrivacyObligationsFingerprint(report.obligations)
+  ) {
+    throw new Error('Restore privacy artifact replay manifest evidence binding does not match reconciliation');
+  }
+  if (!SHA256_FINGERPRINT.test(manifest.obligationsFingerprint) || !SHA256_FINGERPRINT.test(manifest.entriesFingerprint)) {
+    throw new Error('Restore privacy artifact replay manifest fingerprint is invalid');
+  }
+  if (!Array.isArray(manifest.entries) || manifest.entryCount !== manifest.entries.length) {
+    throw new Error('Restore privacy artifact replay manifest entry count is invalid');
+  }
+  if (report.status === 'CLEAR' && manifest.entries.length !== 0) {
+    throw new Error('CLEAR restore privacy reconciliation must have an empty artifact replay plan');
+  }
+
+  const obligationsByExecution = new Map(report.obligations.map((item) => [item.executionId, item] as const));
+  for (const entry of manifest.entries) assertManifestEntry(entry, obligationsByExecution);
+  const canonicalEntries = [...manifest.entries].sort((left, right) => entryKey(left).localeCompare(entryKey(right)));
+  if (JSON.stringify(canonicalEntries) !== JSON.stringify(manifest.entries)) {
+    throw new Error('Restore privacy artifact replay manifest entries are not in canonical order');
+  }
+  if (new Set(manifest.entries.map((entry) => entryKey(entry))).size !== manifest.entries.length) {
+    throw new Error('Restore privacy artifact replay manifest contains duplicate entries');
+  }
+  if (sha256(JSON.stringify(manifest.entries)) !== manifest.entriesFingerprint) {
+    throw new Error('Restore privacy artifact replay manifest entries fingerprint does not match its entries');
+  }
 }
 
 /**
@@ -225,11 +323,10 @@ export async function buildRestorePrivacyArtifactReplayManifest(
   const canonicalEntries = Object.freeze(
     [...entries.values()].sort((left, right) => entryKey(left).localeCompare(entryKey(right))),
   );
-  const canonicalObligationList = canonicalObligations(report.obligations);
   const entriesFingerprint = sha256(JSON.stringify(canonicalEntries));
-  const obligationsFingerprint = sha256(JSON.stringify(canonicalObligationList));
+  const obligationsFingerprint = restorePrivacyObligationsFingerprint(report.obligations);
 
-  return Object.freeze({
+  const manifest = Object.freeze({
     manifestVersion: RESTORE_PRIVACY_ARTIFACT_REPLAY_MANIFEST_VERSION,
     backupCutoff: report.backupCutoff,
     reconciliationStatus: report.status,
@@ -242,6 +339,30 @@ export async function buildRestorePrivacyArtifactReplayManifest(
     entriesFingerprint,
     entries: canonicalEntries,
   });
+  verifyRestorePrivacyArtifactReplayManifest(manifest, report);
+  return manifest;
+}
+
+export async function readVerifiedRestorePrivacyArtifactReplayManifestIfPresent(
+  filePath: string,
+  report: Readonly<RestorePrivacyReconciliationReport>,
+): Promise<Readonly<RestorePrivacyArtifactReplayManifest> | null> {
+  let serialized: string;
+  try {
+    serialized = await readFile(filePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  let parsed: RestorePrivacyArtifactReplayManifest;
+  try {
+    parsed = JSON.parse(serialized) as RestorePrivacyArtifactReplayManifest;
+  } catch (error) {
+    throw new Error('Restore privacy artifact replay manifest is not valid JSON', { cause: error });
+  }
+  verifyRestorePrivacyArtifactReplayManifest(parsed, report);
+  await chmod(filePath, 0o600);
+  return Object.freeze(parsed);
 }
 
 export async function persistRestorePrivacyArtifactReplayManifest(
