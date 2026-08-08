@@ -232,7 +232,10 @@ jobs:
               assert mounts['/restore-replay']['type'] == 'bind'
               assert mounts['/restore-replay']['read_only'] is True
               assert mounts['/candidate']['type'] == 'volume'
-              assert mounts['/candidate'].get('read_only') is candidate_ro
+              if candidate_ro:
+                  assert mounts['/candidate'].get('read_only') is True
+              else:
+                  assert mounts['/candidate'].get('read_only') is not True
               assert mounts['/candidate']['source'] == 'restore-promotion-candidate'
               assert forbidden.isdisjoint(mounts)
           volume = config['volumes']['restore-promotion-candidate']
