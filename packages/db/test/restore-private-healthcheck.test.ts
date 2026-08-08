@@ -1,5 +1,4 @@
 import { createClient } from '@libsql/client';
-import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
@@ -13,6 +12,7 @@ import { prepareAthleteAnonymizationExecution } from '../src/services/anonymizat
 import { restorePrivacyArtifactReplayResultForManifest } from '../src/services/restore-privacy-artifact-replay';
 import { buildRestorePrivacyArtifactReplayManifest } from '../src/services/restore-privacy-artifact-replay-manifest';
 import { assessRestorePrivateHealthcheck } from '../src/services/restore-private-healthcheck';
+import { replayRestorePrivacyObligationToDatabase } from '../src/services/restore-privacy-db-replay';
 import type { RestorePrivacyReconciliationReport } from '../src/services/restore-privacy-reconciliation-report';
 import type { GlobalPrivacyCapabilities } from '../src/services/global-privacy-policy';
 
@@ -147,28 +147,13 @@ async function seedNormalizedReplay(
   );
   const dbCommittedAt = '2026-08-06T12:00:00.000Z';
   const reconciliation = replayReconciliation(approval, execution, dbCommittedAt);
+  const obligation = reconciliation.obligations[0]!;
 
-  await db.insert(schema.restorePrivacyReplayAuthorizations).values({
-    executionId: execution.id,
-    tenantId: execution.tenantId,
-    athleteId: execution.athleteId,
-    approvalId: approval.id,
-    deletionRequestId: approval.deletionRequestId,
-    executionVersion: execution.executionVersion,
-    policyVersion: approval.policyVersion,
-    scopeFingerprint: approval.scopeFingerprint,
-    capabilityFingerprint: approval.capabilityFingerprint,
-    dbCommittedAt,
-    status: 'ACTIVE',
-    appliedAt: null,
-    createdAt: '2026-08-08T08:00:00.000Z',
-    updatedAt: '2026-08-08T08:00:00.000Z',
-  });
-  await db.update(schema.restorePrivacyReplayAuthorizations).set({
-    status: 'APPLIED',
-    appliedAt: '2026-08-08T09:00:00.000Z',
-    updatedAt: '2026-08-08T09:00:00.000Z',
-  }).where(eq(schema.restorePrivacyReplayAuthorizations.executionId, execution.id));
+  await replayRestorePrivacyObligationToDatabase(
+    db,
+    obligation,
+    '2026-08-08T09:00:00.000Z',
+  );
 
   await db.insert(schema.restorePrivateRecoveryNormalizations).values({
     executionId: execution.id,
