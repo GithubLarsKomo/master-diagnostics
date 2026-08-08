@@ -19,6 +19,7 @@ import {
 } from './services/restore-private-recovery-receipt';
 import { createRestorePrivacyReconciliationReportFromStorage } from './services/restore-privacy-reconciliation-report';
 
+const RESTORE_PRIVATE_PROMOTION_INTENT_CLI_MODE = 'ISOLATED_RESTORE_PROMOTION_INTENT' as const;
 const CANONICAL_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 interface StagedBackupManifest {
@@ -158,7 +159,7 @@ async function main(): Promise<void> {
 
   if (!readiness.promotionAllowed || readiness.status !== 'PROMOTION_READY') {
     process.stdout.write(`${JSON.stringify({
-      mode: 'ISOLATED_RESTORE_PROMOTION_INTENT',
+      mode: RESTORE_PRIVATE_PROMOTION_INTENT_CLI_MODE,
       status: 'BLOCKED',
       promotionAllowed: false,
       authorizationPersisted: false,
@@ -179,7 +180,7 @@ async function main(): Promise<void> {
   });
 
   process.stdout.write(`${JSON.stringify({
-    mode: 'ISOLATED_RESTORE_PROMOTION_INTENT',
+    mode: RESTORE_PRIVATE_PROMOTION_INTENT_CLI_MODE,
     status: 'AUTHORIZED',
     backupCutoff: readiness.backupCutoff,
     promotionAllowed: true,
