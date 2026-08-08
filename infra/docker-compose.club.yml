@@ -154,6 +154,63 @@ services:
       - ${RESTORE_PRIVACY_EFFECT_JOURNAL_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-effect-journal}:/privacy-effect-journal:ro
       - ${RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE:-/etc/master-diagnostics/restore-privacy-effect-journal.key}:/run/secrets/restore-privacy-effect-journal.key:ro
 
+  backup-privacy-replay-db:
+    profiles: [backup]
+    image: ghcr.io/tursodatabase/libsql-server:3ec6803
+    restart: "no"
+    environment:
+      SQLD_NODE: primary
+    volumes:
+      - ${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-restore-unset}/libsql:/var/lib/sqld
+    networks: [restore-internal]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  backup-privacy-replay-migrate:
+    profiles: [backup]
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    environment:
+      DATABASE_URL: http://backup-privacy-replay-db:8080
+      DATABASE_AUTH_TOKEN: ""
+    command: ["pnpm", "--filter", "@masters/db", "db:migrate"]
+    depends_on:
+      backup-privacy-replay-db:
+        condition: service_healthy
+    networks: [restore-internal]
+
+  backup-privacy-replay:
+    profiles: [backup]
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    environment:
+      DATABASE_URL: http://backup-privacy-replay-db:8080
+      DATABASE_AUTH_TOKEN: ""
+      RESTORE_PRIVACY_LEDGER_DIR: /privacy-ledger
+      RESTORE_PRIVACY_LEDGER_KEY_FILE: /run/secrets/restore-privacy-ledger.key
+      RESTORE_PRIVACY_EFFECT_JOURNAL_DIR: /privacy-effect-journal
+      RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE: /run/secrets/restore-privacy-effect-journal.key
+    command: ["pnpm", "--filter", "@masters/db", "backup:privacy-replay-db"]
+    volumes:
+      - ${RESTORE_STAGING_HOST_DIR:-/var/lib/master-diagnostics/restore-staging}:/restore-staging:ro
+      - ${RESTORE_PRIVACY_LEDGER_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-ledger}:/privacy-ledger:ro
+      - ${RESTORE_PRIVACY_LEDGER_KEY_FILE:-/etc/master-diagnostics/restore-privacy-ledger.key}:/run/secrets/restore-privacy-ledger.key:ro
+      - ${RESTORE_PRIVACY_EFFECT_JOURNAL_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-effect-journal}:/privacy-effect-journal:ro
+      - ${RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE:-/etc/master-diagnostics/restore-privacy-effect-journal.key}:/run/secrets/restore-privacy-effect-journal.key:ro
+    depends_on:
+      backup-privacy-replay-migrate:
+        condition: service_completed_successfully
+    networks: [restore-internal]
+
   app:
     build:
       context: ..
@@ -220,6 +277,8 @@ services:
 
 networks:
   internal:
+  restore-internal:
+    internal: true
 volumes:
   libsql-data:
   report-data:
