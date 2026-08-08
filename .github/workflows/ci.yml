@@ -57,6 +57,7 @@ jobs:
           bash -n infra/backup/stage-club-restore.sh
           bash -n infra/backup/create-club-restore-privacy-ledger.sh
           bash -n infra/backup/reconcile-club-restore-privacy.sh
+          bash -n infra/backup/replay-club-restore-privacy-db.sh
       - name: Verify runtime privacy capability attestation
         run: pnpm privacy-capabilities:check
       - name: Verify independent Python diagnostic references
@@ -113,7 +114,6 @@ jobs:
             pnpm --silent --filter @masters/db backup:privacy-ledger > /tmp/restore-privacy-ledger-summary.json
           python3 - <<'PY'
           import json
-          import os
           from pathlib import Path
 
           with open('/tmp/restore-privacy-ledger-summary.json', encoding='utf-8') as handle:
@@ -165,6 +165,38 @@ jobs:
           assert report['journalMarkerCount'] == 0
           assert report['obligations'] == []
           assert report['blockers'] == []
+          PY
+      - name: Verify isolated restore privacy database replay CLI
+        run: |
+          rm -f /tmp/restore-privacy-replay-ci.db
+          DATABASE_URL=file:/tmp/restore-privacy-replay-ci.db DATABASE_AUTH_TOKEN= \
+            pnpm --silent --filter @masters/db db:migrate >/tmp/restore-privacy-replay-migrate.log
+          RESTORE_STAGING_MANIFEST=/tmp/restore-staging/restore-ci/manifest.json \
+          RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-privacy-ledger \
+          RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-privacy-ledger.key \
+          RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-privacy-effect-journal \
+          RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-privacy-effect-journal.key \
+          DATABASE_URL=file:/tmp/restore-privacy-replay-ci.db DATABASE_AUTH_TOKEN= \
+            pnpm --silent --filter @masters/db backup:privacy-replay-db > /tmp/restore-privacy-replay-summary.json
+          python3 - <<'PY'
+          import json
+
+          with open('/tmp/restore-privacy-replay-summary.json', encoding='utf-8') as handle:
+              summary = json.load(handle)
+          assert summary == {
+              'mode': 'ISOLATED_RESTORE_DB_REPLAY',
+              'backupCutoff': '2026-08-01T00:00:00.000Z',
+              'reconciliationStatus': 'CLEAR',
+              'databaseAssessmentBefore': 'DATABASE_SATISFIED',
+              'databaseAssessmentAfter': 'DATABASE_SATISFIED',
+              'promotionAllowed': False,
+              'obligationCount': 0,
+              'databaseSatisfiedBeforeCount': 0,
+              'replayRequiredCount': 0,
+              'appliedCount': 0,
+              'alreadyAppliedCount': 0,
+              'executions': [],
+          }
           PY
       - name: Run Playwright E2E
         run: |
@@ -220,10 +252,14 @@ jobs:
           backup_stage = config["services"]["backup-restore-stage"]
           privacy_ledger = config["services"]["backup-privacy-ledger"]
           privacy_reconcile = config["services"]["backup-privacy-reconcile"]
+          privacy_replay_db = config["services"]["backup-privacy-replay-db"]
+          privacy_replay_migrate = config["services"]["backup-privacy-replay-migrate"]
+          privacy_replay = config["services"]["backup-privacy-replay"]
           libsql = config["services"]["libsql"]
           caddy = config["services"]["caddy"]
 
           assert libsql["image"] == "ghcr.io/tursodatabase/libsql-server:3ec6803"
+          assert privacy_replay_db["image"] == "ghcr.io/tursodatabase/libsql-server:3ec6803"
           assert caddy["image"] == "caddy:2.11.3-alpine"
           assert all(":latest" not in service.get("image", "") for service in config["services"].values())
 
@@ -340,6 +376,39 @@ jobs:
           assert all(volume.get("read_only") is True for volume in reconcile_mounts.values())
           assert production_targets.isdisjoint(reconcile_mounts)
           assert "depends_on" not in privacy_reconcile
+
+          replay_db_mounts = {volume.get("target"): volume for volume in privacy_replay_db.get("volumes", [])}
+          assert set(replay_db_mounts) == {"/var/lib/sqld"}
+          replay_db_data = replay_db_mounts["/var/lib/sqld"]
+          assert replay_db_data.get("type") == "bind"
+          assert replay_db_data.get("read_only") is not True
+          assert replay_db_data["source"].endswith("/restore-privacy-replay/restore-unset/libsql")
+          assert set(privacy_replay_db.get("networks", {})) == {"restore-internal"}
+          assert "depends_on" not in privacy_replay_db
+
+          assert privacy_replay_migrate["environment"]["DATABASE_URL"] == "http://backup-privacy-replay-db:8080"
+          assert privacy_replay_migrate.get("volumes", []) == []
+          assert privacy_replay_migrate["depends_on"]["backup-privacy-replay-db"]["condition"] == "service_healthy"
+          assert set(privacy_replay_migrate.get("networks", {})) == {"restore-internal"}
+
+          replay_command = privacy_replay.get("command", [])
+          replay_text = " ".join(replay_command) if isinstance(replay_command, list) else str(replay_command)
+          assert "backup:privacy-replay-db" in replay_text
+          assert privacy_replay["environment"]["DATABASE_URL"] == "http://backup-privacy-replay-db:8080"
+          replay_mounts = {volume.get("target"): volume for volume in privacy_replay.get("volumes", [])}
+          assert set(replay_mounts) == {
+              "/restore-staging",
+              "/privacy-ledger",
+              "/run/secrets/restore-privacy-ledger.key",
+              "/privacy-effect-journal",
+              "/run/secrets/restore-privacy-effect-journal.key",
+          }
+          assert all(volume.get("read_only") is True for volume in replay_mounts.values())
+          assert production_targets.isdisjoint(replay_mounts)
+          assert privacy_replay["depends_on"]["backup-privacy-replay-migrate"]["condition"] == "service_completed_successfully"
+          assert set(privacy_replay.get("networks", {})) == {"restore-internal"}
+          assert "libsql" not in privacy_replay.get("depends_on", {})
+          assert config["networks"]["restore-internal"]["internal"] is True
           PY
       - name: Verify pinned infrastructure images resolve
         run: |
