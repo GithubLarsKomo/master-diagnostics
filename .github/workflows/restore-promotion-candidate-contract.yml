@@ -5,17 +5,21 @@ on:
     paths:
       - '.github/workflows/restore-promotion-candidate-contract.yml'
       - 'infra/backup/prepare-club-restore-promotion-candidates.sh'
+      - 'infra/backup/check-club-restore-promotion-candidates.sh'
       - 'infra/docker-compose.restore-promotion.yml'
       - 'packages/db/**'
       - 'docs/restore-private-promotion-candidates.md'
+      - 'docs/restore-private-promotion-candidate-healthcheck.md'
   push:
     branches: [main]
     paths:
       - '.github/workflows/restore-promotion-candidate-contract.yml'
       - 'infra/backup/prepare-club-restore-promotion-candidates.sh'
+      - 'infra/backup/check-club-restore-promotion-candidates.sh'
       - 'infra/docker-compose.restore-promotion.yml'
       - 'packages/db/**'
       - 'docs/restore-private-promotion-candidates.md'
+      - 'docs/restore-private-promotion-candidate-healthcheck.md'
 
 jobs:
   contract:
@@ -43,7 +47,7 @@ jobs:
           docker volume rm -f "${CANDIDATE_VOLUME}" >/dev/null 2>&1 || true
           docker volume create "${CANDIDATE_VOLUME}" >/dev/null
 
-      - name: Build isolated candidate copy image
+      - name: Build isolated candidate copy and check images
         run: |
           RESTORE_PRIVACY_REPLAY_HOST_DIR="${RESTORE_ROOT}" \
           RESTORE_STAGING_NAME="${RESTORE_STAGING_NAME}" \
@@ -51,7 +55,9 @@ jobs:
             docker compose --profile backup \
               -f infra/docker-compose.club.yml \
               -f infra/docker-compose.restore-promotion.yml \
-              build backup-restore-promotion-candidate-copy
+              build \
+              backup-restore-promotion-candidate-copy \
+              backup-restore-promotion-candidate-check
 
       - name: Copy and fingerprint reports candidate
         run: |
@@ -82,12 +88,56 @@ jobs:
           assert result['byteCount'] == 11
           PY
 
-      - name: Verify retry clears stale candidate content
+      - name: Verify healthy read-only candidate check
+        run: |
+          RESTORE_PRIVACY_REPLAY_HOST_DIR="${RESTORE_ROOT}" \
+          RESTORE_STAGING_NAME="${RESTORE_STAGING_NAME}" \
+          RESTORE_PRIVATE_PROMOTION_CANDIDATE_VOLUME="${CANDIDATE_VOLUME}" \
+            docker compose --profile backup \
+              -f infra/docker-compose.club.yml \
+              -f infra/docker-compose.restore-promotion.yml \
+              run --rm --no-deps \
+              -e RESTORE_PRIVATE_PROMOTION_CANDIDATE_ROLE=REPORTS \
+              backup-restore-promotion-candidate-check \
+              >/tmp/candidate-check-first.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('/tmp/candidate-check-first.json').read_text())
+          assert result['mode'] == 'ISOLATED_RESTORE_PROMOTION_CANDIDATE_HEALTHCHECK'
+          assert result['status'] == 'HEALTHY'
+          assert result['role'] == 'REPORTS'
+          assert result['sourceSubpath'] == 'reports'
+          assert result['candidateMutationAllowed'] is False
+          assert result['productionMutationAllowed'] is False
+          assert result['promotionExecuted'] is False
+          assert result['sourceFingerprint'] == result['candidateFingerprint']
+          PY
+
+      - name: Verify source drift makes candidate unhealthy without modifying it
         run: |
           rm "${RESTORE_ROOT}/${RESTORE_STAGING_NAME}/reports/a.txt"
           printf 'gamma\n' >"${RESTORE_ROOT}/${RESTORE_STAGING_NAME}/reports/c.txt"
           chmod 0644 "${RESTORE_ROOT}/${RESTORE_STAGING_NAME}/reports/c.txt"
 
+          set +e
+          RESTORE_PRIVACY_REPLAY_HOST_DIR="${RESTORE_ROOT}" \
+          RESTORE_STAGING_NAME="${RESTORE_STAGING_NAME}" \
+          RESTORE_PRIVATE_PROMOTION_CANDIDATE_VOLUME="${CANDIDATE_VOLUME}" \
+            docker compose --profile backup \
+              -f infra/docker-compose.club.yml \
+              -f infra/docker-compose.restore-promotion.yml \
+              run --rm --no-deps \
+              -e RESTORE_PRIVATE_PROMOTION_CANDIDATE_ROLE=REPORTS \
+              backup-restore-promotion-candidate-check \
+              >/tmp/candidate-check-stale.out 2>/tmp/candidate-check-stale.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'does not match the private restore source' /tmp/candidate-check-stale.err
+
+      - name: Verify retry refreshes candidate and healthcheck
+        run: |
           RESTORE_PRIVACY_REPLAY_HOST_DIR="${RESTORE_ROOT}" \
           RESTORE_STAGING_NAME="${RESTORE_STAGING_NAME}" \
           RESTORE_PRIVATE_PROMOTION_CANDIDATE_VOLUME="${CANDIDATE_VOLUME}" \
@@ -98,17 +148,33 @@ jobs:
               -e RESTORE_PRIVATE_PROMOTION_CANDIDATE_ROLE=REPORTS \
               backup-restore-promotion-candidate-copy \
               >/tmp/candidate-copy-second.json
+
+          RESTORE_PRIVACY_REPLAY_HOST_DIR="${RESTORE_ROOT}" \
+          RESTORE_STAGING_NAME="${RESTORE_STAGING_NAME}" \
+          RESTORE_PRIVATE_PROMOTION_CANDIDATE_VOLUME="${CANDIDATE_VOLUME}" \
+            docker compose --profile backup \
+              -f infra/docker-compose.club.yml \
+              -f infra/docker-compose.restore-promotion.yml \
+              run --rm --no-deps \
+              -e RESTORE_PRIVATE_PROMOTION_CANDIDATE_ROLE=REPORTS \
+              backup-restore-promotion-candidate-check \
+              >/tmp/candidate-check-second.json
           python3 - <<'PY'
           import json
           from pathlib import Path
           first = json.loads(Path('/tmp/candidate-copy-first.json').read_text())
           second = json.loads(Path('/tmp/candidate-copy-second.json').read_text())
+          check = json.loads(Path('/tmp/candidate-check-second.json').read_text())
           assert second['status'] == 'COPIED_AND_VERIFIED'
           assert second['sourceFingerprint'] == second['candidateFingerprint']
           assert second['sourceFingerprint'] != first['sourceFingerprint']
           assert second['fileCount'] == 2
           assert second['directoryCount'] == 2
           assert second['byteCount'] == 11
+          assert check['status'] == 'HEALTHY'
+          assert check['candidateMutationAllowed'] is False
+          assert check['sourceFingerprint'] == second['sourceFingerprint']
+          assert check['candidateFingerprint'] == second['candidateFingerprint']
           PY
 
       - name: Reject symlinks before candidate mutation
@@ -130,7 +196,7 @@ jobs:
           test "$code" -ne 0
           grep -q 'contains a symlink' /tmp/candidate-copy-symlink.err
 
-      - name: Verify candidate copy Compose isolation
+      - name: Verify candidate services Compose isolation
         run: |
           RESTORE_PRIVACY_REPLAY_HOST_DIR="${RESTORE_ROOT}" \
           RESTORE_STAGING_NAME="${RESTORE_STAGING_NAME}" \
@@ -143,18 +209,6 @@ jobs:
           import json
           with open('/tmp/candidate-compose.json', encoding='utf-8') as handle:
               config = json.load(handle)
-          service = config['services']['backup-restore-promotion-candidate-copy']
-          assert service['command'][-1] == 'backup:restore-promotion-candidate-copy'
-          assert '--silent' in service['command']
-          assert service.get('network_mode') == 'none'
-          assert not service.get('depends_on')
-          mounts = {item['target']: item for item in service.get('volumes', [])}
-          assert set(mounts) == {'/restore-replay', '/candidate'}
-          assert mounts['/restore-replay']['type'] == 'bind'
-          assert mounts['/restore-replay']['read_only'] is True
-          assert mounts['/candidate']['type'] == 'volume'
-          assert mounts['/candidate'].get('read_only') is not True
-          assert mounts['/candidate']['source'] == 'restore-promotion-candidate'
           forbidden = {
               '/var/run/docker.sock',
               '/var/lib/sqld',
@@ -164,7 +218,23 @@ jobs:
               '/data',
               '/config',
           }
-          assert forbidden.isdisjoint(mounts)
+          for service_name, command, candidate_ro in (
+              ('backup-restore-promotion-candidate-copy', 'backup:restore-promotion-candidate-copy', False),
+              ('backup-restore-promotion-candidate-check', 'backup:restore-promotion-candidate-check', True),
+          ):
+              service = config['services'][service_name]
+              assert service['command'][-1] == command
+              assert '--silent' in service['command']
+              assert service.get('network_mode') == 'none'
+              assert not service.get('depends_on')
+              mounts = {item['target']: item for item in service.get('volumes', [])}
+              assert set(mounts) == {'/restore-replay', '/candidate'}
+              assert mounts['/restore-replay']['type'] == 'bind'
+              assert mounts['/restore-replay']['read_only'] is True
+              assert mounts['/candidate']['type'] == 'volume'
+              assert mounts['/candidate'].get('read_only') is candidate_ro
+              assert mounts['/candidate']['source'] == 'restore-promotion-candidate'
+              assert forbidden.isdisjoint(mounts)
           volume = config['volumes']['restore-promotion-candidate']
           assert volume['external'] is True
           assert volume['name'] == 'master-diagnostics-restore-candidate-ci-reports'
