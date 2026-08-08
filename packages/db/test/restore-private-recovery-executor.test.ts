@@ -244,7 +244,7 @@ async function prepareExecution(
   });
   return {
     plan,
-    keyFile,
+    intentKeyFile: keyFile,
     intentFile: join(intentDir, RESTORE_PRIVATE_RECOVERY_INTENT_FILE_NAME),
   };
 }
