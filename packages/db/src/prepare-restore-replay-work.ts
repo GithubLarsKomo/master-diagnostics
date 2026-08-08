@@ -1,8 +1,10 @@
-import { chmod, cp, lstat, mkdir, rm } from 'node:fs/promises';
-import { isAbsolute, join } from 'node:path';
-
-const STAGING_NAME = /^restore-[0-9TZ]+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const WORK_NAME = /^restore-work-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+import { isAbsolute } from 'node:path';
+import {
+  cleanupRestoreReplayWork,
+  prepareRestoreReplayWork,
+  RESTORE_STAGING_NAME_PATTERN,
+  RESTORE_WORK_NAME_PATTERN,
+} from './services/restore-replay-work';
 
 type WorkAction = 'prepare' | 'cleanup';
 
@@ -25,49 +27,19 @@ function requiredAction(): WorkAction {
   return value;
 }
 
-async function prepare(stagingRoot: string, stagingName: string, workRoot: string, workName: string) {
-  const source = join(stagingRoot, stagingName, 'libsql');
-  const sourceInfo = await lstat(source).catch(() => null);
-  if (!sourceInfo?.isDirectory()) throw new Error('Staged restore libSQL directory is missing');
-
-  await mkdir(workRoot, { recursive: true, mode: 0o700 });
-  await chmod(workRoot, 0o700);
-  const workPath = join(workRoot, workName);
-  const workInfo = await lstat(workPath).catch(() => null);
-  if (workInfo) throw new Error('Restore replay work scope already exists');
-
-  await mkdir(workPath, { mode: 0o700 });
-  try {
-    await cp(source, join(workPath, 'libsql'), {
-      recursive: true,
-      force: false,
-      errorOnExist: true,
-      preserveTimestamps: true,
-    });
-    await chmod(workPath, 0o700);
-    process.stdout.write(`${JSON.stringify({ action: 'prepare', workName })}\n`);
-  } catch (error) {
-    await rm(workPath, { recursive: true, force: true });
-    throw error;
-  }
-}
-
-async function cleanup(workRoot: string, workName: string) {
-  await rm(join(workRoot, workName), { recursive: true, force: true });
-  process.stdout.write(`${JSON.stringify({ action: 'cleanup', workName })}\n`);
-}
-
 async function main(): Promise<void> {
   const action = requiredAction();
   const workRoot = requiredPath('RESTORE_WORK_ROOT');
-  const workName = requiredName('RESTORE_WORK_NAME', WORK_NAME);
+  const workName = requiredName('RESTORE_WORK_NAME', RESTORE_WORK_NAME_PATTERN);
   if (action === 'cleanup') {
-    await cleanup(workRoot, workName);
+    await cleanupRestoreReplayWork(workRoot, workName);
+    process.stdout.write(`${JSON.stringify({ action, workName })}\n`);
     return;
   }
   const stagingRoot = requiredPath('RESTORE_STAGING_ROOT');
-  const stagingName = requiredName('RESTORE_STAGING_NAME', STAGING_NAME);
-  await prepare(stagingRoot, stagingName, workRoot, workName);
+  const stagingName = requiredName('RESTORE_STAGING_NAME', RESTORE_STAGING_NAME_PATTERN);
+  await prepareRestoreReplayWork({ stagingRoot, stagingName, workRoot, workName });
+  process.stdout.write(`${JSON.stringify({ action, workName })}\n`);
 }
 
 main().catch((error: unknown) => {
