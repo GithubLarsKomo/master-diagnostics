@@ -35,6 +35,7 @@ export * from './services/restore-private-recovery-receipt';
 export * from './services/restore-private-recovery-normalization';
 export * from './services/restore-private-recovery-executor';
 export * from './services/restore-private-promotion-readiness';
+export * from './services/restore-private-promotion-intent';
 export * from './services/club-bootstrap';
 export * from './services/factory-protocol-templates';
 export * from './services/protocol-templates';
