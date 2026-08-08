@@ -46,6 +46,8 @@ jobs:
           assert 'backup-restore-recovery-execute' in active
           assert 'RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE' in active
           assert 'exit 4' not in active
+          assert '-L "${recovery_plan_path}"' in active
+          assert 'mkdir -p "${recovery_intent_dir}"' in active
           retry_guard = active.index('if [[ -f "${recovery_plan_path}" ]]; then')
           artifact_plan = active.index('backup-privacy-artifact-plan', retry_guard)
           retry_execute = active.index('run_recovery_executor', retry_guard)
@@ -84,6 +86,9 @@ jobs:
           assert service['command'][-1] == 'backup:restore-recovery-execute'
           assert set(service.get('networks', {})) == {'restore-internal'}
           assert config['networks']['restore-internal']['internal'] is True
+          assert set(service.get('depends_on', {})) == {'backup-privacy-replay-db'}
+          assert service['depends_on']['backup-privacy-replay-db']['condition'] == 'service_healthy'
+          assert 'backup-restore-recovery-plan' not in service.get('depends_on', {})
 
           mounts = {volume.get('target'): volume for volume in service.get('volumes', [])}
           expected_targets = {
@@ -93,16 +98,39 @@ jobs:
               '/privacy-effect-journal',
               '/run/secrets/restore-privacy-effect-journal.key',
               '/run/secrets/restore-private-recovery-intent.key',
-              '/restore-replay',
+              '/restore-replay/recovery-plan.json',
+              '/restore-replay/recovery-execution',
+              '/restore-replay/reports',
+              '/restore-replay/tenant-exports',
+              '/restore-replay/data-subject-delivery',
           }
           assert set(mounts) == expected_targets
-          for target, volume in mounts.items():
-              if target == '/restore-replay':
-                  assert volume.get('read_only') is not True
-                  assert volume.get('type') == 'bind'
-                  assert volume['source'].endswith('/restore-privacy-replay/restore-unset')
-              else:
-                  assert volume.get('read_only') is True
+
+          read_only_targets = {
+              '/restore-staging',
+              '/privacy-ledger',
+              '/run/secrets/restore-privacy-ledger.key',
+              '/privacy-effect-journal',
+              '/run/secrets/restore-privacy-effect-journal.key',
+              '/run/secrets/restore-private-recovery-intent.key',
+              '/restore-replay/recovery-plan.json',
+          }
+          writable_targets = {
+              '/restore-replay/recovery-execution',
+              '/restore-replay/reports',
+              '/restore-replay/tenant-exports',
+              '/restore-replay/data-subject-delivery',
+          }
+          for target in read_only_targets:
+              assert mounts[target].get('read_only') is True
+          for target in writable_targets:
+              assert mounts[target].get('read_only') is not True
+              assert mounts[target].get('type') == 'bind'
+          assert mounts['/restore-replay/recovery-plan.json']['source'].endswith('/restore-privacy-replay/restore-unset/recovery-plan.json')
+          assert mounts['/restore-replay/recovery-execution']['source'].endswith('/restore-privacy-replay/restore-unset/recovery-execution')
+          assert mounts['/restore-replay/reports']['source'].endswith('/restore-privacy-replay/restore-unset/reports')
+          assert mounts['/restore-replay/tenant-exports']['source'].endswith('/restore-privacy-replay/restore-unset/tenant-exports')
+          assert mounts['/restore-replay/data-subject-delivery']['source'].endswith('/restore-privacy-replay/restore-unset/data-subject-delivery')
 
           production_targets = {
               '/var/lib/sqld',
