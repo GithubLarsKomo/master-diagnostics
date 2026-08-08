@@ -14,12 +14,16 @@ import {
   type RestorePrivatePromotionStoragePaths,
 } from './restore-private-promotion-storage';
 
-export interface RestorePrivatePromotionCandidatePlanInput {
-  readonly storagePaths: Readonly<RestorePrivatePromotionStoragePaths>;
+export interface RestorePrivatePromotionCandidatePlanBindingInput {
   readonly promotionIntentFile: string;
   readonly promotionKeyFile: string;
   readonly executionPlanFile: string;
   readonly activeVolumes: Readonly<RestorePrivatePromotionActiveVolumeSet>;
+}
+
+export interface RestorePrivatePromotionCandidatePlanInput
+  extends RestorePrivatePromotionCandidatePlanBindingInput {
+  readonly storagePaths: Readonly<RestorePrivatePromotionStoragePaths>;
 }
 
 export interface VerifiedRestorePrivatePromotionCandidatePlan {
@@ -28,15 +32,11 @@ export interface VerifiedRestorePrivatePromotionCandidatePlan {
   readonly plan: Readonly<SignedRestorePrivatePromotionExecutionPlanEnvelope>;
 }
 
-/**
- * Reconstructs and verifies the complete promotion chain used both by candidate mutation
- * authorization and the later read-only candidate-set healthcheck.
- */
-export async function verifyRestorePrivatePromotionCandidatePlan(
-  db: Database,
-  input: Readonly<RestorePrivatePromotionCandidatePlanInput>,
+/** Bind an already freshly recomputed readiness report to intent, preflight, plan and active volumes. */
+export async function verifyRestorePrivatePromotionCandidatePlanFromReadiness(
+  readiness: Readonly<RestorePrivatePromotionReadinessReport>,
+  input: Readonly<RestorePrivatePromotionCandidatePlanBindingInput>,
 ): Promise<Readonly<VerifiedRestorePrivatePromotionCandidatePlan>> {
-  const readiness = await assessRestorePrivatePromotionReadinessFromStorage(db, input.storagePaths);
   if (!readiness.promotionAllowed || readiness.status !== 'PROMOTION_READY') {
     throw new Error('Restore promotion candidate plan requires fresh PROMOTION_READY evidence');
   }
@@ -52,4 +52,16 @@ export async function verifyRestorePrivatePromotionCandidatePlan(
     input.activeVolumes,
   );
   return Object.freeze({ readiness, preflight, plan });
+}
+
+/**
+ * Reconstructs and verifies the complete promotion chain used both by candidate mutation
+ * authorization and the later read-only candidate-set healthcheck.
+ */
+export async function verifyRestorePrivatePromotionCandidatePlan(
+  db: Database,
+  input: Readonly<RestorePrivatePromotionCandidatePlanInput>,
+): Promise<Readonly<VerifiedRestorePrivatePromotionCandidatePlan>> {
+  const readiness = await assessRestorePrivatePromotionReadinessFromStorage(db, input.storagePaths);
+  return verifyRestorePrivatePromotionCandidatePlanFromReadiness(readiness, input);
 }
