@@ -181,16 +181,19 @@ Der Service `backup-restore-recovery-execute` erhält:
 - private Restore-libSQL-DB über `backup-privacy-replay-db`,
 - Staging, Ledger, Journal und alle Evidence-Keys read-only,
 - den separaten Recovery-Intent-Key read-only,
-- `/restore-replay` als einzigen schreibbaren Workspace,
+- `recovery-plan.json` separat read-only,
+- ausschließlich `recovery-execution`, `reports`, `tenant-exports` und `data-subject-delivery` aus dem privaten Workspace schreibbar,
 - ausschließlich `restore-internal` als Netzwerk.
 
-Nicht gemountet werden produktive Targets wie `/var/lib/sqld`, produktive Reports/Exports/Delivery-Packages oder Caddy-Daten.
+Damit kann der Executor weder den persistierten Plan noch andere Replay-Evidence-Dateien im Workspace überschreiben. Nicht gemountet werden produktive Targets wie `/var/lib/sqld`, produktive Reports/Exports/Delivery-Packages oder Caddy-Daten.
 
-Der Executor-Service hat absichtlich **keine Abhängigkeit zum Recovery-Planer**. Ein Compose-Retry darf den Planer nicht implizit erneut starten.
+Der Executor-Service hängt ausschließlich von der privaten `backup-privacy-replay-db` mit erfolgreichem Healthcheck ab. Er hat absichtlich **keine Abhängigkeit zum Recovery-Planer**. Ein Compose-Retry darf den Planer nicht implizit erneut starten.
 
 ## Host-Workflow und Crash-Retry
 
 `infra/backup/replay-club-restore-privacy-db.sh` unterscheidet zwei Wege.
+
+Vor einer Recovery-Ausführung werden zusätzlich der Planpfad und das Intent-Verzeichnis gegen Symlink-/Dateityp-Verwechslungen geschützt. Das Intent-Verzeichnis wird mit `0700` vorbereitet; der Plan selbst bleibt read-only.
 
 ### Neuer Restore ohne bestehenden Plan
 
