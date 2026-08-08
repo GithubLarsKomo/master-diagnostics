@@ -88,19 +88,6 @@ async function seedDeletionRequest(db: Database, redacted: boolean) {
   });
 }
 
-async function seedCommitProof(db: Database) {
-  await db.insert(schema.auditEvents).values({
-    id: 'audit-proof-a', tenantId: 'tenant-a', occurredAt: committedAt,
-    actorUserId: null, actorRole: 'TENANT_ADMIN',
-    action: 'athlete.anonymization_db_committed',
-    entityType: 'athlete_anonymization_execution', entityId: 'execution-a',
-    source: 'SYSTEM', reason: null, beforeJson: null,
-    afterJson: JSON.stringify({ athleteId: 'athlete-a', policyVersion: '1.6.0' }),
-    correlationId: 'correlation-a', authProvider: null, sessionId: null,
-    createdAt: committedAt, updatedAt: committedAt,
-  });
-}
-
 describe('restore privacy replay database assessment', () => {
   it('reports database replay when the pre-anonymization athlete state remains', async () => {
     const db = await createTestDatabase();
@@ -117,16 +104,14 @@ describe('restore privacy replay database assessment', () => {
     expect(assessment.obligations[0]?.reasons).toEqual([
       'ATHLETE_TOMBSTONE_MISSING',
       'DELETION_REQUEST_TEXT_NOT_REDACTED',
-      'COMMIT_PROOF_MISSING',
     ]);
   });
 
-  it('proves the database half already satisfied only with tombstone, redaction and matching commit proof', async () => {
+  it('proves the database half satisfied from the signed obligation plus exact target state', async () => {
     const db = await createTestDatabase();
     await seedTenant(db);
     await seedAthlete(db, true);
     await seedDeletionRequest(db, true);
-    await seedCommitProof(db);
 
     const assessment = await assessRestorePrivacyReplayDatabase(db, replayReport());
 
@@ -143,11 +128,21 @@ describe('restore privacy replay database assessment', () => {
         dataSubjectExportPackages: 0,
         tenantExportPackages: 0,
         deletionRequestsWithUnredactedText: 0,
-        matchingCommitProofs: 1,
       },
     });
     expect(assessment.promotionAllowed).toBe(false);
     expect(assessment.artifactVerificationRequired).toBe(true);
+  });
+
+  it('does not require a post-backup historical audit event that cannot exist in the restored snapshot', async () => {
+    const db = await createTestDatabase();
+    await seedTenant(db);
+    await seedAthlete(db, true);
+    await seedDeletionRequest(db, true);
+
+    expect(await db.select().from(schema.auditEvents)).toHaveLength(0);
+    const assessment = await assessRestorePrivacyReplayDatabase(db, replayReport());
+    expect(assessment.status).toBe('DATABASE_SATISFIED');
   });
 
   it('fails closed when the signed obligation cannot resolve its athlete anchor in staging', async () => {
@@ -165,6 +160,23 @@ describe('restore privacy replay database assessment', () => {
       reasons: ['ATHLETE_STATE_UNRESOLVED'],
       counts: null,
     });
+  });
+
+  it('requires the exact signed deletion request anchor to remain completed', async () => {
+    const db = await createTestDatabase();
+    await seedTenant(db);
+    await seedAthlete(db, true);
+    await seedDeletionRequest(db, true);
+
+    const assessment = await assessRestorePrivacyReplayDatabase(db, replayReport({
+      obligations: [{
+        ...replayReport().obligations[0]!,
+        deletionRequestId: 'missing-deletion-request',
+      }],
+    }));
+
+    expect(assessment.status).toBe('DATABASE_REPLAY_REQUIRED');
+    expect(assessment.obligations[0]?.reasons).toEqual(['DELETION_REQUEST_STATE_UNRESOLVED']);
   });
 
   it('does not inspect the staging database when reconciliation itself is blocked', async () => {
