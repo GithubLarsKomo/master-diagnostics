@@ -1,0 +1,145 @@
+name: Restore Recovery Execution Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-recovery-execution-contract.yml'
+      - '.env.example'
+      - 'infra/backup/replay-club-restore-privacy-db.sh'
+      - 'infra/docker-compose.club.yml'
+      - 'infra/docker-compose.restore-recovery.yml'
+      - 'packages/db/package.json'
+      - 'packages/db/src/execute-restore-private-recovery.ts'
+      - 'packages/db/src/services/restore-private-recovery-*.ts'
+      - 'docs/restore-private-recovery.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-recovery-execution-contract.yml'
+      - '.env.example'
+      - 'infra/backup/replay-club-restore-privacy-db.sh'
+      - 'infra/docker-compose.club.yml'
+      - 'infra/docker-compose.restore-recovery.yml'
+      - 'packages/db/package.json'
+      - 'packages/db/src/execute-restore-private-recovery.ts'
+      - 'packages/db/src/services/restore-private-recovery-*.ts'
+      - 'docs/restore-private-recovery.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify host retry and post-recovery ordering
+        run: |
+          bash -n infra/backup/replay-club-restore-privacy-db.sh
+          python3 - <<'PY'
+          from pathlib import Path
+
+          script = Path('infra/backup/replay-club-restore-privacy-db.sh').read_text()
+          active = '\n'.join(
+              line for line in script.splitlines()
+              if not line.lstrip().startswith('#')
+          )
+          assert 'docker-compose.restore-recovery.yml' in script
+          assert 'backup-restore-recovery-execute' in script
+          assert 'RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE' in script
+          assert 'exit 4' not in active
+          assert 'if [[ -f "${recovery_plan_path}" ]]; then' in script
+          retry_guard = script.index('# Crash/retry rule: once a durable plan exists')
+          artifact_plan = script.index('backup-privacy-artifact-plan', retry_guard)
+          retry_execute = script.index('run_recovery_executor', retry_guard)
+          retry_health = script.index('run_healthcheck', retry_execute)
+          assert retry_execute < retry_health < artifact_plan
+          normal_plan = script.rindex('backup-restore-recovery-plan')
+          normal_execute = script.rindex('run_recovery_executor')
+          normal_health = script.rindex('run_healthcheck')
+          assert normal_plan < normal_execute < normal_health
+          PY
+
+      - name: Verify isolated recovery executor Compose contract
+        run: |
+          cp .env.example .env
+          sed -i 's/diagnostics.example.org/localhost/g' .env
+          sed -i 's/replace-with-at-least-32-random-bytes/ci-only-secret-with-at-least-32-characters/' .env
+          docker compose --profile backup \
+            -f infra/docker-compose.club.yml \
+            -f infra/docker-compose.restore-recovery.yml \
+            config --format json > /tmp/restore-recovery-compose.json
+          python3 - <<'PY'
+          import json
+
+          with open('/tmp/restore-recovery-compose.json', encoding='utf-8') as handle:
+              config = json.load(handle)
+
+          service = config['services']['backup-restore-recovery-execute']
+          assert service['environment']['DATABASE_URL'] == 'http://backup-privacy-replay-db:8080'
+          assert service['environment']['DATABASE_AUTH_TOKEN'] == ''
+          assert service['environment']['RESTORE_PRIVATE_RECOVERY_PLAN_FILE'] == '/restore-replay/recovery-plan.json'
+          assert service['environment']['RESTORE_PRIVATE_RECOVERY_INTENT_DIR'] == '/restore-replay/recovery-execution'
+          assert service['environment']['RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE'] == '/run/secrets/restore-private-recovery-intent.key'
+          assert service['environment']['RESTORE_PRIVACY_REPORT_ROOT'] == '/restore-replay/reports'
+          assert service['environment']['RESTORE_PRIVACY_TENANT_EXPORT_ROOT'] == '/restore-replay/tenant-exports'
+          assert service['environment']['RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT'] == '/restore-replay/data-subject-delivery'
+          assert service['command'][-1] == 'backup:restore-recovery-execute'
+          assert set(service.get('networks', {})) == {'restore-internal'}
+          assert config['networks']['restore-internal']['internal'] is True
+
+          mounts = {volume.get('target'): volume for volume in service.get('volumes', [])}
+          expected_targets = {
+              '/restore-staging',
+              '/privacy-ledger',
+              '/run/secrets/restore-privacy-ledger.key',
+              '/privacy-effect-journal',
+              '/run/secrets/restore-privacy-effect-journal.key',
+              '/run/secrets/restore-private-recovery-intent.key',
+              '/restore-replay',
+          }
+          assert set(mounts) == expected_targets
+          for target, volume in mounts.items():
+              if target == '/restore-replay':
+                  assert volume.get('read_only') is not True
+                  assert volume.get('type') == 'bind'
+                  assert volume['source'].endswith('/restore-privacy-replay/restore-unset')
+              else:
+                  assert volume.get('read_only') is True
+
+          production_targets = {
+              '/var/lib/sqld',
+              '/var/lib/masters/reports',
+              '/var/lib/masters/exports',
+              '/var/lib/masters/data-subject-delivery-packages',
+              '/data',
+              '/config',
+          }
+          assert production_targets.isdisjoint(mounts)
+          PY
+
+      - name: Verify CLI and independent key contract
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          env = Path('.env.example').read_text()
+          package = json.loads(Path('packages/db/package.json').read_text())
+          cli = Path('packages/db/src/execute-restore-private-recovery.ts').read_text()
+
+          assert 'RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE=/etc/master-diagnostics/restore-private-recovery-intent.key' in env
+          assert package['scripts']['backup:restore-recovery-execute'] == 'tsx src/execute-restore-private-recovery.ts'
+          for name in (
+              'RESTORE_STAGING_MANIFEST',
+              'RESTORE_PRIVATE_RECOVERY_PLAN_FILE',
+              'RESTORE_PRIVATE_RECOVERY_INTENT_DIR',
+              'RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE',
+              'RESTORE_PRIVACY_REPORT_ROOT',
+              'RESTORE_PRIVACY_TENANT_EXPORT_ROOT',
+              'RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT',
+          ):
+              assert name in cli
+          assert 'ensureSignedRestorePrivateRecoveryIntent' in cli
+          assert 'executeRestorePrivateRecovery' in cli
+          assert 'intentCreated' in cli
+          assert 'intentReused' in cli
+          PY
