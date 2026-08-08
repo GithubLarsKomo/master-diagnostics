@@ -6,7 +6,9 @@ import {
   athleteAnonymizationExecutions,
   athleteDataSubjectDeliveryPackages,
   reportVersions,
+  restorePrivateRecoveryNormalizations,
   tenantExportPackages,
+  type RestorePrivateRecoveryNormalizationRow,
 } from '../schema';
 import {
   verifyRestorePrivacyArtifactReplayResult,
@@ -25,6 +27,10 @@ import type { RestorePrivacyReconciliationReport } from './restore-privacy-recon
 
 export const RESTORE_PRIVATE_HEALTHCHECK_VERSION = 1 as const;
 
+const CANONICAL_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const SHA256_FINGERPRINT = /^sha256:[0-9a-f]{64}$/;
+const HMAC_SHA256_SIGNATURE = /^hmac-sha256:[0-9a-f]{64}$/;
+
 export type RestorePrivateHealthcheckStatus = 'HEALTHY' | 'BLOCKED';
 export type RestorePrivateStorageKind = 'REPORT' | 'TENANT_EXPORT' | 'DATA_SUBJECT_DELIVERY';
 
@@ -42,6 +48,7 @@ export type RestorePrivateHealthcheckBlockerCode =
   | 'ACTIVE_ARTIFACT_MISSING'
   | 'ACTIVE_ARTIFACT_ORPHANED'
   | 'ANONYMIZATION_EXECUTION_TRANSIENT'
+  | 'RECOVERY_NORMALIZATION_INVALID'
   | 'ANONYMIZATION_QUARANTINE_NOT_EMPTY';
 
 export interface RestorePrivateHealthcheckBlocker {
@@ -68,6 +75,17 @@ export interface RestorePrivateTransientExecution {
   readonly status: 'PREPARING' | 'ARTIFACTS_STAGED' | 'DB_COMMITTED';
 }
 
+export interface RestorePrivateNormalizedTransientExecution {
+  readonly executionId: string;
+  readonly tenantId: string;
+  readonly athleteId: string;
+  readonly snapshotStatus: 'PREPARING' | 'ARTIFACTS_STAGED';
+  readonly sourceDbCommittedAt: string;
+  readonly recoveryStartedAt: string;
+  readonly normalizedAt: string;
+  readonly planFingerprint: string;
+}
+
 export interface RestorePrivateHealthcheckReport {
   readonly healthcheckVersion: typeof RESTORE_PRIVATE_HEALTHCHECK_VERSION;
   readonly backupCutoff: string;
@@ -81,6 +99,7 @@ export interface RestorePrivateHealthcheckReport {
   readonly artifactReplayVerified: boolean;
   readonly storage: readonly Readonly<RestorePrivateStorageHealth>[];
   readonly transientExecutions: readonly Readonly<RestorePrivateTransientExecution>[];
+  readonly normalizedTransientExecutions: readonly Readonly<RestorePrivateNormalizedTransientExecution>[];
   readonly blockers: readonly Readonly<RestorePrivateHealthcheckBlocker>[];
 }
 
@@ -119,6 +138,57 @@ function blocker(
     reference: options.reference ?? null,
     executionId: options.executionId ?? null,
     executionStatus: options.executionStatus ?? null,
+  });
+}
+
+function isCanonicalTimestamp(value: string): boolean {
+  return CANONICAL_UTC_TIMESTAMP.test(value) && Number.isFinite(Date.parse(value));
+}
+
+function normalizationMatches(
+  execution: Readonly<RestorePrivateTransientExecution>,
+  normalization: Readonly<RestorePrivateRecoveryNormalizationRow>,
+  reconciliation: Readonly<RestorePrivacyReconciliationReport>,
+): boolean {
+  if (execution.status !== 'PREPARING' && execution.status !== 'ARTIFACTS_STAGED') return false;
+  const obligation = reconciliation.obligations.find((item) => item.executionId === execution.executionId);
+  if (!obligation) return false;
+  return normalization.executionId === execution.executionId
+    && normalization.tenantId === execution.tenantId
+    && normalization.athleteId === execution.athleteId
+    && normalization.backupCutoff === reconciliation.backupCutoff
+    && normalization.snapshotStatus === execution.status
+    && normalization.action === 'PURGE_REPLAYED_ARTIFACTS_AND_NORMALIZE'
+    && normalization.effectBasis === 'POST_BACKUP_COMMITTED'
+    && normalization.sourceDbCommittedAt === obligation.dbCommittedAt
+    && obligation.tenantId === execution.tenantId
+    && obligation.athleteId === execution.athleteId
+    && SHA256_FINGERPRINT.test(normalization.planFingerprint)
+    && SHA256_FINGERPRINT.test(normalization.actionsFingerprint)
+    && HMAC_SHA256_SIGNATURE.test(normalization.intentSignature)
+    && isCanonicalTimestamp(normalization.backupCutoff)
+    && isCanonicalTimestamp(normalization.sourceDbCommittedAt)
+    && isCanonicalTimestamp(normalization.recoveryStartedAt)
+    && isCanonicalTimestamp(normalization.normalizedAt)
+    && isCanonicalTimestamp(normalization.createdAt)
+    && normalization.sourceDbCommittedAt > normalization.backupCutoff
+    && normalization.recoveryStartedAt >= normalization.sourceDbCommittedAt
+    && normalization.normalizedAt >= normalization.recoveryStartedAt
+    && normalization.createdAt === normalization.normalizedAt;
+}
+
+function normalizedExecution(
+  normalization: Readonly<RestorePrivateRecoveryNormalizationRow>,
+): Readonly<RestorePrivateNormalizedTransientExecution> {
+  return Object.freeze({
+    executionId: normalization.executionId,
+    tenantId: normalization.tenantId,
+    athleteId: normalization.athleteId,
+    snapshotStatus: normalization.snapshotStatus,
+    sourceDbCommittedAt: normalization.sourceDbCommittedAt,
+    recoveryStartedAt: normalization.recoveryStartedAt,
+    normalizedAt: normalization.normalizedAt,
+    planFingerprint: normalization.planFingerprint,
   });
 }
 
@@ -271,9 +341,9 @@ function compareStorage(
 /**
  * Read-only final-state healthcheck for the isolated restore workspace.
  *
- * This deliberately performs no recovery and grants no promotion. Any transient anonymization
- * execution, quarantine artifact, DB/filesystem mismatch, or evidence problem remains a blocker
- * for the later operator-controlled recovery/promotion slices.
+ * This deliberately performs no recovery and grants no promotion. Historical PREPARING or
+ * ARTIFACTS_STAGED executions remain blockers unless immutable restore-recovery normalization
+ * evidence exactly binds them to the current post-backup reconciliation obligation.
  */
 export async function assessRestorePrivateHealthcheck(
   db: Database,
@@ -328,18 +398,44 @@ export async function assessRestorePrivateHealthcheck(
     ['PREPARING', 'ARTIFACTS_STAGED', 'DB_COMMITTED'],
   )).orderBy(asc(athleteAnonymizationExecutions.id));
 
-  const transientExecutions = Object.freeze(transientRows.map((row) => Object.freeze({
-    executionId: row.executionId,
-    tenantId: row.tenantId,
-    athleteId: row.athleteId,
-    status: row.status as RestorePrivateTransientExecution['status'],
-  })));
-  for (const execution of transientExecutions) {
+  const normalizationRows = transientRows.length === 0
+    ? []
+    : await db.select().from(restorePrivateRecoveryNormalizations).where(inArray(
+      restorePrivateRecoveryNormalizations.executionId,
+      transientRows.map((row) => row.executionId),
+    )).orderBy(asc(restorePrivateRecoveryNormalizations.executionId));
+  const normalizationByExecutionId = new Map(
+    normalizationRows.map((row) => [row.executionId, row] as const),
+  );
+
+  const unresolvedTransients: Readonly<RestorePrivateTransientExecution>[] = [];
+  const normalizedTransients: Readonly<RestorePrivateNormalizedTransientExecution>[] = [];
+  for (const row of transientRows) {
+    const execution = Object.freeze({
+      executionId: row.executionId,
+      tenantId: row.tenantId,
+      athleteId: row.athleteId,
+      status: row.status as RestorePrivateTransientExecution['status'],
+    });
+    const normalization = normalizationByExecutionId.get(execution.executionId);
+    if (normalization && normalizationMatches(execution, normalization, reconciliation)) {
+      normalizedTransients.push(normalizedExecution(normalization));
+      continue;
+    }
+    unresolvedTransients.push(execution);
+    if (normalization) {
+      blockers.push(blocker('RECOVERY_NORMALIZATION_INVALID', {
+        executionId: execution.executionId,
+        executionStatus: execution.status,
+      }));
+    }
     blockers.push(blocker('ANONYMIZATION_EXECUTION_TRANSIENT', {
       executionId: execution.executionId,
       executionStatus: execution.status,
     }));
   }
+  const transientExecutions = Object.freeze(unresolvedTransients);
+  const normalizedTransientExecutions = Object.freeze(normalizedTransients);
 
   const references = await databaseReferences(db);
   const [reportScan, tenantExportScan, deliveryScan] = await Promise.all([
@@ -371,6 +467,7 @@ export async function assessRestorePrivateHealthcheck(
     artifactReplayVerified,
     storage,
     transientExecutions,
+    normalizedTransientExecutions,
     blockers: canonicalBlockers,
   });
 }
