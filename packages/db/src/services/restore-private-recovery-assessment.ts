@@ -246,9 +246,10 @@ async function inspectArtifact(
 }
 
 function expectedQuarantineReference(
-  executionId: string,
-  reference: string,
+  executionId: string | null,
+  reference: string | null,
 ): string {
+  if (!executionId || !reference) return '';
   return ['.anonymization-quarantine', executionId, reference].join('/');
 }
 
