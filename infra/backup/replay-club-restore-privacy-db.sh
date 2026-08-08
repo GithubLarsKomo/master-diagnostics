@@ -28,19 +28,25 @@ set +a
 
 staging_root="${RESTORE_STAGING_HOST_DIR:-/var/lib/master-diagnostics/restore-staging}"
 replay_root="${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}"
-source_dir="${staging_root}/${staging_name}/libsql"
-manifest_path="${staging_root}/${staging_name}/manifest.json"
+source_root="${staging_root}/${staging_name}"
+manifest_path="${source_root}/manifest.json"
 workspace="${replay_root}/${staging_name}"
-workspace_db="${workspace}/libsql"
+required_sources=(libsql reports tenant-exports data-subject-delivery)
 
-if [[ ! -d "${source_dir}" || ! -f "${manifest_path}" ]]; then
+if [[ ! -f "${manifest_path}" ]]; then
   echo "Restore staging is incomplete: ${staging_name}" >&2
   exit 1
 fi
+for source_name in "${required_sources[@]}"; do
+  if [[ ! -d "${source_root}/${source_name}" ]]; then
+    echo "Restore staging source is missing: ${source_name}" >&2
+    exit 1
+  fi
+done
 
 mkdir -p "${replay_root}"
 chmod 0700 "${replay_root}"
-if [[ ! -d "${workspace_db}" ]]; then
+if [[ ! -d "${workspace}" ]]; then
   if [[ -e "${workspace}" ]]; then
     echo "Restore privacy replay workspace exists but is incomplete: ${workspace}" >&2
     exit 1
@@ -48,10 +54,20 @@ if [[ ! -d "${workspace_db}" ]]; then
   tmp_workspace="${replay_root}/.${staging_name}.$$.tmp"
   trap 'rm -rf -- "${tmp_workspace:-}"' EXIT
   mkdir -m 0700 "${tmp_workspace}"
-  cp -a -- "${source_dir}" "${tmp_workspace}/libsql"
+  for source_name in "${required_sources[@]}"; do
+    cp -a -- "${source_root}/${source_name}" "${tmp_workspace}/${source_name}"
+  done
   mv -- "${tmp_workspace}" "${workspace}"
   trap - EXIT
+else
+  for source_name in "${required_sources[@]}"; do
+    if [[ ! -d "${workspace}/${source_name}" ]]; then
+      echo "Restore privacy replay workspace exists but is incomplete: ${workspace}/${source_name}" >&2
+      exit 1
+    fi
+  done
 fi
+chmod 0700 "${workspace}"
 
 export RESTORE_STAGING_NAME="${staging_name}"
 compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
@@ -60,8 +76,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"${compose[@]}" --profile backup build backup-privacy-replay-migrate backup-privacy-replay
+"${compose[@]}" --profile backup build backup-privacy-replay-migrate backup-privacy-artifact-plan backup-privacy-replay
 "${compose[@]}" --profile backup run --rm backup-privacy-replay-migrate
+"${compose[@]}" --profile backup run --rm \
+  -e "RESTORE_STAGING_MANIFEST=/restore-staging/${staging_name}/manifest.json" \
+  backup-privacy-artifact-plan
 "${compose[@]}" --profile backup run --rm \
   -e "RESTORE_STAGING_MANIFEST=/restore-staging/${staging_name}/manifest.json" \
   backup-privacy-replay
