@@ -1,0 +1,304 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+COMPOSE_FILE="${ROOT_DIR}/infra/docker-compose.club.yml"
+PROMOTION_COMPOSE_FILE="${ROOT_DIR}/infra/docker-compose.restore-promotion.yml"
+RESOLVER="${ROOT_DIR}/infra/backup/resolve-active-club-volumes.py"
+ENV_FILE="${ROOT_DIR}/.env"
+
+if [[ $# -ne 1 ]]; then
+  echo "Usage: bash infra/backup/prepare-club-restore-promotion-candidates.sh restore-<timestamp>-<uuid>" >&2
+  exit 2
+fi
+if [[ ! -f "${ENV_FILE}" ]]; then
+  echo "Missing ${ENV_FILE}; configure the club deployment first." >&2
+  exit 1
+fi
+if [[ ! -f "${PROMOTION_COMPOSE_FILE}" || ! -f "${RESOLVER}" ]]; then
+  echo "Promotion candidate wiring is incomplete." >&2
+  exit 1
+fi
+
+staging_name="$1"
+if [[ ! "${staging_name}" =~ ^restore-[0-9TZ]+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+  echo "Restore staging name is invalid." >&2
+  exit 2
+fi
+
+set -a
+# shellcheck disable=SC1090
+source "${ENV_FILE}"
+set +a
+
+staging_root="${RESTORE_STAGING_HOST_DIR:-/var/lib/master-diagnostics/restore-staging}"
+replay_root="${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}"
+promotion_key="${RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE:-/etc/master-diagnostics/restore-private-promotion.key}"
+recovery_key="${RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE:-/etc/master-diagnostics/restore-private-recovery-intent.key}"
+source_root="${staging_root}/${staging_name}"
+manifest_path="${source_root}/manifest.json"
+workspace="${replay_root}/${staging_name}"
+promotion_dir="${workspace}/promotion"
+promotion_intent_path="${promotion_dir}/promotion-intent.json"
+execution_plan_path="${promotion_dir}/promotion-execution-plan.json"
+artifact_manifest_path="${workspace}/artifact-replay-manifest.json"
+artifact_result_path="${workspace}/artifact-replay-result.json"
+recovery_plan_path="${workspace}/recovery-plan.json"
+recovery_execution_dir="${workspace}/recovery-execution"
+recovery_intent_path="${recovery_execution_dir}/recovery-execution-pending.json"
+recovery_receipt_path="${recovery_execution_dir}/recovery-execution-completed.json"
+required_workspace_dirs=(libsql reports tenant-exports data-subject-delivery)
+
+require_regular_file() {
+  local path="$1"
+  local label="$2"
+  if [[ ! -f "${path}" || -L "${path}" ]]; then
+    echo "${label} is missing or unsafe: ${path}" >&2
+    exit 1
+  fi
+}
+
+require_non_symlink_dir() {
+  local path="$1"
+  local label="$2"
+  if [[ ! -d "${path}" || -L "${path}" ]]; then
+    echo "${label} is missing or unsafe: ${path}" >&2
+    exit 1
+  fi
+}
+
+require_regular_file "${manifest_path}" "Restore staging manifest"
+require_non_symlink_dir "${workspace}" "Private restore workspace"
+for source_name in "${required_workspace_dirs[@]}"; do
+  require_non_symlink_dir "${workspace}/${source_name}" "Private restore workspace directory ${source_name}"
+done
+require_regular_file "${artifact_manifest_path}" "Restore artifact replay manifest"
+require_regular_file "${artifact_result_path}" "Restore artifact replay result"
+require_regular_file "${promotion_key}" "Restore promotion intent key"
+require_non_symlink_dir "${promotion_dir}" "Restore promotion directory"
+require_regular_file "${promotion_intent_path}" "Restore promotion intent"
+require_regular_file "${execution_plan_path}" "Restore promotion execution plan"
+
+for evidence_path in "${recovery_plan_path}" "${recovery_intent_path}" "${recovery_receipt_path}"; do
+  if [[ -e "${evidence_path}" && ( ! -f "${evidence_path}" || -L "${evidence_path}" ) ]]; then
+    echo "Restore recovery evidence path is unsafe: ${evidence_path}" >&2
+    exit 1
+  fi
+done
+if [[ -e "${recovery_execution_dir}" && ( ! -d "${recovery_execution_dir}" || -L "${recovery_execution_dir}" ) ]]; then
+  echo "Restore recovery execution directory is unsafe: ${recovery_execution_dir}" >&2
+  exit 1
+fi
+
+base_compose=(
+  docker compose
+  --env-file "${ENV_FILE}"
+  -f "${COMPOSE_FILE}"
+)
+
+resolve_container_id() {
+  local service="$1"
+  local ids=()
+  mapfile -t ids < <("${base_compose[@]}" ps -q "${service}" | awk 'NF')
+  if [[ ${#ids[@]} -ne 1 ]]; then
+    echo "Expected exactly one running ${service} container, found ${#ids[@]}." >&2
+    exit 1
+  fi
+  printf '%s\n' "${ids[0]}"
+}
+
+tmp_dir="$(mktemp -d)"
+chmod 0700 "${tmp_dir}"
+cleanup_tmp() {
+  rm -rf -- "${tmp_dir}"
+}
+trap cleanup_tmp EXIT
+
+"${base_compose[@]}" config --format json >"${tmp_dir}/compose.json"
+app_container_id="$(resolve_container_id app)"
+libsql_container_id="$(resolve_container_id libsql)"
+docker inspect "${app_container_id}" >"${tmp_dir}/app-inspect.json"
+docker inspect "${libsql_container_id}" >"${tmp_dir}/libsql-inspect.json"
+
+resolved_volumes=()
+mapfile -t resolved_volumes < <(
+  python3 "${RESOLVER}" \
+    --compose-json "${tmp_dir}/compose.json" \
+    --app-inspect-json "${tmp_dir}/app-inspect.json" \
+    --libsql-inspect-json "${tmp_dir}/libsql-inspect.json" \
+    --format lines
+)
+if [[ ${#resolved_volumes[@]} -ne 4 ]]; then
+  echo "Active application volume resolver returned an invalid result." >&2
+  exit 1
+fi
+active_libsql_volume="${resolved_volumes[0]}"
+active_reports_volume="${resolved_volumes[1]}"
+active_tenant_exports_volume="${resolved_volumes[2]}"
+active_data_subject_delivery_volume="${resolved_volumes[3]}"
+
+recovery_run_args=()
+if [[ -e "${recovery_key}" ]]; then
+  require_regular_file "${recovery_key}" "Restore recovery intent key"
+  recovery_run_args+=(
+    -v "${recovery_key}:/run/secrets/restore-private-recovery-intent.key:ro"
+    -e "RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE=/run/secrets/restore-private-recovery-intent.key"
+  )
+fi
+
+export RESTORE_STAGING_NAME="${staging_name}"
+compose=(
+  docker compose
+  --env-file "${ENV_FILE}"
+  -f "${COMPOSE_FILE}"
+  -f "${PROMOTION_COMPOSE_FILE}"
+)
+private_db_running=true
+cleanup_private_db() {
+  if [[ "${private_db_running}" == true ]]; then
+    "${compose[@]}" --profile backup rm -sf backup-privacy-replay-db >/dev/null 2>&1 || true
+    private_db_running=false
+  fi
+}
+trap 'cleanup_private_db; cleanup_tmp' EXIT
+
+"${compose[@]}" --profile backup build \
+  backup-privacy-replay-migrate \
+  backup-restore-promotion-plan \
+  backup-restore-promotion-candidate-copy
+"${compose[@]}" --profile backup run --rm backup-privacy-replay-migrate
+
+"${compose[@]}" --profile backup run --rm \
+  "${recovery_run_args[@]}" \
+  -e "RESTORE_STAGING_MANIFEST=/restore-staging/${staging_name}/manifest.json" \
+  -e "RESTORE_PRIVATE_PROMOTION_EXECUTION_PLAN_FILE=/restore-replay/promotion/promotion-execution-plan.json" \
+  -e "RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME=${active_libsql_volume}" \
+  -e "RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME=${active_reports_volume}" \
+  -e "RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME=${active_tenant_exports_volume}" \
+  -e "RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME=${active_data_subject_delivery_volume}" \
+  backup-restore-promotion-plan \
+  pnpm --silent --filter @masters/db backup:restore-promotion-candidates-authorize \
+  >"${tmp_dir}/candidate-authorization.json"
+
+# The private libSQL server must be stopped before its workspace directory becomes a copy source.
+cleanup_private_db
+
+candidate_rows=()
+mapfile -t candidate_rows < <(
+  python3 - "${tmp_dir}/candidate-authorization.json" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+result = json.loads(path.read_text())
+if result.get('mode') != 'ISOLATED_RESTORE_PROMOTION_CANDIDATE_PREPARATION':
+    raise SystemExit('Candidate authorization mode is invalid')
+if result.get('status') != 'CANDIDATE_COPY_AUTHORIZED':
+    raise SystemExit('Candidate copy was not authorized')
+if result.get('evidenceRecomputed') is not True:
+    raise SystemExit('Candidate authorization did not recompute evidence')
+if result.get('candidateMutationAllowed') is not True:
+    raise SystemExit('Candidate mutation is not authorized')
+if result.get('productionMutationAllowed') is not False or result.get('promotionExecuted') is not False:
+    raise SystemExit('Candidate authorization crossed the production mutation boundary')
+plan_fingerprint = result.get('planFingerprint')
+if not isinstance(plan_fingerprint, str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', plan_fingerprint):
+    raise SystemExit('Candidate authorization plan fingerprint is invalid')
+candidate_set = result.get('candidateSetId')
+if not isinstance(candidate_set, str) or not re.fullmatch(r'restore-[0-9a-f]{20}', candidate_set):
+    raise SystemExit('Candidate authorization set ID is invalid')
+expected = [
+    ('LIBSQL', 'libsql'),
+    ('REPORTS', 'reports'),
+    ('TENANT_EXPORTS', 'tenant-exports'),
+    ('DATA_SUBJECT_DELIVERY', 'data-subject-delivery'),
+]
+volumes = result.get('volumes')
+if not isinstance(volumes, list) or len(volumes) != len(expected):
+    raise SystemExit('Candidate authorization volume set is invalid')
+active = set()
+candidates = set()
+rows = []
+for item, (role, subpath) in zip(volumes, expected, strict=True):
+    if not isinstance(item, dict) or item.get('role') != role or item.get('restoreWorkspaceSubpath') != subpath:
+        raise SystemExit('Candidate authorization role order is invalid')
+    current = item.get('activeVolumeName')
+    rollback = item.get('rollbackVolumeName')
+    candidate = item.get('candidateVolumeName')
+    for value in (current, rollback, candidate):
+        if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', value):
+            raise SystemExit('Candidate authorization contains an unsafe Docker volume name')
+    if rollback != current or candidate == current:
+        raise SystemExit('Candidate authorization rollback/candidate boundary is invalid')
+    active.add(current)
+    candidates.add(candidate)
+    rows.append((role, subpath, current, candidate))
+if len(active) != 4 or len(candidates) != 4 or active & candidates:
+    raise SystemExit('Candidate authorization volume identities are not distinct')
+for role, subpath, current, candidate in rows:
+    print('\t'.join((role, subpath, current, candidate, plan_fingerprint, candidate_set)))
+PY
+)
+if [[ ${#candidate_rows[@]} -ne 4 ]]; then
+  echo "Candidate authorization did not produce exactly four volume rows." >&2
+  exit 1
+fi
+
+ensure_candidate_volume() {
+  local role="$1"
+  local active_volume="$2"
+  local candidate_volume="$3"
+  local plan_fingerprint="$4"
+  local candidate_set="$5"
+
+  if docker volume inspect "${candidate_volume}" >"${tmp_dir}/volume-inspect.json" 2>/dev/null; then
+    python3 - "${tmp_dir}/volume-inspect.json" "${role}" "${active_volume}" "${plan_fingerprint}" "${candidate_set}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+record = json.loads(Path(sys.argv[1]).read_text())
+if not isinstance(record, list) or len(record) != 1:
+    raise SystemExit('Existing candidate volume inspect result is invalid')
+labels = record[0].get('Labels') or {}
+expected = {
+    'com.master-diagnostics.restore.promotion-candidate': 'true',
+    'com.master-diagnostics.restore.plan-fingerprint': sys.argv[4],
+    'com.master-diagnostics.restore.candidate-set': sys.argv[5],
+    'com.master-diagnostics.restore.role': sys.argv[2],
+    'com.master-diagnostics.restore.rollback-volume': sys.argv[3],
+}
+for key, value in expected.items():
+    if labels.get(key) != value:
+        raise SystemExit(f'Existing candidate volume label mismatch: {key}')
+PY
+    return
+  fi
+
+  docker volume create \
+    --label 'com.master-diagnostics.restore.promotion-candidate=true' \
+    --label "com.master-diagnostics.restore.plan-fingerprint=${plan_fingerprint}" \
+    --label "com.master-diagnostics.restore.candidate-set=${candidate_set}" \
+    --label "com.master-diagnostics.restore.role=${role}" \
+    --label "com.master-diagnostics.restore.rollback-volume=${active_volume}" \
+    "${candidate_volume}" >/dev/null
+}
+
+for row in "${candidate_rows[@]}"; do
+  IFS=$'\t' read -r role _subpath active_volume candidate_volume plan_fingerprint candidate_set <<<"${row}"
+  ensure_candidate_volume \
+    "${role}" \
+    "${active_volume}" \
+    "${candidate_volume}" \
+    "${plan_fingerprint}" \
+    "${candidate_set}"
+
+  RESTORE_STAGING_NAME="${staging_name}" \
+  RESTORE_PRIVATE_PROMOTION_CANDIDATE_VOLUME="${candidate_volume}" \
+    "${compose[@]}" --profile backup run --rm --no-deps \
+      -e "RESTORE_PRIVATE_PROMOTION_CANDIDATE_ROLE=${role}" \
+      backup-restore-promotion-candidate-copy
+ done
