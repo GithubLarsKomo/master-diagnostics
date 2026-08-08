@@ -74,6 +74,31 @@ Jede Replay-Pflicht enthält ausschließlich die bereits minimierte technische I
 
 Namen, Geburtsdaten, Kontakte, Gründe, Messwerte, Reportinhalte und andere direkte Fachdaten gehören nicht in diesen Vertrag.
 
+## Read-only DB-Assessment v1
+
+`assessRestorePrivacyReplayDatabase()` bewertet die **Datenbankhälfte** einer konsistenten Replay-Pflicht gegen eine ausschließlich isolierte Restore-Staging-Datenbank bzw. eine private Kopie davon.
+
+Der Assessment-Status ist einer von:
+
+- `BLOCKED`: Die signierte Pflicht kann nicht eindeutig gegen den Staging-Zustand aufgelöst werden, beispielsweise weil der gebundene Athlete-Anker fehlt.
+- `DATABASE_REPLAY_REQUIRED`: Mindestens eine erwartete privacy-effektive DB-Wirkung fehlt noch.
+- `DATABASE_SATISFIED`: Die Datenbankwirkung ist bereits technisch nachweisbar vorhanden.
+
+`DATABASE_SATISFIED` verlangt gemeinsam:
+
+- den deterministischen Athlete-Tombstone v1,
+- keine Tests, Athlete-Snapshots, Coach-Zuordnungen oder Guardian-Datensätze,
+- keine athletenbezogenen Betroffenenexport-Metadaten,
+- konservativ keine Tenant-Export-Metadaten im betroffenen Tenant,
+- den exakt gebundenen abgeschlossenen `deletionRequestId`,
+- redigierte Freitexte aller Löschrequests des Athleten.
+
+Die **signierte externe Replay-Pflicht selbst** ist dabei der Nachweis, warum dieser Zielzustand hergestellt sein muss. Ein Backup mit `backupCutoff < dbCommittedAt` kann den ursprünglichen späteren `athlete.anonymization_db_committed`-Auditdatensatz definitionsgemäß nicht enthalten; dessen künstliche Rekonstruktion wäre daher kein zulässiges Erfüllungskriterium. Das Assessment prüft stattdessen den vollständigen technischen Zielzustand gegen die kryptografisch gebundene Obligation.
+
+Der Assessment-Output enthält nur technische IDs, Reason-Codes und Zähler. Er verändert keine Daten.
+
+Wichtig: `DATABASE_SATISFIED` ist **kein vollständiger Replay-Nachweis**. Report-, Tenant-Export- und Betroffenenexportdateien im Staging müssen weiterhin separat geprüft bzw. kontrolliert entfernt werden. `promotionAllowed` bleibt daher auch bei vollständig erfüllter Datenbankhälfte `false`.
+
 ## Club-Betrieb
 
 Der Host-Wrapper
@@ -94,13 +119,18 @@ Dieser Service besitzt ausschließlich read-only Mounts auf:
 
 Er mountet keine Produktivvolumes und besitzt keine `DATABASE_URL`-Abhängigkeit.
 
+Das DB-Assessment ist als eigener Fachvertrag vorhanden, wird in diesem Slice aber noch **nicht** automatisch gegen den gestagten libSQL-Stand gestartet. Der folgende Betriebs-Slice muss dafür eine private, nicht promotionsfähige Staging-DB-Kopie bereitstellen und ausschließlich diese an den Assessment-/Replay-Pfad anbinden.
+
 ## Verbleibende Restore-Slices
 
-Der nächste Schritt ist die **kontrollierte Anwendung** der konsistenten Replay-Pflichten auf eine isolierte Staging-Datenbank. Erst danach folgen:
+Als nächste Schritte bleiben:
 
-1. Datenbank-/Anwendungs-Healthcheck im Staging,
-2. kontrollierte Promotion/Rückschreibung,
-3. Restore-Audit,
-4. praktischer RTO-Drill.
+1. isolierte Staging-DB-Kopie für Assessment/Replay starten,
+2. noch offene DB-Replay-Wirkungen kontrolliert anwenden,
+3. Report-/Exportartefakte im Staging reconciliieren,
+4. Datenbank-/Anwendungs-Healthcheck im Staging,
+5. kontrollierte Promotion/Rückschreibung,
+6. Restore-Audit,
+7. praktischer RTO-Drill.
 
 Bis diese Schritte praktisch nachgewiesen sind, bleibt `PRIVACY_BACKUP_STATE=DISABLED`.
