@@ -35,6 +35,7 @@ export type RestorePrivacyReplayDatabaseReason =
   | 'GUARDIAN_REMAINS'
   | 'DATA_SUBJECT_EXPORT_METADATA_REMAINS'
   | 'TENANT_EXPORT_METADATA_REMAINS'
+  | 'DELETION_REQUEST_STATE_UNRESOLVED'
   | 'DELETION_REQUEST_TEXT_NOT_REDACTED'
   | 'COMMIT_PROOF_MISSING';
 
@@ -90,6 +91,22 @@ function tombstoneMatches(row: typeof athletes.$inferSelect): boolean {
     && row.trainingStatus === expected.trainingStatus;
 }
 
+function validCommitProof(
+  row: Pick<typeof auditEvents.$inferSelect, 'occurredAt' | 'afterJson'>,
+  obligation: Readonly<RestorePrivacyReplayObligation>,
+): boolean {
+  if (row.occurredAt !== obligation.dbCommittedAt || !row.afterJson) return false;
+  try {
+    const parsed: unknown = JSON.parse(row.afterJson);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    const value = parsed as Record<string, unknown>;
+    return value.athleteId === obligation.athleteId
+      && value.policyVersion === obligation.policyVersion;
+  } catch {
+    return false;
+  }
+}
+
 async function assessObligation(
   db: Database,
   obligation: Readonly<RestorePrivacyReplayObligation>,
@@ -118,7 +135,8 @@ async function assessObligation(
     subjectExportCount,
     tenantExportCount,
     deletionRequests,
-    commitProofCount,
+    boundDeletionRequest,
+    commitProofRows,
   ] = await Promise.all([
     scalarCount(db, tests, and(eq(tests.tenantId, obligation.tenantId), eq(tests.athleteId, obligation.athleteId))),
     scalarCount(db, athleteSnapshots, and(
@@ -144,18 +162,31 @@ async function assessObligation(
         eq(athleteDeletionRequests.tenantId, obligation.tenantId),
         eq(athleteDeletionRequests.athleteId, obligation.athleteId),
       )),
-    scalarCount(db, auditEvents, and(
-      eq(auditEvents.tenantId, obligation.tenantId),
-      eq(auditEvents.action, 'athlete.anonymization_db_committed'),
-      eq(auditEvents.entityType, 'athlete_anonymization_execution'),
-      eq(auditEvents.entityId, obligation.executionId),
-    )),
+    db.select({ id: athleteDeletionRequests.id, status: athleteDeletionRequests.status })
+      .from(athleteDeletionRequests)
+      .where(and(
+        eq(athleteDeletionRequests.id, obligation.deletionRequestId),
+        eq(athleteDeletionRequests.tenantId, obligation.tenantId),
+        eq(athleteDeletionRequests.athleteId, obligation.athleteId),
+      ))
+      .limit(1),
+    db.select({ occurredAt: auditEvents.occurredAt, afterJson: auditEvents.afterJson })
+      .from(auditEvents)
+      .where(and(
+        eq(auditEvents.tenantId, obligation.tenantId),
+        eq(auditEvents.action, 'athlete.anonymization_db_committed'),
+        eq(auditEvents.entityType, 'athlete_anonymization_execution'),
+        eq(auditEvents.entityId, obligation.executionId),
+      )),
   ]);
 
   const unredactedDeletionRequestCount = deletionRequests.filter((row) => (
     row.reason !== AUDIT_PRIVACY_REDACTED_TEXT
       || row.decisionReason !== AUDIT_PRIVACY_REDACTED_TEXT
   )).length;
+  const deletionRequestResolved = boundDeletionRequest.length === 1
+    && boundDeletionRequest[0]?.status === 'COMPLETED';
+  const commitProofCount = commitProofRows.filter((row) => validCommitProof(row, obligation)).length;
 
   const counts = Object.freeze({
     tests: testCount,
@@ -176,6 +207,7 @@ async function assessObligation(
   if (guardianCount > 0) reasons.push('GUARDIAN_REMAINS');
   if (subjectExportCount > 0) reasons.push('DATA_SUBJECT_EXPORT_METADATA_REMAINS');
   if (tenantExportCount > 0) reasons.push('TENANT_EXPORT_METADATA_REMAINS');
+  if (!deletionRequestResolved) reasons.push('DELETION_REQUEST_STATE_UNRESOLVED');
   if (unredactedDeletionRequestCount > 0) reasons.push('DELETION_REQUEST_TEXT_NOT_REDACTED');
   if (commitProofCount < 1) reasons.push('COMMIT_PROOF_MISSING');
 
