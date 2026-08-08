@@ -117,7 +117,8 @@ trap cleanup_tmp EXIT
 app_container_id="$(resolve_container_id app)"
 libsql_container_id="$(resolve_container_id libsql)"
 docker inspect "${app_container_id}" >"${tmp_dir}/app-inspect.json"
-docker inspect "${libsql_container_id}" >"${tmp_dir}/libsql-inspect.json"\n
+docker inspect "${libsql_container_id}" >"${tmp_dir}/libsql-inspect.json"
+
 resolved_volumes=()
 mapfile -t resolved_volumes < <(
   python3 "${RESOLVER}" \
