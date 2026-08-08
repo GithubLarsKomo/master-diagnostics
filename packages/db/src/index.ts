@@ -24,6 +24,7 @@ export * from './services/restore-privacy-effect-journal';
 export * from './services/restore-privacy-reconciliation-report';
 export * from './services/restore-privacy-replay-assessment';
 export * from './services/restore-privacy-db-replay';
+export * from './services/restore-privacy-artifact-replay-manifest';
 export * from './services/club-bootstrap';
 export * from './services/factory-protocol-templates';
 export * from './services/protocol-templates';
