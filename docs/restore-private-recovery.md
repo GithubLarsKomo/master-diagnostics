@@ -125,11 +125,34 @@ Der Reader verändert beim Verifizieren keine Dateirechte. Dadurch kann ein spä
 
 Nach einer Teilmutation muss der Plan nicht gegen den inzwischen veränderten Filesystem-Zustand neu erzeugt werden. Er kann weiterhin intern und gegen die erneut kryptografisch verifizierte Restore-Reconciliation geprüft werden.
 
+## Recovery-Plan CLI
+
+`pnpm --filter @masters/db backup:restore-recovery-plan` führt die komplette **nicht-mutierende** Entscheidungsstrecke in einem Prozess aus:
+
+1. Backup-Cutoff aus dem Staging-Manifest validieren,
+2. Ledger + Privacy-Effect-Journal erneut kryptografisch reconciliieren,
+3. Artifact-Replay-Manifest und -Result einlesen,
+4. privaten Restore-Healthcheck erneut berechnen,
+5. Recovery Assessment ausführen,
+6. nur bei `RECOVERY_READY` den deterministischen Plan exklusiv persistieren.
+
+Erforderliche Pfade werden ausschließlich als absolute Umgebungsvariablen akzeptiert. Zusätzlich zu den bereits für den Healthcheck verwendeten Variablen ist `RESTORE_PRIVATE_RECOVERY_PLAN_FILE` erforderlich.
+
+Das JSON-Ergebnis verwendet `mode: ISOLATED_RESTORE_RECOVERY_PLAN` und hat drei Zustände:
+
+- `NOT_REQUIRED`: Restore ist bereits gesund; Exit `0`, keine Plan-Datei.
+- `PLAN_READY`: Recovery ist eindeutig; Exit `0`, Plan wurde neu erstellt oder byte-identisch wiederverwendet.
+- `BLOCKED`: mindestens ein nicht sicher recoverbarer Zustand; Exit `3`, keine Plan-Datei.
+
+Technische/strukturelle Fehler bleiben Exit `1`.
+
+Der CLI darf **nur vor der ersten Recovery-Mutation** zur Neuplanung verwendet werden. Nach einem Crash mitten in einer späteren Recovery darf nicht erneut aus dem veränderten Filesystem klassifiziert werden; dann muss der Executor den bereits persistierten und gegen die aktuelle signierte Reconciliation verifizierten Plan fortsetzen.
+
 ## Scope-Grenze
 
-Der aktuelle Stand umfasst Assessment und den durable Recovery-Plan-Vertrag. Noch nicht enthalten sind:
+Der aktuelle Stand umfasst Assessment, den durable Recovery-Plan-Vertrag und einen eigenständigen Recovery-Plan-CLI. Noch nicht enthalten sind:
 
-1. operative CLI-/Compose-Verdrahtung des Plan-Schritts,
+1. Compose-/Host-Wrapper-Verdrahtung des Plan-Schritts,
 2. mutierende Ausführung der persistierten Recovery-Aktionen,
 3. erneuter Healthcheck nach Recovery,
 4. kontrolliertes Promotion-Gate,
