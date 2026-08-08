@@ -1,8 +1,14 @@
 import { readFile } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { createDatabase } from './client';
-import { readVerifiedRestorePrivacyArtifactReplayResultIfPresent } from './services/restore-privacy-artifact-replay';
-import { readVerifiedRestorePrivacyArtifactReplayManifestIfPresent } from './services/restore-privacy-artifact-replay-manifest';
+import {
+  verifyRestorePrivacyArtifactReplayResult,
+  type RestorePrivacyArtifactReplayResult,
+} from './services/restore-privacy-artifact-replay';
+import {
+  verifyRestorePrivacyArtifactReplayManifest,
+  type RestorePrivacyArtifactReplayManifest,
+} from './services/restore-privacy-artifact-replay-manifest';
 import { assessRestorePrivateHealthcheck } from './services/restore-private-healthcheck';
 import { createRestorePrivacyReconciliationReportFromStorage } from './services/restore-privacy-reconciliation-report';
 
@@ -19,6 +25,25 @@ function requireAbsoluteEnvironmentPath(name: string): string {
   if (!value) throw new Error(`${name} is required`);
   if (!isAbsolute(value)) throw new Error(`${name} must be an absolute path`);
   return value;
+}
+
+function isMissingFile(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
+}
+
+async function readJsonIfPresent<T>(filePath: string, label: string): Promise<T | null> {
+  let serialized: string;
+  try {
+    serialized = await readFile(filePath, 'utf8');
+  } catch (error) {
+    if (isMissingFile(error)) return null;
+    throw error;
+  }
+  try {
+    return JSON.parse(serialized) as T;
+  } catch (error) {
+    throw new Error(`${label} is not valid JSON`, { cause: error });
+  }
 }
 
 async function readBackupCutoff(manifestPath: string): Promise<string> {
@@ -57,13 +82,20 @@ async function main(): Promise<void> {
     journalDir,
     journalKeyFile,
   });
-  const artifactManifest = await readVerifiedRestorePrivacyArtifactReplayManifestIfPresent(
+  const artifactManifest = await readJsonIfPresent<RestorePrivacyArtifactReplayManifest>(
     artifactManifestFile,
-    reconciliation,
+    'Restore privacy artifact replay manifest',
   );
+  if (artifactManifest) verifyRestorePrivacyArtifactReplayManifest(artifactManifest, reconciliation);
   const artifactResult = artifactManifest
-    ? await readVerifiedRestorePrivacyArtifactReplayResultIfPresent(artifactResultFile, artifactManifest)
+    ? await readJsonIfPresent<RestorePrivacyArtifactReplayResult>(
+      artifactResultFile,
+      'Restore privacy artifact replay result',
+    )
     : null;
+  if (artifactManifest && artifactResult) {
+    verifyRestorePrivacyArtifactReplayResult(artifactResult, artifactManifest);
+  }
 
   const report = await assessRestorePrivateHealthcheck(
     createDatabase(),
