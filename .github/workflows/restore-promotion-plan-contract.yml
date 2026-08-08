@@ -6,12 +6,14 @@ on:
       - '.github/workflows/restore-promotion-plan-contract.yml'
       - 'packages/db/**'
       - 'docs/restore-private-promotion-execution-plan.md'
+      - 'docs/restore-private-promotion-candidates.md'
   push:
     branches: [main]
     paths:
       - '.github/workflows/restore-promotion-plan-contract.yml'
       - 'packages/db/**'
       - 'docs/restore-private-promotion-execution-plan.md'
+      - 'docs/restore-private-promotion-candidates.md'
 
 jobs:
   contract:
@@ -174,6 +176,48 @@ jobs:
               for item in plan['record']['volumes']
           )
           assert (plan_path.stat().st_mode & 0o777) == 0o600
+          PY
+
+      - name: Verify candidate preparation requires the fresh signed plan
+        run: |
+          env \
+            RESTORE_STAGING_MANIFEST=/tmp/restore-promotion-plan-contract/staging/restore-ci/manifest.json \
+            RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-promotion-plan-contract/ledger \
+            RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-promotion-plan-contract/ledger.key \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-promotion-plan-contract/journal \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-promotion-plan-contract/journal.key \
+            RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE=/tmp/restore-promotion-plan-contract/replay/artifact-replay-manifest.json \
+            RESTORE_PRIVACY_ARTIFACT_RESULT_FILE=/tmp/restore-promotion-plan-contract/replay/artifact-replay-result.json \
+            RESTORE_PRIVACY_REPORT_ROOT=/tmp/restore-promotion-plan-contract/replay/reports \
+            RESTORE_PRIVACY_TENANT_EXPORT_ROOT=/tmp/restore-promotion-plan-contract/replay/tenant-exports \
+            RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT=/tmp/restore-promotion-plan-contract/replay/data-subject-delivery \
+            RESTORE_PRIVATE_RECOVERY_PLAN_FILE=/tmp/restore-promotion-plan-contract/replay/recovery-plan.json \
+            RESTORE_PRIVATE_RECOVERY_INTENT_DIR=/tmp/restore-promotion-plan-contract/replay/recovery-execution \
+            RESTORE_PRIVATE_PROMOTION_INTENT_FILE=/tmp/restore-promotion-plan-contract/replay/promotion/promotion-intent.json \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-promotion-plan-contract/promotion.key \
+            RESTORE_PRIVATE_PROMOTION_EXECUTION_PLAN_FILE=/tmp/restore-promotion-plan-contract/replay/promotion/promotion-execution-plan.json \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME=infra_libsql-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME=infra_report-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME=infra_export-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME=infra_data-subject-delivery-data \
+            pnpm --silent --filter @masters/db backup:restore-promotion-candidates-authorize >/tmp/promotion-candidates-authorized.json
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          auth = json.loads(Path('/tmp/promotion-candidates-authorized.json').read_text())
+          plan = json.loads(Path('/tmp/restore-promotion-plan-contract/replay/promotion/promotion-execution-plan.json').read_text())
+          assert auth['mode'] == 'ISOLATED_RESTORE_PROMOTION_CANDIDATE_PREPARATION'
+          assert auth['status'] == 'CANDIDATE_COPY_AUTHORIZED'
+          assert auth['evidenceRecomputed'] is True
+          assert auth['candidateMutationAllowed'] is True
+          assert auth['productionMutationAllowed'] is False
+          assert auth['promotionExecuted'] is False
+          assert auth['planFingerprint'] == plan['record']['planFingerprint']
+          assert auth['planSignature'] == plan['signature']
+          assert auth['candidateSetId'] == plan['record']['candidateSetId']
+          assert auth['activeVolumeSetFingerprint'] == plan['record']['activeVolumeSetFingerprint']
+          assert auth['volumes'] == plan['record']['volumes']
           PY
 
       - name: Verify active volume drift invalidates the existing plan
