@@ -91,8 +91,9 @@ Der Assessment-Status ist einer von:
 - keine athletenbezogenen Betroffenenexport-Metadaten,
 - konservativ keine Tenant-Export-Metadaten im betroffenen Tenant,
 - den exakt gebundenen abgeschlossenen `deletionRequestId`,
-- redigierte Freitexte aller Löschrequests des Athleten,
-- einen passenden append-only `athlete.anonymization_db_committed`-Nachweis für exakt Execution, `dbCommittedAt`, Athlete und Policy-Version.
+- redigierte Freitexte aller Löschrequests des Athleten.
+
+Die **signierte externe Replay-Pflicht selbst** ist dabei der Nachweis, warum dieser Zielzustand hergestellt sein muss. Ein Backup mit `backupCutoff < dbCommittedAt` kann den ursprünglichen späteren `athlete.anonymization_db_committed`-Auditdatensatz definitionsgemäß nicht enthalten; dessen künstliche Rekonstruktion wäre daher kein zulässiges Erfüllungskriterium. Das Assessment prüft stattdessen den vollständigen technischen Zielzustand gegen die kryptografisch gebundene Obligation.
 
 Der Assessment-Output enthält nur technische IDs, Reason-Codes und Zähler. Er verändert keine Daten.
 
