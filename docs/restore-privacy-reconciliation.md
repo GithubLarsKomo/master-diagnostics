@@ -101,36 +101,49 @@ Wichtig: `DATABASE_SATISFIED` ist **kein vollständiger Replay-Nachweis**. Repor
 
 ## Club-Betrieb
 
-Der Host-Wrapper
+Der reine Evidenz-Wrapper
 
 ```sh
 bash infra/backup/reconcile-club-restore-privacy.sh restore-<timestamp>-<uuid>
 ```
 
-startet den Compose-Service `backup-privacy-reconcile`.
+startet den Compose-Service `backup-privacy-reconcile`. Dieser besitzt nur read-only Mounts auf Staging, Ledger, Journal und deren Keys und hat keine Datenbankabhängigkeit.
 
-Dieser Service besitzt ausschließlich read-only Mounts auf:
+Für das Datenbank-Assessment steht zusätzlich zur Verfügung:
 
-- das Restore-Staging,
-- den Restore-Privacy-Ledger,
-- den Ledger-Key,
-- das Privacy-Effect-Journal,
-- den Journal-Key.
+```sh
+bash infra/backup/assess-club-restore-privacy.sh restore-<timestamp>-<uuid>
+```
 
-Er mountet keine Produktivvolumes und besitzt keine `DATABASE_URL`-Abhängigkeit.
+Dieser Wrapper:
 
-Das DB-Assessment ist als eigener Fachvertrag vorhanden, wird in diesem Slice aber noch **nicht** automatisch gegen den gestagten libSQL-Stand gestartet. Der folgende Betriebs-Slice muss dafür eine private, nicht promotionsfähige Staging-DB-Kopie bereitstellen und ausschließlich diese an den Assessment-/Replay-Pfad anbinden.
+1. erzeugt einen UUID-basierten privaten Work-Scope unter `RESTORE_WORK_HOST_DIR` (Standard `/var/lib/master-diagnostics/restore-work`),
+2. kopiert ausschließlich `restore-staging/<name>/libsql` in diesen Work-Scope; das Original-Staging bleibt read-only,
+3. startet das gepinnte libSQL-Image `3ec6803` ausschließlich auf dieser **Kopie** und in einem eigenen internen `restore-assessment`-Netz,
+4. verbindet `backup:privacy-assess` nur mit dieser DB-Kopie und den read-only Ledger-/Journal-Nachweisen,
+5. führt keine Migration aus,
+6. stoppt den isolierten DB-Container und entfernt die Work-Kopie nach dem Assessment auch bei Fehlern.
+
+Der Assessment-Container mountet keine Produktivvolumes. Der produktive `libsql`-Service und das normale interne App-Netz werden nicht verwendet.
+
+Exit-Codes des Wrappers:
+
+- `0`: Datenbankhälfte ist bereits `DATABASE_SATISFIED` oder es gibt keine Replay-Pflicht,
+- `4`: konsistente Replay-Pflichten bestehen und die Datenbankhälfte benötigt Replay,
+- `3`: Reconciliation/Assessment ist blockiert,
+- `1`: technischer Fehler.
+
+Die Work-Kopie ist ausdrücklich **wegwerfbar** und keine neue Restore-Quelle. Das unveränderte Restore-Staging bleibt die Referenz für die folgenden Replay- und Artefakt-Schritte.
 
 ## Verbleibende Restore-Slices
 
 Als nächste Schritte bleiben:
 
-1. isolierte Staging-DB-Kopie für Assessment/Replay starten,
-2. noch offene DB-Replay-Wirkungen kontrolliert anwenden,
-3. Report-/Exportartefakte im Staging reconciliieren,
-4. Datenbank-/Anwendungs-Healthcheck im Staging,
-5. kontrollierte Promotion/Rückschreibung,
-6. Restore-Audit,
-7. praktischer RTO-Drill.
+1. noch offene DB-Replay-Wirkungen kontrolliert auf einer privaten Restore-Arbeitskopie anwenden,
+2. Report-/Exportartefakte im Staging-Work-Scope reconciliieren,
+3. Datenbank-/Anwendungs-Healthcheck im vollständig reconciliierten Staging,
+4. kontrollierte Promotion/Rückschreibung,
+5. Restore-Audit,
+6. praktischer RTO-Drill.
 
 Bis diese Schritte praktisch nachgewiesen sind, bleibt `PRIVACY_BACKUP_STATE=DISABLED`.
