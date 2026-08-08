@@ -131,14 +131,16 @@ async function seedArtifacts(db: Database): Promise<void> {
   await db.insert(schema.athleteDataSubjectDeliveryApprovals).values([
     {
       id: 'delivery-approval-a', tenantId: 'tenant-a', athleteId: 'athlete-a', approvalVersion: 1,
-      sourceSchemaVersion: '1', deliveryPolicyVersion: '1.0.0', assessedAt: createdAt,
+      sourceSchemaVersion: 'masters-data-subject-export-v1',
+      deliveryPolicyVersion: 'masters-data-subject-delivery-v1', assessedAt: createdAt,
       sourceFingerprint: `sha256:${'b'.repeat(64)}`, decisionsFingerprint: `sha256:${'c'.repeat(64)}`,
       reviewDecisionsJson: '{}', approvedByUserId: 'admin-a', approvedAt: createdAt,
       createdAt, updatedAt: createdAt,
     },
     {
       id: 'delivery-approval-b', tenantId: 'tenant-a', athleteId: 'athlete-b', approvalVersion: 1,
-      sourceSchemaVersion: '1', deliveryPolicyVersion: '1.0.0', assessedAt: createdAt,
+      sourceSchemaVersion: 'masters-data-subject-export-v1',
+      deliveryPolicyVersion: 'masters-data-subject-delivery-v1', assessedAt: createdAt,
       sourceFingerprint: `sha256:${'d'.repeat(64)}`, decisionsFingerprint: `sha256:${'e'.repeat(64)}`,
       reviewDecisionsJson: '{}', approvedByUserId: 'admin-a', approvedAt: createdAt,
       createdAt, updatedAt: createdAt,
