@@ -19,7 +19,9 @@
     "backup:verify": "tsx src/verify-backup-bundle.ts",
     "backup:stage": "tsx src/stage-backup-restore.ts",
     "backup:privacy-ledger": "tsx src/create-restore-privacy-ledger-snapshot.ts",
-    "backup:privacy-reconcile": "tsx src/report-restore-privacy-reconciliation.ts"
+    "backup:privacy-reconcile": "tsx src/report-restore-privacy-reconciliation.ts",
+    "backup:privacy-assessment-work": "tsx src/prepare-restore-replay-work.ts",
+    "backup:privacy-assess": "tsx src/assess-restore-privacy-replay.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
