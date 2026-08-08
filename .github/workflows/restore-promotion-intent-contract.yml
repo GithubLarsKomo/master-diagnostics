@@ -1,0 +1,175 @@
+name: Restore Promotion Intent Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-promotion-intent-contract.yml'
+      - 'packages/db/**'
+      - 'docs/restore-private-promotion.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-promotion-intent-contract.yml'
+      - 'packages/db/**'
+      - 'docs/restore-private-promotion.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: file:${{ github.workspace }}/restore-promotion-intent-ci.db
+      DATABASE_AUTH_TOKEN: ''
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Prepare healthy private restore evidence
+        run: |
+          rm -f "${{ github.workspace }}/restore-promotion-intent-ci.db"
+          pnpm --silent --filter @masters/db db:migrate
+          rm -rf /tmp/restore-promotion-intent-contract
+          mkdir -p \
+            /tmp/restore-promotion-intent-contract/staging/restore-ci \
+            /tmp/restore-promotion-intent-contract/ledger \
+            /tmp/restore-promotion-intent-contract/journal \
+            /tmp/restore-promotion-intent-contract/replay/reports \
+            /tmp/restore-promotion-intent-contract/replay/tenant-exports \
+            /tmp/restore-promotion-intent-contract/replay/data-subject-delivery
+          cat >/tmp/restore-promotion-intent-contract/staging/restore-ci/manifest.json <<'JSON'
+          {
+            "bundleVersion": 1,
+            "createdAt": "2026-08-01T00:00:00.000Z",
+            "restoreReconciliationRequired": true
+          }
+          JSON
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          root = Path('/tmp/restore-promotion-intent-contract')
+          root.joinpath('ledger.key').write_text(base64.b64encode(bytes([7]) * 32).decode() + '\n')
+          root.joinpath('journal.key').write_text(base64.b64encode(bytes([9]) * 32).decode() + '\n')
+          root.joinpath('promotion.key').write_text(base64.b64encode(bytes([11]) * 32).decode() + '\n')
+          PY
+          chmod 600 \
+            /tmp/restore-promotion-intent-contract/ledger.key \
+            /tmp/restore-promotion-intent-contract/journal.key \
+            /tmp/restore-promotion-intent-contract/promotion.key
+
+          RESTORE_STAGING_MANIFEST=/tmp/restore-promotion-intent-contract/staging/restore-ci/manifest.json \
+          RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-promotion-intent-contract/ledger \
+          RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-promotion-intent-contract/ledger.key \
+            pnpm --silent --filter @masters/db backup:privacy-ledger >/tmp/promotion-ledger.json
+
+          env \
+            RESTORE_STAGING_MANIFEST=/tmp/restore-promotion-intent-contract/staging/restore-ci/manifest.json \
+            RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-promotion-intent-contract/ledger \
+            RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-promotion-intent-contract/ledger.key \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-promotion-intent-contract/journal \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-promotion-intent-contract/journal.key \
+            RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE=/tmp/restore-promotion-intent-contract/replay/artifact-replay-manifest.json \
+            pnpm --silent --filter @masters/db backup:privacy-artifact-plan >/tmp/promotion-artifact-plan.json
+
+          env \
+            RESTORE_STAGING_MANIFEST=/tmp/restore-promotion-intent-contract/staging/restore-ci/manifest.json \
+            RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-promotion-intent-contract/ledger \
+            RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-promotion-intent-contract/ledger.key \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-promotion-intent-contract/journal \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-promotion-intent-contract/journal.key \
+            RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE=/tmp/restore-promotion-intent-contract/replay/artifact-replay-manifest.json \
+            RESTORE_PRIVACY_ARTIFACT_RESULT_FILE=/tmp/restore-promotion-intent-contract/replay/artifact-replay-result.json \
+            RESTORE_PRIVACY_REPORT_ROOT=/tmp/restore-promotion-intent-contract/replay/reports \
+            RESTORE_PRIVACY_TENANT_EXPORT_ROOT=/tmp/restore-promotion-intent-contract/replay/tenant-exports \
+            RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT=/tmp/restore-promotion-intent-contract/replay/data-subject-delivery \
+            pnpm --silent --filter @masters/db backup:privacy-artifact-replay >/tmp/promotion-artifact-replay.json
+
+      - name: Verify blocked readiness never persists authorization
+        run: |
+          set +e
+          env \
+            RESTORE_STAGING_MANIFEST=/tmp/restore-promotion-intent-contract/staging/restore-ci/manifest.json \
+            RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-promotion-intent-contract/ledger \
+            RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-promotion-intent-contract/ledger.key \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-promotion-intent-contract/journal \
+            RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-promotion-intent-contract/journal.key \
+            RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE=/tmp/restore-promotion-intent-contract/replay/artifact-replay-manifest.json \
+            RESTORE_PRIVACY_ARTIFACT_RESULT_FILE=/tmp/restore-promotion-intent-contract/replay/missing-result.json \
+            RESTORE_PRIVACY_REPORT_ROOT=/tmp/restore-promotion-intent-contract/replay/reports \
+            RESTORE_PRIVACY_TENANT_EXPORT_ROOT=/tmp/restore-promotion-intent-contract/replay/tenant-exports \
+            RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT=/tmp/restore-promotion-intent-contract/replay/data-subject-delivery \
+            RESTORE_PRIVATE_RECOVERY_PLAN_FILE=/tmp/restore-promotion-intent-contract/replay/recovery-plan.json \
+            RESTORE_PRIVATE_RECOVERY_INTENT_DIR=/tmp/restore-promotion-intent-contract/replay/recovery-execution \
+            pnpm --silent --filter @masters/db backup:restore-promotion-intent >/tmp/promotion-blocked.json
+          code=$?
+          set -e
+          test "$code" -eq 3
+          test ! -e /tmp/restore-promotion-intent-contract/replay/promotion
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('/tmp/promotion-blocked.json').read_text())
+          assert result['mode'] == 'ISOLATED_RESTORE_PROMOTION_INTENT'
+          assert result['status'] == 'BLOCKED'
+          assert result['promotionAllowed'] is False
+          assert result['authorizationPersisted'] is False
+          assert result['promotionExecuted'] is False
+          assert result['readiness']['status'] == 'BLOCKED'
+          PY
+
+      - name: Verify signed promotion intent creation and retry reuse
+        run: |
+          for attempt in first second; do
+            env \
+              RESTORE_STAGING_MANIFEST=/tmp/restore-promotion-intent-contract/staging/restore-ci/manifest.json \
+              RESTORE_PRIVACY_LEDGER_DIR=/tmp/restore-promotion-intent-contract/ledger \
+              RESTORE_PRIVACY_LEDGER_KEY_FILE=/tmp/restore-promotion-intent-contract/ledger.key \
+              RESTORE_PRIVACY_EFFECT_JOURNAL_DIR=/tmp/restore-promotion-intent-contract/journal \
+              RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/restore-promotion-intent-contract/journal.key \
+              RESTORE_PRIVACY_ARTIFACT_MANIFEST_FILE=/tmp/restore-promotion-intent-contract/replay/artifact-replay-manifest.json \
+              RESTORE_PRIVACY_ARTIFACT_RESULT_FILE=/tmp/restore-promotion-intent-contract/replay/artifact-replay-result.json \
+              RESTORE_PRIVACY_REPORT_ROOT=/tmp/restore-promotion-intent-contract/replay/reports \
+              RESTORE_PRIVACY_TENANT_EXPORT_ROOT=/tmp/restore-promotion-intent-contract/replay/tenant-exports \
+              RESTORE_PRIVACY_DATA_SUBJECT_DELIVERY_ROOT=/tmp/restore-promotion-intent-contract/replay/data-subject-delivery \
+              RESTORE_PRIVATE_RECOVERY_PLAN_FILE=/tmp/restore-promotion-intent-contract/replay/recovery-plan.json \
+              RESTORE_PRIVATE_RECOVERY_INTENT_DIR=/tmp/restore-promotion-intent-contract/replay/recovery-execution \
+              RESTORE_PRIVATE_PROMOTION_INTENT_DIR=/tmp/restore-promotion-intent-contract/replay/promotion \
+              RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-promotion-intent-contract/promotion.key \
+              pnpm --silent --filter @masters/db backup:restore-promotion-intent >"/tmp/promotion-${attempt}.json"
+          done
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          first = json.loads(Path('/tmp/promotion-first.json').read_text())
+          second = json.loads(Path('/tmp/promotion-second.json').read_text())
+          intent_path = Path('/tmp/restore-promotion-intent-contract/replay/promotion/promotion-intent.json')
+          intent = json.loads(intent_path.read_text())
+
+          assert first['mode'] == 'ISOLATED_RESTORE_PROMOTION_INTENT'
+          assert first['status'] == 'AUTHORIZED'
+          assert first['promotionAllowed'] is True
+          assert first['authorizationPersisted'] is True
+          assert first['promotionExecuted'] is False
+          assert first['intentCreated'] is True
+          assert first['intentReused'] is False
+          assert second['intentCreated'] is False
+          assert second['intentReused'] is True
+          assert second['authorizedAt'] == first['authorizedAt']
+          assert second['evidenceFingerprint'] == first['evidenceFingerprint']
+          assert second['intentSignature'] == first['intentSignature']
+          assert intent['record']['phase'] == 'AUTHORIZED'
+          assert intent['record']['readinessEvidenceFingerprint'] == first['evidenceFingerprint']
+          assert intent['record']['promotionExecuted'] is False
+          assert (intent_path.stat().st_mode & 0o777) == 0o600
+          assert (intent_path.parent.stat().st_mode & 0o777) == 0o700
+          PY
