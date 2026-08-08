@@ -1,4 +1,5 @@
-import { and, count, eq } from 'drizzle-orm';
+import { and, count, eq, type SQL } from 'drizzle-orm';
+import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import type { Database } from '../client';
 import {
   athleteDataSubjectDeliveryPackages,
@@ -52,7 +53,7 @@ export interface RestorePrivacyReplayDatabaseObligationAssessment {
   readonly executionId: string;
   readonly tenantId: string;
   readonly athleteId: string;
-  readonly status: Exclude<RestorePrivacyReplayDatabaseStatus, 'BLOCKED'> | 'BLOCKED';
+  readonly status: RestorePrivacyReplayDatabaseStatus;
   readonly reasons: readonly RestorePrivacyReplayDatabaseReason[];
   readonly counts: Readonly<RestorePrivacyReplayDatabaseCounts> | null;
 }
@@ -68,8 +69,8 @@ export interface RestorePrivacyReplayDatabaseAssessment {
 
 async function scalarCount(
   db: Database,
-  table: Parameters<Database['select']>[0] extends never ? never : any,
-  where: any,
+  table: SQLiteTable,
+  where: SQL | undefined,
 ): Promise<number> {
   const [row] = await db.select({ value: count() }).from(table).where(where);
   return row?.value ?? 0;
