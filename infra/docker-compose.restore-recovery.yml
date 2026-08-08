@@ -27,5 +27,12 @@ services:
       - ${RESTORE_PRIVACY_EFFECT_JOURNAL_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-effect-journal}:/privacy-effect-journal:ro
       - ${RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE:-/etc/master-diagnostics/restore-privacy-effect-journal.key}:/run/secrets/restore-privacy-effect-journal.key:ro
       - ${RESTORE_PRIVATE_RECOVERY_INTENT_KEY_FILE:-/etc/master-diagnostics/restore-private-recovery-intent.key}:/run/secrets/restore-private-recovery-intent.key:ro
-      - ${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-restore-unset}:/restore-replay
+      - ${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-restore-unset}/recovery-plan.json:/restore-replay/recovery-plan.json:ro
+      - ${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-restore-unset}/recovery-execution:/restore-replay/recovery-execution
+      - ${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-restore-unset}/reports:/restore-replay/reports
+      - ${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-restore-unset}/tenant-exports:/restore-replay/tenant-exports
+      - ${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-restore-unset}/data-subject-delivery:/restore-replay/data-subject-delivery
+    depends_on:
+      backup-privacy-replay-db:
+        condition: service_healthy
     networks: [restore-internal]
