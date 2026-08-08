@@ -56,6 +56,14 @@ function reconciliation(status: 'CLEAR' | 'REPLAY_REQUIRED' | 'BLOCKED' = 'REPLA
 }
 
 async function seedArtifacts(db: Database): Promise<void> {
+  await db.insert(schema.tenants).values([
+    { id: 'tenant-a', slug: 'tenant-a', name: 'Tenant A', deploymentMode: 'CLUB', timezone: 'Europe/Berlin', locale: 'de', retentionYears: 5, createdAt, updatedAt: createdAt },
+    { id: 'tenant-b', slug: 'tenant-b', name: 'Tenant B', deploymentMode: 'CLUB', timezone: 'Europe/Berlin', locale: 'de', retentionYears: 5, createdAt, updatedAt: createdAt },
+  ]);
+  await db.insert(schema.users).values([
+    { id: 'admin-a', email: 'admin-a@example.test', displayName: 'Admin A', preferredLocale: 'de', createdAt, updatedAt: createdAt },
+    { id: 'admin-b', email: 'admin-b@example.test', displayName: 'Admin B', preferredLocale: 'de', createdAt, updatedAt: createdAt },
+  ]);
   await db.insert(schema.athletes).values([
     {
       id: 'athlete-a', tenantId: 'tenant-a', linkedUserId: null, firstName: 'Ada', lastName: 'Athlete',
@@ -117,6 +125,22 @@ async function seedArtifacts(db: Database): Promise<void> {
       id: 'tenant-export-b', tenantId: 'tenant-b', tokenHash: `sha256:${'3'.repeat(64)}`,
       storageReference: '22222222-2222-2222-2222-222222222222.mde', packageSha256: `sha256:${'4'.repeat(64)}`,
       createdByUserId: 'admin-b', expiresAt: '2027-01-01T00:00:00.000Z', downloadedAt: null,
+      createdAt, updatedAt: createdAt,
+    },
+  ]);
+  await db.insert(schema.athleteDataSubjectDeliveryApprovals).values([
+    {
+      id: 'delivery-approval-a', tenantId: 'tenant-a', athleteId: 'athlete-a', approvalVersion: 1,
+      sourceSchemaVersion: '1', deliveryPolicyVersion: '1.0.0', assessedAt: createdAt,
+      sourceFingerprint: `sha256:${'b'.repeat(64)}`, decisionsFingerprint: `sha256:${'c'.repeat(64)}`,
+      reviewDecisionsJson: '{}', approvedByUserId: 'admin-a', approvedAt: createdAt,
+      createdAt, updatedAt: createdAt,
+    },
+    {
+      id: 'delivery-approval-b', tenantId: 'tenant-a', athleteId: 'athlete-b', approvalVersion: 1,
+      sourceSchemaVersion: '1', deliveryPolicyVersion: '1.0.0', assessedAt: createdAt,
+      sourceFingerprint: `sha256:${'d'.repeat(64)}`, decisionsFingerprint: `sha256:${'e'.repeat(64)}`,
+      reviewDecisionsJson: '{}', approvedByUserId: 'admin-a', approvedAt: createdAt,
       createdAt, updatedAt: createdAt,
     },
   ]);
