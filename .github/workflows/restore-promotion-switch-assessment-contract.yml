@@ -1,0 +1,172 @@
+name: Restore Promotion Switch Assessment Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-promotion-switch-assessment-contract.yml'
+      - 'packages/db/**'
+      - 'infra/backup/assess-club-restore-promotion-switch.sh'
+      - 'infra/docker-compose.restore-promotion-assessment.yml'
+      - 'docs/restore-private-promotion-switch-assessment.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-promotion-switch-assessment-contract.yml'
+      - 'packages/db/**'
+      - 'infra/backup/assess-club-restore-promotion-switch.sh'
+      - 'infra/docker-compose.restore-promotion-assessment.yml'
+      - 'docs/restore-private-promotion-switch-assessment.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    env:
+      ROOT: /tmp/restore-switch-assessment-contract
+      KEY: /tmp/restore-switch-assessment-contract/promotion.key
+      HEALTHCHECK: /tmp/restore-switch-assessment-contract/candidate-healthcheck.json
+      SWITCH_DIR: /tmp/restore-switch-assessment-contract/switch
+      INTENT: /tmp/restore-switch-assessment-contract/switch/promotion-switch-intent.json
+      EVIDENCE: /tmp/restore-switch-assessment-contract/evidence
+      JOURNAL: /tmp/restore-switch-assessment-contract/evidence/promotion-switch-journal.json
+      RB_LIBSQL: infra_libsql-data
+      RB_REPORTS: infra_report-data
+      RB_EXPORTS: infra_export-data
+      RB_DELIVERY: infra_data-subject-delivery-data
+      CAND_LIBSQL: master-diagnostics-restore-0123456789abcdefabcd-libsql
+      CAND_REPORTS: master-diagnostics-restore-0123456789abcdefabcd-reports
+      CAND_EXPORTS: master-diagnostics-restore-0123456789abcdefabcd-tenant-exports
+      CAND_DELIVERY: master-diagnostics-restore-0123456789abcdefabcd-data-subject-delivery
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify authentication and execution state-machine units
+        run: |
+          pnpm --filter @masters/db exec vitest run \
+            test/restore-private-promotion-switch-authentication.test.ts \
+            test/restore-private-promotion-switch-execution.test.ts
+
+      - name: Prepare authentic switch intent and journal
+        run: |
+          rm -rf "$ROOT"
+          mkdir -p "$SWITCH_DIR" "$EVIDENCE"
+          python3 - <<'PY'
+          import base64, hashlib, json, os
+          from pathlib import Path
+
+          root = Path(os.environ['ROOT'])
+          root.joinpath('promotion.key').write_text(base64.b64encode(bytes([109]) * 32).decode() + '\n')
+          candidates = [
+              {'role':'LIBSQL','sourceSubpath':'libsql','candidateVolumeName':os.environ['CAND_LIBSQL'],'rollbackVolumeName':os.environ['RB_LIBSQL'],'sourceFingerprint':'sha256:'+'1'*64,'candidateFingerprint':'sha256:'+'1'*64,'fileCount':2,'directoryCount':2,'byteCount':2048},
+              {'role':'REPORTS','sourceSubpath':'reports','candidateVolumeName':os.environ['CAND_REPORTS'],'rollbackVolumeName':os.environ['RB_REPORTS'],'sourceFingerprint':'sha256:'+'2'*64,'candidateFingerprint':'sha256:'+'2'*64,'fileCount':3,'directoryCount':2,'byteCount':4096},
+              {'role':'TENANT_EXPORTS','sourceSubpath':'tenant-exports','candidateVolumeName':os.environ['CAND_EXPORTS'],'rollbackVolumeName':os.environ['RB_EXPORTS'],'sourceFingerprint':'sha256:'+'3'*64,'candidateFingerprint':'sha256:'+'3'*64,'fileCount':0,'directoryCount':1,'byteCount':0},
+              {'role':'DATA_SUBJECT_DELIVERY','sourceSubpath':'data-subject-delivery','candidateVolumeName':os.environ['CAND_DELIVERY'],'rollbackVolumeName':os.environ['RB_DELIVERY'],'sourceFingerprint':'sha256:'+'4'*64,'candidateFingerprint':'sha256:'+'4'*64,'fileCount':1,'directoryCount':1,'byteCount':256},
+          ]
+          body = {'healthcheckVersion':1,'planFingerprint':'sha256:'+'a'*64,'activeVolumeSetFingerprint':'sha256:'+'b'*64,'candidateSetId':'restore-0123456789abcdefabcd','candidates':candidates}
+          report = {'mode':'ISOLATED_RESTORE_PROMOTION_CANDIDATE_SET_HEALTHCHECK','status':'CANDIDATE_SET_HEALTHY','healthcheckVersion':1,'evidenceRecomputed':True,'candidateMutationAllowed':False,'productionMutationAllowed':False,'promotionExecuted':False,**body,'candidateSetFingerprint':'sha256:'+hashlib.sha256(json.dumps(body,sort_keys=True,separators=(',',':')).encode()).hexdigest()}
+          Path(os.environ['HEALTHCHECK']).write_text(json.dumps(report,separators=(',',':'))+'\n')
+          PY
+          chmod 600 "$KEY" "$HEALTHCHECK"
+
+          env \
+            RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE="$HEALTHCHECK" \
+            RESTORE_PRIVATE_PROMOTION_INTENT_DIR="$SWITCH_DIR" \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-intent >/tmp/assessment-intent.json
+
+          env \
+            RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE="$HEALTHCHECK" \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_DIR="$EVIDENCE" \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-journal >/tmp/assessment-journal.json
+
+      - name: Verify rollback-bound pre-start assessment without candidate healthcheck
+        run: |
+          env \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME="$RB_LIBSQL" \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME="$RB_REPORTS" \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME="$RB_EXPORTS" \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME="$RB_DELIVERY" \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/assessment-ready.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/assessment-ready.json').read_text())
+          assert r['mode']=='ISOLATED_RESTORE_PROMOTION_SWITCH_EXECUTION_ASSESSMENT'
+          assert r['status']=='READY_TO_START'
+          assert r['switchIntentAuthenticated'] is True and r['journalVerified'] is True
+          assert r['eventCount']==0 and r['currentVolumeSet']=='ROLLBACK'
+          assert r['productionMutationAllowed'] is True and r['promotionExecuted'] is False
+          PY
+
+      - name: Recover candidate selection from live mount identity
+        run: |
+          env RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" RESTORE_PRIVATE_PROMOTION_SWITCH_EVENT_PHASE=CUTOVER_STARTED \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-event >/tmp/event-started.json
+          env \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME="$CAND_LIBSQL" RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME="$CAND_REPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME="$CAND_EXPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME="$CAND_DELIVERY" \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/assessment-recover-candidate.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          event=json.loads(Path('/tmp/event-started.json').read_text())
+          r=json.loads(Path('/tmp/assessment-recover-candidate.json').read_text())
+          assert event['status']=='EVENT_PERSISTED' and event['phase']=='CUTOVER_STARTED'
+          assert event['productionMutationApplied'] is False
+          assert r['status']=='RECOVER_CANDIDATE_SELECTION' and r['currentVolumeSet']=='CANDIDATE'
+          assert r['eventCount']==1 and r['productionMutationAllowed'] is False
+          PY
+
+      - name: Recover rollback selection from live mount identity
+        run: |
+          env RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" RESTORE_PRIVATE_PROMOTION_SWITCH_EVENT_PHASE=CANDIDATE_SELECTED \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-event >/tmp/event-candidate.json
+          env \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME="$RB_LIBSQL" RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME="$RB_REPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME="$RB_EXPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME="$RB_DELIVERY" \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/assessment-recover-rollback.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/assessment-recover-rollback.json').read_text())
+          assert r['status']=='RECOVER_ROLLBACK_SELECTION' and r['currentVolumeSet']=='ROLLBACK'
+          assert r['eventCount']==2 and r['productionMutationAllowed'] is False
+          PY
+
+      - name: Verify HMAC-tampered switch intent blocks assessment
+        run: |
+          mkdir -p "$ROOT/tampered"
+          cp "$INTENT" "$ROOT/tampered/promotion-switch-intent.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path=Path(os.environ['ROOT'])/'tampered'/'promotion-switch-intent.json'
+          data=json.loads(path.read_text())
+          data['record']['candidateSetFingerprint']='sha256:'+'f'*64
+          path.write_text(json.dumps(data,indent=2)+'\n')
+          PY
+          set +e
+          env \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$ROOT/tampered/promotion-switch-intent.json" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME="$RB_LIBSQL" RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME="$RB_REPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME="$RB_EXPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME="$RB_DELIVERY" \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/tampered-assessment.out 2>/tmp/tampered-assessment.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'signature verification failed' /tmp/tampered-assessment.err

@@ -1,0 +1,38 @@
+services:
+  backup-restore-promotion-switch-assess:
+    profiles: [backup]
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    environment:
+      RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE: /promotion-switch-intent.json
+      RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE: /switch-evidence/promotion-switch-journal.json
+      RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR: /switch-evidence
+      RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE: /run/secrets/restore-private-promotion.key
+    command: ["pnpm", "--silent", "--filter", "@masters/db", "backup:restore-promotion-switch-assess"]
+    volumes:
+      - ${RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE:-/etc/master-diagnostics/restore-private-promotion.key}:/run/secrets/restore-private-promotion.key:ro
+      - ${RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_HOST_FILE:?RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_HOST_FILE is required}:/promotion-switch-intent.json:ro
+      - ${RESTORE_PRIVATE_PROMOTION_SWITCH_EVIDENCE_HOST_DIR:?RESTORE_PRIVATE_PROMOTION_SWITCH_EVIDENCE_HOST_DIR is required}:/switch-evidence:ro
+    network_mode: none
+
+  backup-restore-promotion-switch-event:
+    profiles: [backup]
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    environment:
+      RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE: /promotion-switch-intent.json
+      RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE: /switch-evidence/promotion-switch-journal.json
+      RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR: /switch-evidence
+      RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE: /run/secrets/restore-private-promotion.key
+    command: ["pnpm", "--silent", "--filter", "@masters/db", "backup:restore-promotion-switch-event"]
+    volumes:
+      - ${RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE:-/etc/master-diagnostics/restore-private-promotion.key}:/run/secrets/restore-private-promotion.key:ro
+      - ${RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_HOST_FILE:?RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_HOST_FILE is required}:/promotion-switch-intent.json:ro
+      - ${RESTORE_PRIVATE_PROMOTION_SWITCH_EVIDENCE_HOST_DIR:?RESTORE_PRIVATE_PROMOTION_SWITCH_EVIDENCE_HOST_DIR is required}:/switch-evidence
+    network_mode: none
