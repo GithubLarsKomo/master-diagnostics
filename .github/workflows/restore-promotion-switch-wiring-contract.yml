@@ -39,7 +39,7 @@ jobs:
           assert 'check-club-restore-promotion-candidates.sh' in active
           assert 'candidate-healthcheck.json' in active
           assert 'CANDIDATE_SET_HEALTHY' in active
-          assert 'promotion/switch' in active
+          assert 'switch_dir="${promotion_dir}/switch"' in active
           assert 'chmod 0700 "${switch_dir}"' in active
           assert 'backup-restore-promotion-switch-intent' in active
           assert ':/candidate-healthcheck.json:ro' in active
