@@ -14,6 +14,7 @@ from typing import Any
 
 SIGNING_DOMAIN = b"masters:restore-rto-drill-report:v1\n"
 REPORT_NAME = re.compile(r"^drill-[0-9a-f]{32}\.json$")
+DRILL_ID = re.compile(r"^drill-[0-9a-f]{32}$")
 SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 HMAC = re.compile(r"^hmac-sha256:[0-9a-f]{64}$")
 PHASES = [
@@ -49,7 +50,7 @@ def read_key(path: Path) -> bytes:
 
 
 def verify(path: Path, key_file: Path) -> dict[str, Any]:
-    if not path.is_absolute() or path.name != path.as_posix().split("/")[-1] or not REPORT_NAME.fullmatch(path.name):
+    if not path.is_absolute() or not REPORT_NAME.fullmatch(path.name):
         fail("Restore RTO drill report path/name is invalid")
     if path.is_symlink() or not path.is_file():
         fail("Restore RTO drill report must be a regular non-symlink file")
@@ -62,6 +63,9 @@ def verify(path: Path, key_file: Path) -> dict[str, Any]:
         fail("Restore RTO drill report envelope is invalid")
     if record.get("reportVersion") != 1 or record.get("executionScope") != "HOST_OPERATIONAL_RESTORE_RTO_DRILL":
         fail("Restore RTO drill report record version/scope is invalid")
+    drill_id = record.get("drillId")
+    if not isinstance(drill_id, str) or not DRILL_ID.fullmatch(drill_id) or f"{drill_id}.json" != path.name:
+        fail("Restore RTO drill report filename does not match signed drill identity")
     fingerprint = record.get("reportFingerprint")
     if not isinstance(fingerprint, str) or not SHA256.fullmatch(fingerprint):
         fail("Restore RTO drill report fingerprint is invalid")
@@ -104,7 +108,7 @@ def verify(path: Path, key_file: Path) -> dict[str, Any]:
     return {
         "mode": "RESTORE_RTO_DRILL_REPORT_VERIFICATION",
         "status": "DRILL_VERIFIED" if successful else "DRILL_NOT_SUCCESSFUL",
-        "drillId": record.get("drillId"),
+        "drillId": drill_id,
         "reportFingerprint": fingerprint,
         "signatureVerified": True,
         "restoreCompleted": record.get("status") == "COMPLETED",
