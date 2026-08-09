@@ -1,0 +1,65 @@
+name: Backup Privacy Activation Executor Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-activation-executor-contract.yml'
+      - 'infra/backup/execute-backup-privacy-activation.py'
+      - 'infra/backup/check-backup-privacy-runtime.sh'
+      - 'infra/backup/test-backup-privacy-activation-executor.sh'
+      - 'infra/backup/backup-privacy-activation-execution.py'
+      - 'infra/backup/prepare-backup-privacy-activation-plan.py'
+      - 'infra/backup/check-backup-privacy-activation-plan.py'
+      - 'infra/backup/write-backup-privacy-manual-attestation.py'
+      - 'infra/backup/check-backup-privacy-manual-attestation.py'
+      - 'docs/backup-privacy-activation-execution.md'
+      - 'TASKS.md'
+      - '.env.example'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-activation-executor-contract.yml'
+      - 'infra/backup/execute-backup-privacy-activation.py'
+      - 'infra/backup/check-backup-privacy-runtime.sh'
+      - 'infra/backup/test-backup-privacy-activation-executor.sh'
+      - 'infra/backup/backup-privacy-activation-execution.py'
+      - 'infra/backup/prepare-backup-privacy-activation-plan.py'
+      - 'infra/backup/check-backup-privacy-activation-plan.py'
+      - 'infra/backup/write-backup-privacy-manual-attestation.py'
+      - 'infra/backup/check-backup-privacy-manual-attestation.py'
+      - 'docs/backup-privacy-activation-execution.md'
+      - 'TASKS.md'
+      - '.env.example'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify syntax and bounded mutation surface
+        run: |
+          bash -n infra/backup/check-backup-privacy-runtime.sh
+          bash -n infra/backup/test-backup-privacy-activation-executor.sh
+          python3 -m py_compile infra/backup/execute-backup-privacy-activation.py
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('infra/backup/execute-backup-privacy-activation.py').read_text()
+          assert 'os.replace(' in text
+          assert 'fcntl.flock' in text
+          assert 'os.fsync' in text
+          assert 'ROLLBACK_STARTED' in text
+          assert 'ROLLBACK_VERIFIED' in text
+          assert 'COMPLETED' in text
+          for forbidden in ('docker compose','docker volume','compose restart','compose up'):
+              assert forbidden not in text, forbidden
+          PY
+
+      - name: Verify target, crash-retry, rollback, drift and tamper contracts
+        run: bash infra/backup/test-backup-privacy-activation-executor.sh
+
+      - name: Verify release and operational gates remain open
+        run: |
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
