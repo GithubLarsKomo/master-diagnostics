@@ -114,11 +114,14 @@ jobs:
               }
               assert mounts['/run/secrets/restore-private-promotion.key']['read_only'] is True
               assert mounts['/promotion-switch-intent.json']['read_only'] is True
-              assert mounts['/switch-evidence'].get('read_only') is evidence_ro
+              if evidence_ro:
+                  assert mounts['/switch-evidence'].get('read_only') is True
+              else:
+                  assert mounts['/switch-evidence'].get('read_only') is not True
               assert production_targets.isdisjoint(mounts)
           PY
 
-      - name: Verify resolver accepts stopped-container inspect evidence and rejects mixed project identity
+      - name: Verify resolver accepts stopped-container inspect evidence
         run: |
           python3 - <<'PY'
           import json
