@@ -1,0 +1,76 @@
+name: Backup Privacy Live Handoff Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-live-handoff-contract.yml'
+      - 'infra/backup/stage-backup-privacy-live-handoff.py'
+      - 'infra/backup/check-backup-privacy-live-handoff.py'
+      - 'infra/backup/test-backup-privacy-live-handoff.sh'
+      - 'infra/backup/check-backup-privacy-runtime.sh'
+      - 'infra/backup/execute-backup-privacy-activation.py'
+      - 'infra/backup/backup-privacy-activation-execution.py'
+      - 'docs/backup-privacy-live-handoff.md'
+      - '.env.example'
+      - 'TASKS.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-live-handoff-contract.yml'
+      - 'infra/backup/stage-backup-privacy-live-handoff.py'
+      - 'infra/backup/check-backup-privacy-live-handoff.py'
+      - 'infra/backup/test-backup-privacy-live-handoff.sh'
+      - 'infra/backup/check-backup-privacy-runtime.sh'
+      - 'infra/backup/execute-backup-privacy-activation.py'
+      - 'infra/backup/backup-privacy-activation-execution.py'
+      - 'docs/backup-privacy-live-handoff.md'
+      - '.env.example'
+      - 'TASKS.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify syntax and bounded handoff surface
+        run: |
+          bash -n infra/backup/test-backup-privacy-live-handoff.sh
+          python3 -m py_compile \
+            infra/backup/stage-backup-privacy-live-handoff.py \
+            infra/backup/check-backup-privacy-live-handoff.py
+          python3 - <<'PY'
+          from pathlib import Path
+          stage=Path('infra/backup/stage-backup-privacy-live-handoff.py').read_text()
+          check=Path('infra/backup/check-backup-privacy-live-handoff.py').read_text()
+          assert 'activation-executor.lock' in stage
+          assert 'LIVE_RUNTIME_ATTESTATION_REQUIRED' in stage
+          assert 'AWAITING_LIVE_RUNTIME_CUTOVER' in stage
+          assert 'activationExecuted' in stage
+          assert 'serviceCutoverPlanningAllowed' in check
+          assert 'LIVE_HANDOFF_TERMINAL_COMPLETION_CONFLICT' in check
+          for text in (stage,check):
+              assert 'docker compose' not in text
+              assert 'docker inspect' not in text
+              assert 'docker volume' not in text
+          PY
+
+      - name: Verify target handoff, retry, crash recovery, rollback and tamper paths
+        run: bash infra/backup/test-backup-privacy-live-handoff.sh
+
+      - name: Verify production release boundary remains disabled
+        run: |
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
