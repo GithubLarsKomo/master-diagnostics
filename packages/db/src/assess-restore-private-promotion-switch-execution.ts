@@ -1,5 +1,9 @@
-import { isAbsolute } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { readAuthenticatedRestorePrivatePromotionSwitchIntent } from './services/restore-private-promotion-switch-authentication';
+import {
+  RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_FILE_NAME,
+  readVerifiedRestorePrivatePromotionSwitchCompletionReceipt,
+} from './services/restore-private-promotion-switch-completion-receipt';
 import {
   assessRestorePrivatePromotionSwitchExecution,
   readVerifiedRestorePrivatePromotionSwitchExecutionEvents,
@@ -45,12 +49,24 @@ async function main(): Promise<void> {
   const events = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(executionDir, keyFile, journal);
   const assessment = assessRestorePrivatePromotionSwitchExecution(journal, events, currentVolumes);
 
+  let completionReceiptVerified = false;
+  if (assessment.status === 'COMPLETED') {
+    await readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(
+      join(executionDir, RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_FILE_NAME),
+      keyFile,
+      journal,
+      events,
+    );
+    completionReceiptVerified = true;
+  }
+
   process.stdout.write(`${JSON.stringify({
     mode: MODE,
     ...assessment,
     switchIntentAuthenticated: true,
     journalVerified: true,
     eventCount: events.length,
+    completionReceiptVerified,
   })}\n`);
 }
 

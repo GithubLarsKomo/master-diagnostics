@@ -1,0 +1,93 @@
+name: Restore Promotion Switch Completion Receipt Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-promotion-switch-completion-receipt-contract.yml'
+      - 'packages/db/package.json'
+      - 'packages/db/src/index.ts'
+      - 'packages/db/src/services/restore-private-promotion-switch-journal.ts'
+      - 'packages/db/src/services/restore-private-promotion-switch-completion-receipt.ts'
+      - 'packages/db/src/prepare-restore-private-promotion-switch-completion-receipt.ts'
+      - 'packages/db/src/record-restore-private-promotion-switch-event.ts'
+      - 'packages/db/src/assess-restore-private-promotion-switch-execution.ts'
+      - 'packages/db/test/restore-private-promotion-switch-completion-receipt.test.ts'
+      - 'docs/restore-private-promotion-switch-completion-receipt.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-promotion-switch-completion-receipt-contract.yml'
+      - 'packages/db/package.json'
+      - 'packages/db/src/index.ts'
+      - 'packages/db/src/services/restore-private-promotion-switch-journal.ts'
+      - 'packages/db/src/services/restore-private-promotion-switch-completion-receipt.ts'
+      - 'packages/db/src/prepare-restore-private-promotion-switch-completion-receipt.ts'
+      - 'packages/db/src/record-restore-private-promotion-switch-event.ts'
+      - 'packages/db/src/assess-restore-private-promotion-switch-execution.ts'
+      - 'packages/db/test/restore-private-promotion-switch-completion-receipt.test.ts'
+      - 'docs/restore-private-promotion-switch-completion-receipt.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify signed completion receipt contract
+        run: pnpm --filter @masters/db exec vitest run test/restore-private-promotion-switch-completion-receipt.test.ts
+
+      - name: Verify receipt is mandatory for operational completion
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          journal_core = Path('packages/db/src/services/restore-private-promotion-switch-journal.ts').read_text()
+          core = Path('packages/db/src/services/restore-private-promotion-switch-completion-receipt.ts').read_text()
+          receipt_cli = Path('packages/db/src/prepare-restore-private-promotion-switch-completion-receipt.ts').read_text()
+          event_cli = Path('packages/db/src/record-restore-private-promotion-switch-event.ts').read_text()
+          assessment_cli = Path('packages/db/src/assess-restore-private-promotion-switch-execution.ts').read_text()
+          package = Path('packages/db/package.json').read_text()
+          index = Path('packages/db/src/index.ts').read_text()
+
+          assert 'SIGNED_SWITCH_RECEIPT_AFTER_POST_SWITCH_HEALTHCHECK' in journal_core
+          for token in (
+              'CANDIDATE_SELECTED',
+              'CLUB_RESTORE_PROMOTION_POST_SWITCH_HEALTHCHECK',
+              'rollbackVolumesRetained',
+              'caddyPreserved',
+              'productionMutationCompleted',
+              'promotionExecuted',
+          ):
+              assert token in core or token in receipt_cli
+
+          assert 'backup:restore-promotion-switch-completion-receipt' in package
+          assert "restore-private-promotion-switch-completion-receipt" in index
+          assert 'RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_DIR' not in receipt_cli
+          assert 'RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR' in receipt_cli
+          assert "phase === 'COMPLETED'" in event_cli
+          assert 'readVerifiedRestorePrivatePromotionSwitchCompletionReceipt' in event_cli
+          assert "assessment.status === 'COMPLETED'" in assessment_cli
+          assert 'readVerifiedRestorePrivatePromotionSwitchCompletionReceipt' in assessment_cli
+          assert 'completionReceiptVerified' in event_cli
+          assert 'completionReceiptVerified' in assessment_cli
+
+          combined = core + '\n' + receipt_cli
+          for forbidden in (
+              'docker compose',
+              'docker volume',
+              'child_process',
+              '/var/run/docker.sock',
+          ):
+              assert forbidden not in combined
+          PY

@@ -1,7 +1,12 @@
-import { isAbsolute } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { readAuthenticatedRestorePrivatePromotionSwitchIntent } from './services/restore-private-promotion-switch-authentication';
 import {
+  RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_FILE_NAME,
+  readVerifiedRestorePrivatePromotionSwitchCompletionReceipt,
+} from './services/restore-private-promotion-switch-completion-receipt';
+import {
   ensureSignedRestorePrivatePromotionSwitchExecutionEvent,
+  readVerifiedRestorePrivatePromotionSwitchExecutionEvents,
   type RestorePrivatePromotionSwitchExecutionPhase,
 } from './services/restore-private-promotion-switch-execution';
 import { readVerifiedRestorePrivatePromotionSwitchJournal } from './services/restore-private-promotion-switch-journal';
@@ -40,6 +45,19 @@ async function main(): Promise<void> {
 
   const intent = await readAuthenticatedRestorePrivatePromotionSwitchIntent(switchIntentFile, keyFile);
   const journal = await readVerifiedRestorePrivatePromotionSwitchJournal(journalFile, keyFile, intent);
+
+  let completionReceiptVerified = false;
+  if (phase === 'COMPLETED') {
+    const events = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(executionDir, keyFile, journal);
+    await readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(
+      join(executionDir, RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_FILE_NAME),
+      keyFile,
+      journal,
+      events,
+    );
+    completionReceiptVerified = true;
+  }
+
   const result = await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(
     executionDir,
     keyFile,
@@ -59,6 +77,7 @@ async function main(): Promise<void> {
     previousEventSignature: result.envelope.record.previousEventSignature,
     targetVolumeSet: result.envelope.record.targetVolumeSet,
     terminal: result.envelope.record.terminal,
+    completionReceiptVerified,
     productionMutationApplied: false,
     promotionExecuted: result.envelope.record.promotionExecuted,
   })}\n`);
