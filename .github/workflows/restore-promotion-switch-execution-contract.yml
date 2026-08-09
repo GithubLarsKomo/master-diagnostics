@@ -1,0 +1,61 @@
+name: Restore Promotion Switch Execution Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-promotion-switch-execution-contract.yml'
+      - 'packages/db/src/services/restore-private-promotion-switch-execution.ts'
+      - 'packages/db/test/restore-private-promotion-switch-execution.test.ts'
+      - 'packages/db/src/index.ts'
+      - 'docs/restore-private-promotion-switch-execution.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-promotion-switch-execution-contract.yml'
+      - 'packages/db/src/services/restore-private-promotion-switch-execution.ts'
+      - 'packages/db/test/restore-private-promotion-switch-execution.test.ts'
+      - 'packages/db/src/index.ts'
+      - 'docs/restore-private-promotion-switch-execution.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify crash-safe execution evidence state machine
+        run: pnpm --filter @masters/db exec vitest run test/restore-private-promotion-switch-execution.test.ts
+
+      - name: Verify execution protocol remains library-only and non-operational
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          service = Path('packages/db/src/services/restore-private-promotion-switch-execution.ts').read_text()
+          package = Path('packages/db/package.json').read_text()
+          assert 'CUTOVER_STARTED' in service
+          assert 'CANDIDATE_SELECTED' in service
+          assert 'ROLLBACK_SELECTED' in service
+          assert 'ROLLBACK_VERIFIED' in service
+          assert 'COMPLETED' in service
+          assert 'previousEventSignature' in service
+          assert 'ACTIVE_VOLUME_SET_MIXED_OR_UNKNOWN' in service
+          assert 'RECOVER_CANDIDATE_SELECTION' in service
+          assert 'RECOVER_ROLLBACK_SELECTION' in service
+          assert 'docker compose' not in service
+          assert 'docker volume' not in service
+          assert 'child_process' not in service
+          assert 'backup:restore-promotion-switch-execute' not in package
+          assert 'backup:restore-promotion-switch-assess' not in package
+          PY
