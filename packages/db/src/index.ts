@@ -42,6 +42,7 @@ export * from './services/restore-private-promotion-execution-plan';
 export * from './services/restore-private-promotion-candidate-plan';
 export * from './services/restore-private-promotion-candidate-tree';
 export * from './services/restore-private-promotion-switch-intent';
+export * from './services/restore-private-promotion-switch-journal';
 export * from './services/club-bootstrap';
 export * from './services/factory-protocol-templates';
 export * from './services/protocol-templates';

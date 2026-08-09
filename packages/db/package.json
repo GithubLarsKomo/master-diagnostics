@@ -33,7 +33,8 @@
     "backup:restore-promotion-candidate-copy": "tsx src/copy-restore-private-promotion-candidate.ts",
     "backup:restore-promotion-candidates-preflight": "tsx src/preflight-restore-private-promotion-candidates.ts",
     "backup:restore-promotion-candidate-check": "tsx src/check-restore-private-promotion-candidate.ts",
-    "backup:restore-promotion-switch-intent": "tsx src/authorize-restore-private-promotion-switch.ts"
+    "backup:restore-promotion-switch-intent": "tsx src/authorize-restore-private-promotion-switch.ts",
+    "backup:restore-promotion-switch-journal": "tsx src/prepare-restore-private-promotion-switch-journal.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
