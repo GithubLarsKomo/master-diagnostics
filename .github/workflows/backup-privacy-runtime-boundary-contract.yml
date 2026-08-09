@@ -1,0 +1,91 @@
+name: Backup Privacy Runtime Boundary Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-runtime-boundary-contract.yml'
+      - 'infra/backup/check-backup-privacy-runtime.sh'
+      - 'docs/backup-privacy-runtime-boundary.md'
+      - '.env.example'
+      - 'TASKS.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-runtime-boundary-contract.yml'
+      - 'infra/backup/check-backup-privacy-runtime.sh'
+      - 'docs/backup-privacy-runtime-boundary.md'
+      - '.env.example'
+      - 'TASKS.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify canonical checker is non-mutating
+        run: |
+          bash -n infra/backup/check-backup-privacy-runtime.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('infra/backup/check-backup-privacy-runtime.sh').read_text()
+          assert 'LIVE_RUNTIME_ATTESTATION_REQUIRED' in text
+          assert 'STATIC_ENV_POLICY_ONLY' in text
+          assert 'privacy-capabilities:check' in text
+          for forbidden in ('docker compose', 'docker inspect', 'docker restart', 'docker stop', 'docker run', 'os.replace'):
+              assert forbidden not in text, forbidden
+          PY
+
+      - name: Verify ENABLED cannot be authorized by static env policy
+        run: |
+          set +e
+          PRIVACY_BACKUP_STATE=ENABLED \
+          PRIVACY_BACKUP_POLICY_VERSION=1.0.0 \
+          PRIVACY_BACKUP_ENCRYPTED_AT_REST=true \
+          PRIVACY_BACKUP_BOUNDED_RETENTION_CONFIGURED=true \
+          PRIVACY_BACKUP_RESTORE_RECONCILIATION=true \
+          PRIVACY_NOTIFICATIONS_STATE=DISABLED \
+            bash infra/backup/check-backup-privacy-runtime.sh >/tmp/enabled-static.json
+          code=$?
+          set -e
+          test "$code" -ne 0
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result=json.loads(Path('/tmp/enabled-static.json').read_text())
+          assert result['readyForIrreversibleProcessing'] is False
+          assert result['backupState']=='ENABLED'
+          assert result['attestationScope']=='STATIC_ENV_POLICY_ONLY'
+          assert result['blockers']==['LIVE_RUNTIME_ATTESTATION_REQUIRED']
+          PY
+
+      - name: Verify DISABLED rollback policy remains attestable
+        run: |
+          PRIVACY_BACKUP_STATE=DISABLED \
+          PRIVACY_NOTIFICATIONS_STATE=DISABLED \
+            bash infra/backup/check-backup-privacy-runtime.sh >/tmp/disabled-runtime.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result=json.loads(Path('/tmp/disabled-runtime.json').read_text())
+          assert result['readyForIrreversibleProcessing'] is True
+          assert result['backupState']=='DISABLED'
+          assert result['blockers']==[]
+          PY
+
+      - name: Verify release boundary remains disabled
+        run: |
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
