@@ -1,0 +1,223 @@
+name: Restore Promotion Switch Executor Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-promotion-switch-executor-contract.yml'
+      - 'infra/backup/execute-club-restore-promotion-switch.sh'
+      - 'infra/backup/apply-club-restore-promotion-selector.sh'
+      - 'infra/backup/build-restore-promotion-post-switch-healthcheck.py'
+      - 'infra/docker-compose.restore-promotion-selector.yml'
+      - 'infra/docker-compose.restore-promotion-assessment.yml'
+      - 'packages/db/**'
+      - 'docs/restore-private-promotion-switch-executor.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-promotion-switch-executor-contract.yml'
+      - 'infra/backup/execute-club-restore-promotion-switch.sh'
+      - 'infra/backup/apply-club-restore-promotion-selector.sh'
+      - 'infra/backup/build-restore-promotion-post-switch-healthcheck.py'
+      - 'infra/docker-compose.restore-promotion-selector.yml'
+      - 'infra/docker-compose.restore-promotion-assessment.yml'
+      - 'packages/db/**'
+      - 'docs/restore-private-promotion-switch-executor.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify executor syntax and fail-closed sequencing
+        run: |
+          bash -n infra/backup/execute-club-restore-promotion-switch.sh
+          bash -n infra/backup/apply-club-restore-promotion-selector.sh
+          python3 -m py_compile infra/backup/build-restore-promotion-post-switch-healthcheck.py
+          python3 - <<'PY'
+          from pathlib import Path
+          executor=Path('infra/backup/execute-club-restore-promotion-switch.sh').read_text()
+          selector=Path('infra/backup/apply-club-restore-promotion-selector.sh').read_text()
+          assert 'flock -n 9' in executor
+          assert 'prepare-club-restore-promotion-switch-journal.sh' in executor
+          assert 'RESTORE_PRIVATE_PROMOTION_SWITCH_EVENT_PHASE' in executor
+          assert 'persist_event CUTOVER_STARTED' in executor
+          assert 'persist_event CANDIDATE_SELECTED' in executor
+          assert 'persist_event ROLLBACK_STARTED' in executor
+          assert 'persist_event ROLLBACK_SELECTED' in executor
+          assert 'persist_event ROLLBACK_VERIFIED' in executor
+          assert 'create_completion_receipt' in executor
+          assert executor.index('create_completion_receipt') < executor.rindex('persist_event COMPLETED')
+          assert '--allow-explicit-volume-name-drift' in executor
+          assert 'docker volume rm' not in executor
+          assert 'docker volume create' not in executor
+          assert 'docker cp ' not in executor
+          assert 'docker compose down' not in executor
+          assert 'caddy' not in selector.split('stop app export-cleanup retention-scan libsql',1)[1].split('up -d --no-deps --force-recreate libsql',1)[0]
+          assert 'docker volume inspect' in selector
+          assert selector.index('docker volume inspect') < selector.index(' stop app export-cleanup retention-scan libsql')
+          assert 'docker volume rm' not in selector
+          assert 'docker volume create' not in selector
+          PY
+
+      - name: Exercise candidate and rollback selector on disposable Docker volumes
+        run: |
+          set -Eeuo pipefail
+          root=/tmp/md-switch-executor-contract
+          project=mdswitchci
+          rm -rf "$root"
+          mkdir -p "$root"
+          : >"$root/.env"
+          cat >"$root/compose.yml" <<'YAML'
+          services:
+            libsql:
+              image: busybox:1.37.0
+              command: ["sh","-c","sleep 3600"]
+              volumes: ["libsql-data:/var/lib/sqld"]
+              healthcheck:
+                test: ["CMD","sh","-c","exit 0"]
+                interval: 1s
+                timeout: 1s
+                retries: 10
+            app:
+              image: busybox:1.37.0
+              command: ["sh","-c","sleep 3600"]
+              volumes:
+                - report-data:/var/lib/masters/reports
+                - export-data:/var/lib/masters/exports
+                - data-subject-delivery-data:/var/lib/masters/data-subject-delivery-packages
+              healthcheck:
+                test: ["CMD","sh","-c","exit 0"]
+                interval: 1s
+                timeout: 1s
+                retries: 10
+            export-cleanup:
+              image: busybox:1.37.0
+              command: ["sh","-c","sleep 3600"]
+              volumes:
+                - export-data:/var/lib/masters/exports
+                - data-subject-delivery-data:/var/lib/masters/data-subject-delivery-packages
+            retention-scan:
+              image: busybox:1.37.0
+              command: ["sh","-c","sleep 3600"]
+            caddy:
+              image: busybox:1.37.0
+              command: ["sh","-c","sleep 3600"]
+          volumes:
+            libsql-data: {}
+            report-data: {}
+            export-data: {}
+            data-subject-delivery-data: {}
+          YAML
+
+          rb=(mdsw-rb-libsql mdsw-rb-reports mdsw-rb-exports mdsw-rb-delivery)
+          cand=(mdsw-cand-libsql mdsw-cand-reports mdsw-cand-exports mdsw-cand-delivery)
+          cleanup() {
+            RESTORE_PRIVATE_PROMOTION_SELECTED_LIBSQL_VOLUME="${rb[0]}" \
+            RESTORE_PRIVATE_PROMOTION_SELECTED_REPORTS_VOLUME="${rb[1]}" \
+            RESTORE_PRIVATE_PROMOTION_SELECTED_TENANT_EXPORTS_VOLUME="${rb[2]}" \
+            RESTORE_PRIVATE_PROMOTION_SELECTED_DATA_SUBJECT_DELIVERY_VOLUME="${rb[3]}" \
+              docker compose -p "$project" --env-file "$root/.env" -f "$root/compose.yml" -f infra/docker-compose.restore-promotion-selector.yml down --remove-orphans >/dev/null 2>&1 || true
+            docker volume rm -f "${rb[@]}" "${cand[@]}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          for volume in "${rb[@]}" "${cand[@]}"; do docker volume create "$volume" >/dev/null; done
+
+          export RESTORE_PRIVATE_PROMOTION_BASE_COMPOSE_FILE="$root/compose.yml"
+          export RESTORE_PRIVATE_PROMOTION_SELECTOR_COMPOSE_FILE="$GITHUB_WORKSPACE/infra/docker-compose.restore-promotion-selector.yml"
+          export RESTORE_PRIVATE_PROMOTION_ENV_FILE="$root/.env"
+          export RESTORE_PRIVATE_PROMOTION_COMPOSE_PROJECT_NAME="$project"
+
+          select_set() {
+            local -n values=$1
+            export RESTORE_PRIVATE_PROMOTION_SELECTED_LIBSQL_VOLUME="${values[0]}"
+            export RESTORE_PRIVATE_PROMOTION_SELECTED_REPORTS_VOLUME="${values[1]}"
+            export RESTORE_PRIVATE_PROMOTION_SELECTED_TENANT_EXPORTS_VOLUME="${values[2]}"
+            export RESTORE_PRIVATE_PROMOTION_SELECTED_DATA_SUBJECT_DELIVERY_VOLUME="${values[3]}"
+          }
+          select_set rb
+          docker compose -p "$project" --env-file "$root/.env" -f "$root/compose.yml" -f infra/docker-compose.restore-promotion-selector.yml up -d
+          caddy_before="$(docker compose -p "$project" -f "$root/compose.yml" ps -q caddy)"
+          journal_started="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+          cat >"$root/journal.json" <<JSON
+          {"record":{"phase":"PENDING","startedAt":"${journal_started}","candidateSetId":"restore-0123456789abcdefabcd","volumes":[{"role":"LIBSQL","candidateVolumeName":"${cand[0]}","rollbackVolumeName":"${rb[0]}"},{"role":"REPORTS","candidateVolumeName":"${cand[1]}","rollbackVolumeName":"${rb[1]}"},{"role":"TENANT_EXPORTS","candidateVolumeName":"${cand[2]}","rollbackVolumeName":"${rb[2]}"},{"role":"DATA_SUBJECT_DELIVERY","candidateVolumeName":"${cand[3]}","rollbackVolumeName":"${rb[3]}"}]}}
+          JSON
+
+          select_set cand
+          bash infra/backup/apply-club-restore-promotion-selector.sh
+          for service in libsql app; do
+            id="$(docker compose -p "$project" -f "$root/compose.yml" ps -q "$service")"
+            for _ in $(seq 1 20); do
+              [[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$id")" == healthy ]] && break
+              sleep 1
+            done
+            test "$(docker inspect --format '{{.State.Health.Status}}' "$id")" = healthy
+          done
+          test "$(docker compose -p "$project" -f "$root/compose.yml" ps -q caddy)" = "$caddy_before"
+
+          docker compose -p "$project" -f "$root/compose.yml" config --format json >"$root/compose.json"
+          docker inspect "$(docker compose -p "$project" -f "$root/compose.yml" ps -q app)" >"$root/app-inspect.json"
+          docker inspect "$(docker compose -p "$project" -f "$root/compose.yml" ps -q libsql)" >"$root/libsql-inspect.json"
+          python3 infra/backup/resolve-active-club-volumes.py \
+            --compose-json "$root/compose.json" --app-inspect-json "$root/app-inspect.json" --libsql-inspect-json "$root/libsql-inspect.json" \
+            --allow-explicit-volume-name-drift --format lines >"$root/current.txt"
+          diff -u <(printf '%s\n' "${cand[@]}") "$root/current.txt"
+          for service in export-cleanup retention-scan caddy; do docker inspect "$(docker compose -p "$project" -f "$root/compose.yml" ps -q "$service")" >"$root/${service}-inspect.json"; done
+          docker volume inspect "${rb[@]}" >"$root/rollback-inspect.json"
+          python3 infra/backup/build-restore-promotion-post-switch-healthcheck.py \
+            --journal "$root/journal.json" --current-volumes "$root/current.txt" --rollback-volume-inspect "$root/rollback-inspect.json" \
+            --app-inspect "$root/app-inspect.json" --libsql-inspect "$root/libsql-inspect.json" \
+            --export-cleanup-inspect "$root/export-cleanup-inspect.json" --retention-scan-inspect "$root/retention-scan-inspect.json" --caddy-inspect "$root/caddy-inspect.json" >"$root/health.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('/tmp/md-switch-executor-contract/health.json').read_text())
+          assert report['status']=='HEALTHY'
+          assert report['currentVolumeSet']=='CANDIDATE'
+          assert report['caddyPreserved'] is True
+          assert report['rollbackVolumesRetained'] is True
+          PY
+
+          candidate_app="$(docker compose -p "$project" -f "$root/compose.yml" ps -q app)"
+          export RESTORE_PRIVATE_PROMOTION_SELECTED_LIBSQL_VOLUME=missing-md-switch-volume
+          set +e
+          bash infra/backup/apply-club-restore-promotion-selector.sh >/tmp/missing-selector.out 2>/tmp/missing-selector.err
+          missing_code=$?
+          set -e
+          test "$missing_code" -ne 0
+          test "$(docker compose -p "$project" -f "$root/compose.yml" ps -q app)" = "$candidate_app"
+
+          select_set rb
+          bash infra/backup/apply-club-restore-promotion-selector.sh
+          docker compose -p "$project" -f "$root/compose.yml" config --format json >"$root/compose.json"
+          docker inspect "$(docker compose -p "$project" -f "$root/compose.yml" ps -q app)" >"$root/app-inspect.json"
+          docker inspect "$(docker compose -p "$project" -f "$root/compose.yml" ps -q libsql)" >"$root/libsql-inspect.json"
+          python3 infra/backup/resolve-active-club-volumes.py \
+            --compose-json "$root/compose.json" --app-inspect-json "$root/app-inspect.json" --libsql-inspect-json "$root/libsql-inspect.json" \
+            --allow-explicit-volume-name-drift --format lines >"$root/current.txt"
+          diff -u <(printf '%s\n' "${rb[@]}") "$root/current.txt"
+          test "$(docker compose -p "$project" -f "$root/compose.yml" ps -q caddy)" = "$caddy_before"
+
+      - name: Verify completion receipt service isolation
+        run: |
+          cp .env.example .env
+          sed -i 's/diagnostics.example.org/localhost/g' .env
+          sed -i 's/replace-with-at-least-32-random-bytes/ci-only-secret-with-at-least-32-characters/' .env
+          touch /tmp/promotion-switch-intent.json
+          mkdir -p /tmp/promotion-switch-evidence
+          RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_HOST_FILE=/tmp/promotion-switch-intent.json \
+          RESTORE_PRIVATE_PROMOTION_SWITCH_EVIDENCE_HOST_DIR=/tmp/promotion-switch-evidence \
+            docker compose --profile backup --env-file .env -f infra/docker-compose.club.yml -f infra/docker-compose.restore-promotion-assessment.yml config --format json >/tmp/executor-assessment-compose.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          config=json.loads(Path('/tmp/executor-assessment-compose.json').read_text())
+          service=config['services']['backup-restore-promotion-switch-completion-receipt']
+          assert service['network_mode']=='none'
+          assert not service.get('depends_on')
+          assert service['command'][-1]=='backup:restore-promotion-switch-completion-receipt'
+          targets={m['target']:m for m in service['volumes']}
+          assert set(targets)=={'/run/secrets/restore-private-promotion.key','/promotion-switch-intent.json','/switch-evidence'}
+          assert '/var/run/docker.sock' not in targets
+          assert targets['/switch-evidence'].get('read_only') is not True
+          PY
