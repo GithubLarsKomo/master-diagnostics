@@ -11,6 +11,7 @@ const ALLOWED_PHASES: readonly RestorePrivatePromotionSwitchExecutionPhase[] = O
   'CUTOVER_STARTED',
   'CANDIDATE_SELECTED',
   'COMPLETED',
+  'ROLLBACK_STARTED',
   'ROLLBACK_SELECTED',
   'ROLLBACK_VERIFIED',
 ]);
@@ -56,7 +57,7 @@ async function main(): Promise<void> {
     eventPath: result.path,
     eventSignature: result.envelope.signature,
     previousEventSignature: result.envelope.record.previousEventSignature,
-    selectedVolumeSet: result.envelope.record.selectedVolumeSet,
+    targetVolumeSet: result.envelope.record.targetVolumeSet,
     terminal: result.envelope.record.terminal,
     productionMutationApplied: false,
     promotionExecuted: result.envelope.record.promotionExecuted,
