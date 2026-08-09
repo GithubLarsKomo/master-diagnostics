@@ -119,6 +119,24 @@ services:
       - ${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-restore-unset}/promotion/switch:/restore-promotion-switch
     network_mode: none
 
+  backup-restore-promotion-switch-journal:
+    profiles: [backup]
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: migrator
+    restart: "no"
+    environment:
+      RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE: /candidate-healthcheck.json
+      RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE: /promotion-switch-intent.json
+      RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE: /run/secrets/restore-private-promotion.key
+      RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_DIR: /restore-promotion-switch-journal
+    command: ["pnpm", "--silent", "--filter", "@masters/db", "backup:restore-promotion-switch-journal"]
+    volumes:
+      - ${RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE:-/etc/master-diagnostics/restore-private-promotion.key}:/run/secrets/restore-private-promotion.key:ro
+      - ${RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_HOST_DIR:-/var/lib/master-diagnostics/restore-promotion-switch-journal}/${RESTORE_PRIVATE_PROMOTION_CANDIDATE_SET_ID:-restore-unset}:/restore-promotion-switch-journal
+    network_mode: none
+
 volumes:
   restore-promotion-candidate:
     external: true
