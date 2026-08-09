@@ -63,7 +63,6 @@ jobs:
           python3 - <<'PY'
           import base64, hashlib, json, os
           from pathlib import Path
-
           root = Path(os.environ['ROOT'])
           root.joinpath('promotion.key').write_text(base64.b64encode(bytes([109]) * 32).decode() + '\n')
           candidates = [
@@ -77,76 +76,52 @@ jobs:
           Path(os.environ['HEALTHCHECK']).write_text(json.dumps(report,separators=(',',':'))+'\n')
           PY
           chmod 600 "$KEY" "$HEALTHCHECK"
-
-          env \
-            RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE="$HEALTHCHECK" \
-            RESTORE_PRIVATE_PROMOTION_INTENT_DIR="$SWITCH_DIR" \
-            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" \
-            pnpm --silent --filter @masters/db backup:restore-promotion-switch-intent >/tmp/assessment-intent.json
-
-          env \
-            RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE="$HEALTHCHECK" \
-            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" \
-            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" \
-            RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_DIR="$EVIDENCE" \
-            pnpm --silent --filter @masters/db backup:restore-promotion-switch-journal >/tmp/assessment-journal.json
+          env RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE="$HEALTHCHECK" RESTORE_PRIVATE_PROMOTION_INTENT_DIR="$SWITCH_DIR" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" pnpm --silent --filter @masters/db backup:restore-promotion-switch-intent >/tmp/assessment-intent.json
+          env RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE="$HEALTHCHECK" RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_DIR="$EVIDENCE" pnpm --silent --filter @masters/db backup:restore-promotion-switch-journal >/tmp/assessment-journal.json
 
       - name: Verify rollback-bound pre-start assessment without candidate healthcheck
         run: |
-          env \
-            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" \
-            RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" \
-            RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" \
-            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" \
-            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME="$RB_LIBSQL" \
-            RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME="$RB_REPORTS" \
-            RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME="$RB_EXPORTS" \
-            RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME="$RB_DELIVERY" \
-            pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/assessment-ready.json
+          env RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME="$RB_LIBSQL" RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME="$RB_REPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME="$RB_EXPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME="$RB_DELIVERY" pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/assessment-ready.json
           python3 - <<'PY'
           import json
           from pathlib import Path
           r=json.loads(Path('/tmp/assessment-ready.json').read_text())
-          assert r['mode']=='ISOLATED_RESTORE_PROMOTION_SWITCH_EXECUTION_ASSESSMENT'
-          assert r['status']=='READY_TO_START'
+          assert r['status']=='READY_TO_START' and r['eventCount']==0 and r['currentVolumeSet']=='ROLLBACK'
           assert r['switchIntentAuthenticated'] is True and r['journalVerified'] is True
-          assert r['eventCount']==0 and r['currentVolumeSet']=='ROLLBACK'
           assert r['productionMutationAllowed'] is True and r['promotionExecuted'] is False
           PY
 
-      - name: Recover candidate selection from live mount identity
+      - name: Recover candidate selection from exact and partial live mount identity
         run: |
-          env RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" RESTORE_PRIVATE_PROMOTION_SWITCH_EVENT_PHASE=CUTOVER_STARTED \
-            pnpm --silent --filter @masters/db backup:restore-promotion-switch-event >/tmp/event-started.json
-          env \
-            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" \
-            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME="$CAND_LIBSQL" RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME="$CAND_REPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME="$CAND_EXPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME="$CAND_DELIVERY" \
-            pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/assessment-recover-candidate.json
+          env RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" RESTORE_PRIVATE_PROMOTION_SWITCH_EVENT_PHASE=CUTOVER_STARTED pnpm --silent --filter @masters/db backup:restore-promotion-switch-event >/tmp/event-started.json
+          env RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME="$CAND_LIBSQL" RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME="$RB_REPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME="$RB_EXPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME="$RB_DELIVERY" pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/assessment-partial-candidate.json
+          env RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME="$CAND_LIBSQL" RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME="$CAND_REPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME="$CAND_EXPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME="$CAND_DELIVERY" pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/assessment-recover-candidate.json
           python3 - <<'PY'
           import json
           from pathlib import Path
-          event=json.loads(Path('/tmp/event-started.json').read_text())
-          r=json.loads(Path('/tmp/assessment-recover-candidate.json').read_text())
-          assert event['status']=='EVENT_PERSISTED' and event['phase']=='CUTOVER_STARTED'
-          assert event['productionMutationApplied'] is False
-          assert r['status']=='RECOVER_CANDIDATE_SELECTION' and r['currentVolumeSet']=='CANDIDATE'
-          assert r['eventCount']==1 and r['productionMutationAllowed'] is False
+          partial=json.loads(Path('/tmp/assessment-partial-candidate.json').read_text())
+          exact=json.loads(Path('/tmp/assessment-recover-candidate.json').read_text())
+          assert partial['status']=='READY_TO_SELECT_CANDIDATE' and partial['currentVolumeSet']=='MIXED_KNOWN'
+          assert partial['productionMutationAllowed'] is True
+          assert exact['status']=='RECOVER_CANDIDATE_SELECTION' and exact['currentVolumeSet']=='CANDIDATE'
+          assert exact['eventCount']==1 and exact['productionMutationAllowed'] is False
           PY
 
-      - name: Recover rollback selection from live mount identity
+      - name: Recover rollback only after durable ROLLBACK_STARTED evidence
         run: |
-          env RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" RESTORE_PRIVATE_PROMOTION_SWITCH_EVENT_PHASE=CANDIDATE_SELECTED \
-            pnpm --silent --filter @masters/db backup:restore-promotion-switch-event >/tmp/event-candidate.json
-          env \
-            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" \
-            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME="$RB_LIBSQL" RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME="$RB_REPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME="$RB_EXPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME="$RB_DELIVERY" \
-            pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/assessment-recover-rollback.json
+          env RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" RESTORE_PRIVATE_PROMOTION_SWITCH_EVENT_PHASE=CANDIDATE_SELECTED pnpm --silent --filter @masters/db backup:restore-promotion-switch-event >/tmp/event-candidate.json
+          env RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" RESTORE_PRIVATE_PROMOTION_SWITCH_EVENT_PHASE=ROLLBACK_STARTED pnpm --silent --filter @masters/db backup:restore-promotion-switch-event >/tmp/event-rollback-started.json
+          env RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME="$RB_LIBSQL" RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME="$CAND_REPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME="$CAND_EXPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME="$CAND_DELIVERY" pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/assessment-partial-rollback.json
+          env RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$INTENT" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME="$RB_LIBSQL" RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME="$RB_REPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME="$RB_EXPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME="$RB_DELIVERY" pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/assessment-recover-rollback.json
           python3 - <<'PY'
           import json
           from pathlib import Path
-          r=json.loads(Path('/tmp/assessment-recover-rollback.json').read_text())
-          assert r['status']=='RECOVER_ROLLBACK_SELECTION' and r['currentVolumeSet']=='ROLLBACK'
-          assert r['eventCount']==2 and r['productionMutationAllowed'] is False
+          partial=json.loads(Path('/tmp/assessment-partial-rollback.json').read_text())
+          exact=json.loads(Path('/tmp/assessment-recover-rollback.json').read_text())
+          assert partial['status']=='READY_TO_SELECT_ROLLBACK' and partial['currentVolumeSet']=='MIXED_KNOWN'
+          assert partial['productionMutationAllowed'] is True
+          assert exact['status']=='RECOVER_ROLLBACK_SELECTION' and exact['currentVolumeSet']=='ROLLBACK'
+          assert exact['eventCount']==3 and exact['productionMutationAllowed'] is False
           PY
 
       - name: Verify HMAC-tampered switch intent blocks assessment
@@ -162,10 +137,7 @@ jobs:
           path.write_text(json.dumps(data,indent=2)+'\n')
           PY
           set +e
-          env \
-            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$ROOT/tampered/promotion-switch-intent.json" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" \
-            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME="$RB_LIBSQL" RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME="$RB_REPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME="$RB_EXPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME="$RB_DELIVERY" \
-            pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/tampered-assessment.out 2>/tmp/tampered-assessment.err
+          env RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE="$ROOT/tampered/promotion-switch-intent.json" RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE="$JOURNAL" RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR="$EVIDENCE" RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE="$KEY" RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME="$RB_LIBSQL" RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME="$RB_REPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME="$RB_EXPORTS" RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME="$RB_DELIVERY" pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/tampered-assessment.out 2>/tmp/tampered-assessment.err
           code=$?
           set -e
           test "$code" -ne 0
