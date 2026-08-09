@@ -3,10 +3,10 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
-COMPOSE_FILE="${ROOT_DIR}/infra/docker-compose.club.yml"
-ASSESSMENT_COMPOSE_FILE="${ROOT_DIR}/infra/docker-compose.restore-promotion-assessment.yml"
+COMPOSE_FILE="${RESTORE_PRIVATE_PROMOTION_EXECUTOR_BASE_COMPOSE_FILE:-${ROOT_DIR}/infra/docker-compose.club.yml}"
+ASSESSMENT_COMPOSE_FILE="${RESTORE_PRIVATE_PROMOTION_EXECUTOR_ASSESSMENT_COMPOSE_FILE:-${ROOT_DIR}/infra/docker-compose.restore-promotion-assessment.yml}"
 RESOLVER="${ROOT_DIR}/infra/backup/resolve-active-club-volumes.py"
-ENV_FILE="${ROOT_DIR}/.env"
+ENV_FILE="${RESTORE_PRIVATE_PROMOTION_EXECUTOR_ENV_FILE:-${ROOT_DIR}/.env}"
 
 if [[ $# -ne 1 ]]; then
   echo "Usage: bash infra/backup/assess-club-restore-promotion-switch.sh restore-<timestamp>-<uuid>" >&2
@@ -80,11 +80,7 @@ journal_file="${evidence_dir}/promotion-switch-journal.json"
 require_non_symlink_dir "${evidence_dir}" "Durable restore promotion switch evidence directory"
 require_regular_file "${journal_file}" "Durable restore promotion switch journal"
 
-base_compose=(
-  docker compose
-  --env-file "${ENV_FILE}"
-  -f "${COMPOSE_FILE}"
-)
+base_compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
 
 resolve_container_id() {
   local service="$1"
@@ -99,9 +95,7 @@ resolve_container_id() {
 
 tmp_dir="$(mktemp -d)"
 chmod 0700 "${tmp_dir}"
-cleanup() {
-  rm -rf -- "${tmp_dir}"
-}
+cleanup() { rm -rf -- "${tmp_dir}"; }
 trap cleanup EXIT
 
 "${base_compose[@]}" config --format json >"${tmp_dir}/compose.json"
@@ -125,14 +119,11 @@ fi
 
 export RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_HOST_FILE="${switch_intent}"
 export RESTORE_PRIVATE_PROMOTION_SWITCH_EVIDENCE_HOST_DIR="${evidence_dir}"
-assessment_compose=(
-  docker compose
-  --env-file "${ENV_FILE}"
-  -f "${COMPOSE_FILE}"
-  -f "${ASSESSMENT_COMPOSE_FILE}"
-)
+assessment_compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" -f "${ASSESSMENT_COMPOSE_FILE}")
 
-"${assessment_compose[@]}" --profile backup build backup-restore-promotion-switch-assess >&2
+if [[ "${RESTORE_PRIVATE_PROMOTION_EXECUTOR_SKIP_BUILD:-false}" != "true" ]]; then
+  "${assessment_compose[@]}" --profile backup build backup-restore-promotion-switch-assess >&2
+fi
 "${assessment_compose[@]}" --profile backup run --rm --no-deps \
   -e "RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME=${resolved_volumes[0]}" \
   -e "RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME=${resolved_volumes[1]}" \
