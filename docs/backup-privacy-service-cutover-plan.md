@@ -1,120 +1,150 @@
-# Backup Privacy Service Cutover Plan v1
+# Backup Privacy Service Cutover Plan v2
 
 ## Zweck
 
-Nach #226 kann die signierte Activation-ID ihre plan-gebundene Club-`.env` atomar auf den Backup-Privacy-Target-State umstellen und diese **Konfigurationsstufe** HMAC-signiert abschließen. Die bereits laufenden Club-Container können zu diesem Zeitpunkt trotzdem noch mit ihrer vorherigen Prozessumgebung laufen.
+Der produktive Backup-Privacy-Pfad trennt jetzt strikt zwischen **gültiger Target-Konfiguration** und **tatsächlich umgeschalteter Live-Runtime**.
 
-Dieser Slice definiert deshalb ausschließlich den nächsten **read-only Service-Cutover-Plan**. Er führt keine Service-Mutation aus.
+Nach dem atomaren `.env`-Write entsteht auf `main` bereits eine signierte, nichtterminale Target-Handoff-Evidence. Sie beweist den Target-State und dessen statische Policy-Gültigkeit, behauptet aber ausdrücklich noch keine Live-Aktivierung.
 
-Die Trust Chain lautet:
+Die kanonische Trust Chain lautet:
 
 ```text
 signed activation plan v2
   -> signed PENDING execution evidence
-  -> signed env-activation COMPLETED evidence
-  -> verified target Compose render
-  -> signed service cutover plan v1
-  -> [nächster Slice: signed Live-Baseline]
-  -> [erst danach: bounded service cutover]
+  -> atomic target .env replace
+  -> TARGET_HANDOFF_VERIFIED
+  -> signed Service-Cutover-Plan v2
+  -> [next: signed Live-Baseline]
+  -> [then: bounded service recreate]
+  -> [then: live-process attestation]
+  -> [then: genuine terminal completion / activationExecuted=true]
 ```
 
-`PRIVACY_BACKUP_STATE=DISABLED` bleibt in der realen Release-Konfiguration unverändert, bis der gesamte operative Pfad einschließlich Live-Cutover und Drill nachgewiesen ist.
+`PRIVACY_BACKUP_STATE=DISABLED` bleibt in der realen Release-Konfiguration unverändert, bis der gesamte operative Pfad einschließlich Live-Cutover und praktischem Drill nachgewiesen ist.
 
-## Unabhängige Completion-Verifikation
+## Warum Service-Cutover-Plan v1 deprecated ist
 
-`check-backup-privacy-activation-completion.py` verifiziert read-only:
+Der ursprüngliche v1-Plan aus #227 verlangte `activation-execution-completed.json` bereits **vor** dem Service-Cutover. Das ist nach der Live-Runtime-Härtung zirkulär:
 
-- Activation Plan v2 über den bestehenden Plan-Checker,
-- PENDING-Evidence über den #225-Checker,
-- aktuellen `.env`-Fingerprint als signierten Target-State,
-- kanonischen Pfad des `activation-execution-completed.json`,
-- dessen Bindung an Activation-ID, Execution-ID, Plan, PENDING-Datei und Pre-/Target-Fingerprints,
-- Marker-Fingerprint und HMAC unter der #226-Domain,
-- gebundenen SHA-256 der Konfigurations-Policy-Attestation,
-- Abwesenheit widersprüchlicher Rollback-Evidence.
+- eine ehrliche terminale Completion setzt voraus, dass die laufenden Services tatsächlich mit `ENABLED` neu erzeugt und attestiert wurden,
+- genau dieser Service-Cutover sollte aber erst nach der v1-Completion geplant werden.
 
-Erst dann wird `serviceCutoverPlanningAllowed=true` ausgegeben. Das bedeutet ausschließlich, dass der nächste statische Plan erstellt werden darf.
-
-## Service-Cutover-Plan
-
-`prepare-backup-privacy-service-cutover-plan.py` rendert den Club-Compose-Stack mit der bereits signiert aktivierten Target-`.env` über:
+Der alte `check-backup-privacy-activation-completion.py` blockiert deshalb neue pre-cutover Planungen fail-closed mit:
 
 ```text
-docker compose --env-file <env> -f <club-compose> config --format json
+LIVE_RUNTIME_COMPLETION_REQUIRED
 ```
 
-Dieser Docker-Aufruf ist read-only; es gibt in diesem Slice kein `up`, `run`, `restart`, `stop`, `down`, keine Volume-Mutation und keinen `os.replace`.
+Ein historisches oder synthetisches env-only `COMPLETED` darf nicht als Ersatz für Live-Prozessnachweis dienen.
 
-Der Plan bindet unter anderem:
+## Kanonischer Eingang: TARGET_HANDOFF_VERIFIED
 
-- Activation-ID und Execution-ID,
-- vollständige SHA-256 der Activation-Plan-, PENDING- und Completion-Artefakte,
-- Completion-Fingerprint und Konfigurations-Attestation-SHA,
+`check-backup-privacy-target-handoff.py` verifiziert unter anderem:
+
+- Activation Plan v2 und PENDING-Evidence,
+- exakten aktuellen Target-`.env`-Fingerprint,
+- kanonische Handoff-Datei und deren HMAC/Fingerprint,
+- Target-Config-Checker-Pfad und -Dateihash,
+- erneute Target-Konfigurations-Attestation,
+- Abwesenheit von Rollback- und Legacy-Completion-Konflikten,
+- nichtterminale Zustandsflags.
+
+Erst dann gilt:
+
+```text
+TARGET_HANDOFF_VERIFIED
+serviceCutoverPlanningAllowed=true
+serviceCutoverExecuted=false
+liveRuntimeAttested=false
+activationExecuted=false
+```
+
+## Service-Cutover-Plan v2
+
+`prepare-backup-privacy-service-cutover-plan-v2.py` konsumiert ausschließlich `TARGET_HANDOFF_VERIFIED` und rendert den Target-Compose-Stack read-only:
+
+```text
+docker compose --env-file <target-env> -f <club-compose> config --format json
+```
+
+Der Plan bindet:
+
+- Activation- und Execution-ID,
+- vollständige Hashes von Activation Plan, PENDING und Target Handoff,
+- Target-Handoff-Fingerprint,
+- SHA-256 der Target-Configuration-Attestation,
 - `.env`-Pfad und Target-Fingerprint,
 - Compose-Dateipfad und vollständigen Datei-SHA,
 - kanonischen SHA-256 des gerenderten Compose-Modells,
-- `privacy-check` als obligatorischen Preflight,
-- `app`, `export-cleanup` und `retention-scan` als später kontrolliert zu recreatende Services,
-- `libsql` und `caddy` als zu erhaltende Services,
-- erfolgreiche App-Healthchecks und laufende Background-Services als spätere Pflicht,
-- Live-Runtime-Attestation als spätere Pflicht,
-- Rollback bei jedem Cutover-Fehler als spätere Pflicht.
+- `privacy-check` als Pflicht-Preflight,
+- `app`, `export-cleanup`, `retention-scan` als später zu recreatende Services,
+- `libsql` und `caddy` als zu erhaltende Services.
 
-Das Artefakt ist HMAC-signiert, deterministisch wiederverwendbar und bleibt ausdrücklich:
+Zentrale Safety-Flags:
 
 ```text
+targetHandoffRequiredBeforePlanning=true
+targetHandoffIsNonterminal=true
+preflightMustSucceedBeforeMutation=true
+renderedComposeMustRemainBound=true
+liveBaselineRequiredBeforeMutation=true
+appHealthcheckRequired=true
+backgroundServicesRunningRequired=true
+liveRuntimeEnvironmentAttestationRequired=true
+liveRuntimeCompletionRequiredAfterCutover=true
+rollbackOnCutoverFailureRequired=true
 serviceCutoverExecuted=false
 liveRuntimeAttested=false
+activationExecuted=false
 ```
 
-## Warum der Plan noch keine Service-Mutation autorisiert
+Der Plan wird unter der separaten Domain
 
-Das gerenderte Compose-Modell beschreibt den **Sollzustand nach dem Cutover**. Für Crash-/Retry-Sicherheit reicht das allein nicht aus.
+```text
+masters:backup-privacy-service-cutover-plan:v2
+```
 
-Unmittelbar vor der ersten Service-Mutation muss zusätzlich eine separate signierte **Live-Baseline** persistiert werden. Sie muss mindestens den tatsächlichen Istzustand binden:
+HMAC-signiert und mit `check-backup-privacy-service-cutover-plan-v2.py` unabhängig geprüft.
 
-- eindeutige aktuelle Container-Identität von `app`, `export-cleanup` und `retention-scan`,
+## Keine Service-Mutation in diesem Slice
+
+Plan v2 führt keine Runtime-Mutation aus. Es gibt hier insbesondere kein:
+
+- `docker inspect` als Live-Baseline-Ersatz,
+- `docker compose up/run/restart/stop/down`,
+- Volume-Mutation,
+- Service-Recreate,
+- terminales `activationExecuted=true`.
+
+Das Compose-Rendering beschreibt nur den gewünschten Sollzustand.
+
+## Nächste notwendige Grenze: signierte Live-Baseline
+
+Unmittelbar vor der ersten Service-Mutation muss eine separate signierte Live-Baseline mindestens binden:
+
+- eindeutige aktuelle Container-Identität von `app`, `export-cleanup`, `retention-scan`,
 - deren tatsächlich laufende Backup-Privacy-Prozessumgebung als `DISABLED`,
-- aktuelle LibSQL-Container-/Image-Identität,
-- aktuelle Caddy-Container-/Image-Identität,
+- LibSQL- und Caddy-Container-/Image-Identität,
 - tatsächliche Named-Volume-Mounts für LibSQL, Reports, Tenant Exports und Data-Subject Delivery,
-- Health-/Running-State der relevanten Container,
-- den exakten Cutover-Plan-Fingerprint.
-
-Diese Live-Baseline muss außerhalb der zu recreatenden Container dauerhaft und signiert liegen. Erst sie ermöglicht nach einem Crash mitten im Recreate eine eindeutige Entscheidung, welche Rollen bereits den Target-Live-State erreicht haben und welche noch der Rollback-Baseline entsprechen.
+- Health-/Running-State,
+- exakten Cutover-Plan-v2-Fingerprint.
 
 **Ohne diese Live-Baseline darf keine Service-Mutation stattfinden.**
 
-## Vorgesehener späterer Cutover
+Erst der spätere bounded Host-Executor darf die drei Runtime-Services recreaten. Danach müssen App-Health, Background-Service-Status und die tatsächlich laufende `ENABLED`-Prozessumgebung attestiert werden. Erst dann darf eine echte terminale Completion `activationExecuted=true` setzen.
 
-Der spätere Executor soll auf Plan + Live-Baseline eng begrenzt sein:
-
-1. Target-Compose und Plan erneut verifizieren.
-2. `privacy-check` gegen den Target-State erfolgreich ausführen.
-3. Durable `CUTOVER_STARTED`-Evidence schreiben.
-4. Nur die plan-gebundenen Runtime-Services kontrolliert recreaten.
-5. LibSQL und Caddy nicht recreaten; ihre Baseline-Identität muss erhalten bleiben.
-6. Named Data Volumes nach jedem Recreate gegen die Baseline prüfen.
-7. App muss healthy sein; Background-Services müssen running sein.
-8. Die tatsächliche Prozessumgebung des neuen App-Containers muss `PRIVACY_BACKUP_STATE=ENABLED` plus Policy v1 tragen.
-9. Erst dann darf eine separate Live-Cutover-Completion-Evidence entstehen.
-
-Schlägt einer dieser Schritte fehl, muss **vor** jeder Rückmutation durable Rollback-Evidence geschrieben werden. Danach wird die `.env` bytegenau über den signierten Activation-Plan-v2-Rollback zurückgeführt, die betroffenen Services werden kontrolliert auf DISABLED recreated und die Live-Baseline-/Volume-Invarianten werden erneut geprüft.
+Bei jedem Fehler muss vor der Rückmutation durable Rollback-Evidence entstehen; anschließend `.env` bytegenau zurück, betroffene Services mit `DISABLED` recreaten und der laufende DISABLED-State verifizieren.
 
 ## CI-Contract
 
-Der `Backup Privacy Service Cutover Plan Contract` prüft:
+Der `Backup Privacy Service Cutover Plan Contract` beweist serverseitig:
 
-- die vollständige signierte #220 -> #226 Testkette,
-- unabhängige Completion-Verifikation,
-- Target-Compose-Rendering und Pflichtservices,
-- deterministische Plan-Wiederverwendung,
-- Completion-Tamper-Blockade,
-- Compose-Dateidrift auch bei semantisch neutraler Kommentaränderung,
-- Plan-Fingerprint-/HMAC-Tamper-Blockade,
-- `0600` für Planartefakte,
-- die vollständige Abwesenheit mutierender Docker-/Filesystem-Operationen in diesem Slice.
-
-## Nächster Slice
-
-Der nächste sichere Slice ist die **signierte Live-Baseline**. Erst danach darf ein mutierender Service-Cutover-Executor implementiert werden.
+- vollständige bestehende Target-Handoff-Crash/Retry/Rollback-Kette,
+- Rebinding an den kanonischen Target-Config-Checker,
+- `TARGET_HANDOFF_VERIFIED` als einzige neue Planning-Autorisierung,
+- fail-closed Legacy-Completion,
+- deterministischen signierten Service-Cutover-Plan v2,
+- Target-Handoff- und Plan-Tamper-Blockade,
+- `0600`-Planartefakte,
+- keine Service-Mutation,
+- offene Restore-/RTO-/Release-Gates.
