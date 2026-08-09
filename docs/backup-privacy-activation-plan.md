@@ -1,14 +1,14 @@
-# Backup Privacy Activation Plan v1
+# Backup Privacy Activation Plan v2
 
 ## Zweck
 
-Der Activation Plan ist die letzte **pre-mutation** Evidence vor einer späteren Umschaltung der Backup-Privacy-Runtime-Attestation.
+Der Activation Plan ist die letzte **pre-mutation** Evidence vor einer späteren Umschaltung der Backup-Privacy-Runtime-Attestation. Plan v2 ersetzt v1 bewusst: v1 band zwar Ausgangs- und Ziel-Hash, enthielt aber noch nicht genügend Information, um nach einem Prozess-Crash und fehlgeschlagener Post-Validation den exakten Ausgangszustand ohne Raten wiederherzustellen.
 
-Er konsumiert ausschließlich eine gültige signierte Manual-Attestation aus #222 und beschreibt bytegenau, welche `.env`-Datei von welchem Inhalt auf welchen Zielinhalt wechseln darf. Der Plan selbst ändert die Datei nicht.
+Der Plan selbst ändert weiterhin keine `.env`.
 
-## Sicherheitsziel
+## Byte-reversibler Vertrag
 
-Ein späterer Executor darf nicht aus dem aktuellen Dateizustand raten, was ursprünglich autorisiert war. Deshalb bindet der Plan:
+Plan v2 bindet weiterhin:
 
 - `attestationId` und `attestationFingerprint`,
 - SHA-256 des vollständigen Attestation-Artefakts,
@@ -17,12 +17,29 @@ Ein späterer Executor darf nicht aus dem aktuellen Dateizustand raten, was ursp
 - SHA-256 des exakt geplanten Ziel-Bytestrings,
 - die fünf Policy-v1-Zielwerte,
 - `expectedPreState=DISABLED`,
-- `expectedPostState=ENABLED`,
-- Pflicht zu atomarem Replace,
-- Pflicht zu Post-Write-Runtime-Attestation,
-- Pflicht zu Rollback bei Validierungsfehler.
+- `expectedPostState=ENABLED`.
 
-`runtimeConfigurationChanged=false` und `activationExecuted=false` sind im Plan fest.
+Zusätzlich enthält `rollbackDescriptor` ausschließlich reversible Metadaten der fünf erlaubten Backup-Privacy-Variablen:
+
+- ob die Zeile ursprünglich vorhanden war,
+- ursprüngliche Zeilenposition,
+- ursprünglicher Wert,
+- ursprünglicher Zeilenabschluss (`LF`, `CRLF` oder kein Abschluss),
+- Zielwert,
+- bei neu angehängten Variablen die Zielzeilenposition,
+- ob die Originaldatei mit einem Zeilenabschluss endete.
+
+Andere `.env`-Werte – insbesondere Secrets – werden **nicht** in den Plan kopiert.
+
+Die Policy-Flags verlangen:
+
+```text
+atomicReplaceRequired=true
+postWriteRuntimeAttestationRequired=true
+rollbackOnValidationFailureRequired=true
+exactRollbackReconstructionRequired=true
+nonTargetEnvBytesMustRemainUnchanged=true
+```
 
 ## Zielwerte
 
@@ -34,80 +51,57 @@ PRIVACY_BACKUP_BOUNDED_RETENTION_CONFIGURED=true
 PRIVACY_BACKUP_RESTORE_RECONCILIATION=true
 ```
 
-Andere `.env`-Zeilen werden byte-/zeilenlogisch erhalten. Bereits vorhandene Zielvariablen werden an ihrer Position ersetzt; fehlende Zielvariablen werden in fester Reihenfolge angehängt.
+Vorhandene Zielzeilen werden unter Beibehaltung ihres Zeilenabschlusses ersetzt. Fehlende Zielzeilen werden in fester Reihenfolge angehängt. Eine Datei ohne finalen Newline kann exakt wiederhergestellt werden.
 
-## Voraussetzungen
+Gemischte `LF`-/`CRLF`-Dateien werden fail-closed blockiert, weil für neu anzuhängende Zeilen sonst keine eindeutige kanonische Wahl besteht. Reine LF- und reine CRLF-Dateien werden unterstützt.
 
-Die Planung blockiert, wenn:
+## Signatur und Versionierung
 
-- die #222-Attestation nicht verifiziert werden kann,
-- die Attestation nicht exakt Policy v1 autorisiert,
-- `PRIVACY_BACKUP_STATE` in der Ziel-`.env` nicht exakt `DISABLED` ist,
-- eine der fünf Zielvariablen mehrfach vorkommt,
-- eine Zielvariable keine einfache `KEY=VALUE`-Zeile ist,
-- `.env`, Schlüssel oder Planpfade Symlinks/unsicher sind,
-- die `.env` gruppen-/weltweit schreibbar ist.
-
-## Plan erzeugen
-
-```bash
-python3 infra/backup/prepare-backup-privacy-activation-plan.py \
-  --attestation-checker "$PWD/infra/backup/check-backup-privacy-manual-attestation.py" \
-  --attestation /var/lib/master-diagnostics/backup-privacy-attestations/attestation-<32-hex>.json \
-  --key-file /etc/master-diagnostics/backup-privacy-manual-attestation.key \
-  --env-file /path/to/deployment/.env \
-  --output-dir /var/lib/master-diagnostics/backup-privacy-activations
-```
-
-Der `activationId` wird deterministisch aus Attestation-, Env- und Zielbindung abgeleitet. Ein identischer Retry verwendet denselben Plan wieder; ein anderer Ausgangszustand erzeugt bewusst eine andere Planidentität.
-
-## Plan verifizieren
-
-```bash
-python3 infra/backup/check-backup-privacy-activation-plan.py \
-  --plan /var/lib/master-diagnostics/backup-privacy-activations/activation-<32-hex>.json \
-  --key-file /etc/master-diagnostics/backup-privacy-manual-attestation.key
-```
-
-Nur ein gültiger Plan liefert:
+Plan v2 verwendet eine neue HMAC-Domain:
 
 ```text
-ACTIVATION_PLAN_VERIFIED
-activationExecutionAllowed=true
-runtimeConfigurationChanged=false
-activationExecuted=false
+masters:backup-privacy-activation-plan:v2
 ```
 
-Die Signatur verwendet dieselbe Schlüsseldatei wie die manuelle Attestation, aber eine getrennte HMAC-Domain:
+Ein v1-Plan darf deshalb nicht stillschweigend als reversibler v2-Plan interpretiert werden.
 
-```text
-masters:backup-privacy-activation-plan:v1
-```
+## Crash-/Retry-Vertrag
 
-## Crash-/Retry-Vertrag für den späteren Executor
+Ein späterer Executor vergleicht zuerst den tatsächlichen `.env`-Fingerprint:
 
-Ein späterer Executor muss vor jeder Mutation den tatsächlichen `.env`-Fingerprint mit dem Plan vergleichen:
+- `currentEnvFingerprint` → noch nicht umgeschaltet; Mutation darf nach weiterer Execution-Evidence beginnen,
+- `targetEnvFingerprint` → Dateiumschaltung ist bereits erfolgt; nicht blind erneut schreiben, sondern Post-Validation fortsetzen,
+- anderer Fingerprint → `BLOCKED / DRIFT`.
 
-- entspricht er `currentEnvFingerprint`: Mutation darf erst beginnen,
-- entspricht er `targetEnvFingerprint`: die Dateiumschaltung ist bereits erfolgt und darf nicht erneut blind geschrieben werden,
-- entspricht er keinem der beiden Werte: **BLOCKED / DRIFT**, keine automatische Reparatur.
+Wenn die Post-Validation scheitert, kann der Executor aus Ziel-`.env` plus `rollbackDescriptor` ausschließlich die fünf gebundenen Änderungen rückwärts anwenden. Der rekonstruierte Bytestring muss anschließend exakt `currentEnvFingerprint` ergeben. Erst dann darf er atomar zurückgeschrieben werden.
 
-Nach einem Replace muss die globale Runtime-Privacy-Attestation mit dem neuen Zustand erfolgreich sein. Bei Validierungsfehler muss auf den plan-gebundenen Ausgangsbytestring zurückgerollt werden.
+## Sicherheitsgrenzen
 
-## CI-Grenze
+Planung blockiert unter anderem bei:
 
-Der Contract arbeitet nur mit temporären Env-Dateien. Er beweist:
+- ungültiger #222-Attestation,
+- Backup-State ungleich exakt `DISABLED`,
+- doppelten oder nicht-kanonischen Zielvariablen,
+- unsicheren Datei-/Schlüsselpfaden,
+- gruppen-/weltweit schreibbarer `.env`,
+- CR-only oder gemischten LF/CRLF-Zeilenenden.
 
-- echte #220/#221/#222-Evidence-Kette bis zum Plan,
-- Byte-Unverändertheit der `.env` während Planung,
-- unabhängige Berechnung des Ziel-Fingerprints,
-- idempotenten Retry,
-- Blockade bei bereits aktivem oder mehrdeutigem Env-Zustand,
-- HMAC-/Fingerprint-Tamper-Blockade,
-- unveränderte Release-/RTO-Gates.
+`runtimeConfigurationChanged=false` und `activationExecuted=false` bleiben im Plan fest.
+
+## CI
+
+Zusätzlich zum bestehenden Activation-Plan-Contract prüft der Reversible-Plan-Contract:
+
+- exakte Roundtrip-Wiederherstellung für LF,
+- exakte Roundtrip-Wiederherstellung für CRLF,
+- fehlende Zielvariablen,
+- ursprüngliche Datei ohne finalen Newline,
+- Blockade gemischter Zeilenenden,
+- dass keine übrigen `.env`-Secrets in den Rollback-Descriptor aufgenommen werden,
+- weiterhin keine `os.replace`-/Docker-Mutation im Planer.
 
 Ein grüner CI-Lauf aktiviert keine reale Installation.
 
 ## Nächster Slice
 
-Der nachgelagerte Executor darf erst auf Basis dieses verifizierten Plans eine atomare Env-Umschaltung durchführen. Er muss Pre-/Post-Fingerprint, Runtime-Attestation und Rollback als eine crash-/retry-fähige Transaktion behandeln.
+Der nächste Slice kann nun die eigentliche Activation-Execution-Evidence und danach den atomaren Env-Executor implementieren. Er muss Plan-v2-Verifikation, Pre-/Post-Fingerprint, Post-Write-Runtime-Attestation und bytegenauen Rollback als crash-/retry-fähige Zustandsmaschine behandeln.

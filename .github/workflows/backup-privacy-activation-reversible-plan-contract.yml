@@ -1,0 +1,78 @@
+name: Backup Privacy Activation Reversible Plan Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-activation-reversible-plan-contract.yml'
+      - 'infra/backup/prepare-backup-privacy-activation-plan.py'
+      - 'infra/backup/check-backup-privacy-activation-plan.py'
+      - 'docs/backup-privacy-activation-plan.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-activation-reversible-plan-contract.yml'
+      - 'infra/backup/prepare-backup-privacy-activation-plan.py'
+      - 'infra/backup/check-backup-privacy-activation-plan.py'
+      - 'docs/backup-privacy-activation-plan.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify byte-preserving reversible transform helper
+        run: |
+          python3 - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          p=Path('infra/backup/prepare-backup-privacy-activation-plan.py')
+          spec=importlib.util.spec_from_file_location('planner',p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          cases=[
+            b'APP_HOST=x\nSECRET=abc=123\nPRIVACY_BACKUP_STATE=DISABLED\nTAIL=z\n',
+            b'APP_HOST=x\r\nSECRET=abc=123\r\nPRIVACY_BACKUP_STATE=DISABLED\r\nTAIL=z\r\n',
+            b'APP_HOST=x\nPRIVACY_BACKUP_STATE=DISABLED',
+          ]
+          for raw in cases:
+            target, patches, rollback=m.build_reversible_target_env(raw)
+            assert b'SECRET=abc=123' in target or b'SECRET=abc=123' not in raw
+            assert len(patches)==5
+            assert rollback['strategy']=='REVERSE_ONLY_BOUND_BACKUP_PRIVACY_LINES_V1'
+            # independent reverse algorithm from bound patch metadata
+            text=target.decode(); lines=text.splitlines(keepends=True)
+            for patch in reversed(patches):
+              key=patch['key']
+              if patch['originalPresent']:
+                idx=patch['originalLineIndex']; ending={'LF':'\n','CRLF':'\r\n','NONE':''}[patch['originalLineEnding']]
+                lines[idx]=f"{key}={patch['originalValue']}{ending}"
+              else:
+                idx=patch['targetAppendedLineIndex']
+                assert lines[idx].split('=',1)[0]==key
+                del lines[idx]
+            if lines and not rollback['originalHadTrailingLineEnding']:
+              if lines[-1].endswith('\r\n'): lines[-1]=lines[-1][:-2]
+              elif lines[-1].endswith('\n'): lines[-1]=lines[-1][:-1]
+            restored=''.join(lines).encode()
+            assert restored==raw, (raw,restored)
+          PY
+      - name: Verify mixed line endings fail closed
+        run: |
+          python3 - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          p=Path('infra/backup/prepare-backup-privacy-activation-plan.py'); spec=importlib.util.spec_from_file_location('planner',p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          try: m.build_reversible_target_env(b'APP=x\nPRIVACY_BACKUP_STATE=DISABLED\r\n')
+          except ValueError as exc: assert 'ENV_LINE_ENDINGS_MIXED' in str(exc)
+          else: raise AssertionError('mixed endings were accepted')
+          PY
+      - name: Verify plan v2 privacy boundary
+        run: |
+          grep -F 'PLAN_VERSION = 2' infra/backup/prepare-backup-privacy-activation-plan.py
+          grep -F 'backup-privacy-activation-plan:v2' infra/backup/prepare-backup-privacy-activation-plan.py
+          grep -F 'exactRollbackReconstructionRequired' infra/backup/prepare-backup-privacy-activation-plan.py
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('infra/backup/prepare-backup-privacy-activation-plan.py').read_text()
+          assert 'originalValue' in s
+          for forbidden in ('SECRET=', 'BETTER_AUTH_SECRET', 'os.replace(', 'docker compose'):
+            assert forbidden not in s
+          PY
