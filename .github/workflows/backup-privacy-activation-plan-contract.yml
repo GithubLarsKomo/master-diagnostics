@@ -1,0 +1,170 @@
+name: Backup Privacy Activation Plan Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-activation-plan-contract.yml'
+      - 'infra/backup/prepare-backup-privacy-activation-plan.py'
+      - 'infra/backup/check-backup-privacy-activation-plan.py'
+      - 'infra/backup/write-backup-privacy-manual-attestation.py'
+      - 'infra/backup/check-backup-privacy-manual-attestation.py'
+      - 'docs/backup-privacy-activation-plan.md'
+      - 'TASKS.md'
+      - '.env.example'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-activation-plan-contract.yml'
+      - 'infra/backup/prepare-backup-privacy-activation-plan.py'
+      - 'infra/backup/check-backup-privacy-activation-plan.py'
+      - 'infra/backup/write-backup-privacy-manual-attestation.py'
+      - 'infra/backup/check-backup-privacy-manual-attestation.py'
+      - 'docs/backup-privacy-activation-plan.md'
+      - 'TASKS.md'
+      - '.env.example'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    env:
+      PRIVACY_BACKUP_STATE: DISABLED
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare signed drill, manual attestation and disabled env
+        run: |
+          set -Eeuo pipefail
+          root=/tmp/backup-privacy-plan
+          rm -rf "$root"; mkdir -p "$root/reports" "$root/attestations" "$root/plans"
+          chmod 700 "$root/reports" "$root/attestations" "$root/plans"
+          python3 - <<'PY'
+          import base64,json
+          from pathlib import Path
+          root=Path('/tmp/backup-privacy-plan')
+          root.joinpath('key').write_text(base64.b64encode(bytes([71])*32).decode()+'\n')
+          phases=[{'name':n,'status':'COMPLETED','durationSeconds':10,'exitCode':0} for n in ('VERIFY_BACKUP','STAGE_RESTORE','PRIVACY_REPLAY','AUTHORIZE_PROMOTION','PREPARE_PROMOTION_PLAN','PREPARE_CANDIDATES','AUTHORIZE_SWITCH','EXECUTE_SWITCH')]
+          root.joinpath('phases.json').write_text(json.dumps(phases)+'\n')
+          root.joinpath('club.env').write_text('APP_HOST=localhost\nBETTER_AUTH_SECRET=ci-secret-value\nPRIVACY_BACKUP_STATE=DISABLED\nPRIVACY_NOTIFICATIONS_STATE=DISABLED\n')
+          PY
+          chmod 600 "$root/key" "$root/phases.json" "$root/club.env"
+          python3 infra/backup/write-restore-rto-drill-report.py \
+            --output-dir "$root/reports" --key-file "$root/key" \
+            --drill-id drill-11111111111111111111111111111111 \
+            --bundle-name masters-backup-20260809T100000Z-11111111-1111-1111-1111-111111111111.mdbak \
+            --bundle-sha256 sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --staging-name restore-20260809T100100Z-22222222-2222-2222-2222-222222222222 \
+            --candidate-set-id restore-0123456789abcdefabcd \
+            --started-at 2026-08-09T10:00:00.000Z --completed-at 2026-08-09T10:02:00.000Z \
+            --duration-seconds 120 --status COMPLETED --terminal-phase EXECUTE_SWITCH \
+            --phases-file "$root/phases.json" >/dev/null
+          python3 infra/backup/write-backup-privacy-manual-attestation.py \
+            --readiness-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-readiness.py" \
+            --drill-report "$root/reports/drill-11111111111111111111111111111111.json" \
+            --drill-key-file "$root/key" --attestation-key-file "$root/key" \
+            --output-dir "$root/attestations" --attestation-id attestation-22222222222222222222222222222222 \
+            --attestor-id ci-operator --attested-at 2026-08-09T10:05:00.000Z \
+            --acknowledge-operational-responsibility >/dev/null
+
+      - name: Prepare and verify activation plan without env mutation
+        run: |
+          set -Eeuo pipefail
+          root=/tmp/backup-privacy-plan
+          before=$(sha256sum "$root/club.env" | awk '{print $1}')
+          python3 infra/backup/prepare-backup-privacy-activation-plan.py \
+            --attestation-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-manual-attestation.py" \
+            --attestation "$root/attestations/attestation-22222222222222222222222222222222.json" \
+            --key-file "$root/key" --env-file "$root/club.env" --output-dir "$root/plans" >"$root/prepared.json"
+          after=$(sha256sum "$root/club.env" | awk '{print $1}')
+          test "$before" = "$after"
+          plan=$(python3 -c "import json;print(json.load(open('$root/prepared.json'))['planPath'])")
+          python3 infra/backup/check-backup-privacy-activation-plan.py --plan "$plan" --key-file "$root/key" >"$root/verified.json"
+          python3 - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          root=Path('/tmp/backup-privacy-plan')
+          p=json.loads(root.joinpath('prepared.json').read_text()); v=json.loads(root.joinpath('verified.json').read_text())
+          assert p['status']=='ACTIVATION_PLAN_READY' and p['runtimeConfigurationChanged'] is False and p['activationExecuted'] is False
+          assert v['status']=='ACTIVATION_PLAN_VERIFIED' and v['activationExecutionAllowed'] is True
+          assert v['runtimeConfigurationChanged'] is False and v['activationExecuted'] is False
+          current=root.joinpath('club.env').read_text().splitlines()
+          target=[]; replacements={
+            'PRIVACY_BACKUP_STATE':'ENABLED','PRIVACY_BACKUP_POLICY_VERSION':'1.0.0','PRIVACY_BACKUP_ENCRYPTED_AT_REST':'true',
+            'PRIVACY_BACKUP_BOUNDED_RETENTION_CONFIGURED':'true','PRIVACY_BACKUP_RESTORE_RECONCILIATION':'true'}
+          seen=set()
+          for line in current:
+            key=line.split('=',1)[0] if '=' in line else None
+            if key in replacements: target.append(f'{key}={replacements[key]}'); seen.add(key)
+            else: target.append(line)
+          for key in ('PRIVACY_BACKUP_STATE','PRIVACY_BACKUP_POLICY_VERSION','PRIVACY_BACKUP_ENCRYPTED_AT_REST','PRIVACY_BACKUP_BOUNDED_RETENTION_CONFIGURED','PRIVACY_BACKUP_RESTORE_RECONCILIATION'):
+            if key not in seen: target.append(f'{key}={replacements[key]}')
+          expected='sha256:'+hashlib.sha256(('\n'.join(target)+'\n').encode()).hexdigest()
+          assert p['targetEnvFingerprint']==expected==v['targetEnvFingerprint']
+          PY
+          test "$(stat -c '%a' "$root/plans")" = 700
+          test "$(stat -c '%a' "$plan")" = 600
+
+      - name: Verify deterministic retry
+        run: |
+          set -Eeuo pipefail
+          root=/tmp/backup-privacy-plan
+          python3 infra/backup/prepare-backup-privacy-activation-plan.py \
+            --attestation-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-manual-attestation.py" \
+            --attestation "$root/attestations/attestation-22222222222222222222222222222222.json" \
+            --key-file "$root/key" --env-file "$root/club.env" --output-dir "$root/plans" >"$root/retry.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/backup-privacy-plan/retry.json').read_text())
+          assert r['planCreated'] is False and r['planReused'] is True
+          PY
+
+      - name: Verify unsafe current state and duplicate target variables block planning
+        run: |
+          set -Eeuo pipefail
+          root=/tmp/backup-privacy-plan
+          cp "$root/club.env" "$root/enabled.env"; sed -i 's/PRIVACY_BACKUP_STATE=DISABLED/PRIVACY_BACKUP_STATE=ENABLED/' "$root/enabled.env"; chmod 600 "$root/enabled.env"
+          cp "$root/club.env" "$root/duplicate.env"; printf 'PRIVACY_BACKUP_STATE=DISABLED\n' >>"$root/duplicate.env"; chmod 600 "$root/duplicate.env"
+          for file in enabled duplicate; do
+            set +e
+            python3 infra/backup/prepare-backup-privacy-activation-plan.py \
+              --attestation-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-manual-attestation.py" \
+              --attestation "$root/attestations/attestation-22222222222222222222222222222222.json" \
+              --key-file "$root/key" --env-file "$root/$file.env" --output-dir "$root/plans" >/tmp/$file.out 2>/tmp/$file.err
+            code=$?; set -e; test "$code" -ne 0
+          done
+          grep -q 'BACKUP_CAPABILITY_NOT_DISABLED' /tmp/enabled.err
+          grep -q 'ENV_TARGET_DUPLICATE' /tmp/duplicate.err
+
+      - name: Verify plan tampering blocks execution authorization
+        run: |
+          set -Eeuo pipefail
+          root=/tmp/backup-privacy-plan
+          plan=$(python3 -c "import json;print(json.load(open('$root/prepared.json'))['planPath'])")
+          mkdir -p "$root/tampered"
+          name=$(basename "$plan"); cp "$plan" "$root/tampered/$name"; chmod 600 "$root/tampered/$name"
+          python3 - <<'PY'
+          import json,glob
+          from pathlib import Path
+          p=Path(glob.glob('/tmp/backup-privacy-plan/tampered/activation-*.json')[0]); d=json.loads(p.read_text()); d['record']['targetEnvFingerprint']='sha256:'+'f'*64; p.write_text(json.dumps(d,indent=2)+'\n')
+          PY
+          set +e
+          python3 infra/backup/check-backup-privacy-activation-plan.py --plan "$root/tampered/$name" --key-file "$root/key" >"$root/tampered.json"
+          code=$?; set -e; test "$code" -ne 0
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/backup-privacy-plan/tampered.json').read_text()); assert r['status']=='BLOCKED'; assert r['activationExecutionAllowed'] is False; assert r['runtimeConfigurationChanged'] is False
+          PY
+
+      - name: Verify planning boundary and release gates remain unchanged
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          combined='\n'.join(Path(p).read_text() for p in ('infra/backup/prepare-backup-privacy-activation-plan.py','infra/backup/check-backup-privacy-activation-plan.py'))
+          for token in ('os.replace(', 'docker compose', 'docker volume', 'PRIVACY_BACKUP_STATE=ENABLED'):
+            assert token not in combined
+          assert 'runtimeConfigurationChanged' in combined and 'activationExecuted' in combined
+          PY
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
