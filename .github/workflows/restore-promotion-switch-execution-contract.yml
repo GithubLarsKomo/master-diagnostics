@@ -43,18 +43,22 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           service = Path('packages/db/src/services/restore-private-promotion-switch-execution.ts').read_text()
           package = Path('packages/db/package.json').read_text()
-          assert 'CUTOVER_STARTED' in service
-          assert 'CANDIDATE_SELECTED' in service
-          assert 'ROLLBACK_SELECTED' in service
-          assert 'ROLLBACK_VERIFIED' in service
-          assert 'COMPLETED' in service
-          assert 'previousEventSignature' in service
-          assert 'ACTIVE_VOLUME_SET_MIXED_OR_UNKNOWN' in service
-          assert 'RECOVER_CANDIDATE_SELECTION' in service
-          assert 'RECOVER_ROLLBACK_SELECTION' in service
+          for token in (
+              'CUTOVER_STARTED',
+              'CANDIDATE_SELECTED',
+              'ROLLBACK_STARTED',
+              'ROLLBACK_SELECTED',
+              'ROLLBACK_VERIFIED',
+              'COMPLETED',
+              'previousEventSignature',
+              'MIXED_KNOWN',
+              'READY_TO_SELECT_ROLLBACK',
+              'RECOVER_CANDIDATE_SELECTION',
+              'RECOVER_ROLLBACK_SELECTION',
+          ):
+              assert token in service
           assert 'docker compose' not in service
           assert 'docker volume' not in service
           assert 'child_process' not in service
