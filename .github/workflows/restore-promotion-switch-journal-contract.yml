@@ -1,0 +1,209 @@
+name: Restore Promotion Switch Journal Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-promotion-switch-journal-contract.yml'
+      - 'packages/db/**'
+      - 'infra/backup/prepare-club-restore-promotion-switch-journal.sh'
+      - 'infra/docker-compose.restore-promotion.yml'
+      - 'docs/restore-private-promotion-switch-journal.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-promotion-switch-journal-contract.yml'
+      - 'packages/db/**'
+      - 'infra/backup/prepare-club-restore-promotion-switch-journal.sh'
+      - 'infra/docker-compose.restore-promotion.yml'
+      - 'docs/restore-private-promotion-switch-journal.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Run focused switch journal unit contract
+        run: pnpm --filter @masters/db exec vitest run test/restore-private-promotion-switch-journal.test.ts
+
+      - name: Prepare signed healthy switch intent fixture
+        run: |
+          rm -rf /tmp/restore-switch-journal-contract
+          mkdir -p /tmp/restore-switch-journal-contract/switch /tmp/restore-switch-journal-contract/journal
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path('/tmp/restore-switch-journal-contract')
+          root.joinpath('promotion.key').write_text(base64.b64encode(bytes([83]) * 32).decode() + '\n')
+          candidates = [
+              {
+                  'role': 'LIBSQL',
+                  'sourceSubpath': 'libsql',
+                  'candidateVolumeName': 'master-diagnostics-restore-0123456789abcdefabcd-libsql',
+                  'rollbackVolumeName': 'infra_libsql-data',
+                  'sourceFingerprint': 'sha256:' + '1' * 64,
+                  'candidateFingerprint': 'sha256:' + '1' * 64,
+                  'fileCount': 3,
+                  'directoryCount': 2,
+                  'byteCount': 4096,
+              },
+              {
+                  'role': 'REPORTS',
+                  'sourceSubpath': 'reports',
+                  'candidateVolumeName': 'master-diagnostics-restore-0123456789abcdefabcd-reports',
+                  'rollbackVolumeName': 'infra_report-data',
+                  'sourceFingerprint': 'sha256:' + '2' * 64,
+                  'candidateFingerprint': 'sha256:' + '2' * 64,
+                  'fileCount': 4,
+                  'directoryCount': 3,
+                  'byteCount': 8192,
+              },
+              {
+                  'role': 'TENANT_EXPORTS',
+                  'sourceSubpath': 'tenant-exports',
+                  'candidateVolumeName': 'master-diagnostics-restore-0123456789abcdefabcd-tenant-exports',
+                  'rollbackVolumeName': 'infra_export-data',
+                  'sourceFingerprint': 'sha256:' + '3' * 64,
+                  'candidateFingerprint': 'sha256:' + '3' * 64,
+                  'fileCount': 0,
+                  'directoryCount': 1,
+                  'byteCount': 0,
+              },
+              {
+                  'role': 'DATA_SUBJECT_DELIVERY',
+                  'sourceSubpath': 'data-subject-delivery',
+                  'candidateVolumeName': 'master-diagnostics-restore-0123456789abcdefabcd-data-subject-delivery',
+                  'rollbackVolumeName': 'infra_data-subject-delivery-data',
+                  'sourceFingerprint': 'sha256:' + '4' * 64,
+                  'candidateFingerprint': 'sha256:' + '4' * 64,
+                  'fileCount': 1,
+                  'directoryCount': 1,
+                  'byteCount': 128,
+              },
+          ]
+          body = {
+              'healthcheckVersion': 1,
+              'planFingerprint': 'sha256:' + 'a' * 64,
+              'activeVolumeSetFingerprint': 'sha256:' + 'b' * 64,
+              'candidateSetId': 'restore-0123456789abcdefabcd',
+              'candidates': candidates,
+          }
+          fingerprint = 'sha256:' + hashlib.sha256(
+              json.dumps(body, sort_keys=True, separators=(',', ':')).encode()
+          ).hexdigest()
+          report = {
+              'mode': 'ISOLATED_RESTORE_PROMOTION_CANDIDATE_SET_HEALTHCHECK',
+              'status': 'CANDIDATE_SET_HEALTHY',
+              'healthcheckVersion': 1,
+              'evidenceRecomputed': True,
+              'candidateMutationAllowed': False,
+              'productionMutationAllowed': False,
+              'promotionExecuted': False,
+              **body,
+              'candidateSetFingerprint': fingerprint,
+          }
+          root.joinpath('candidate-healthcheck.json').write_text(json.dumps(report, separators=(',', ':')) + '\n')
+          PY
+          chmod 600 /tmp/restore-switch-journal-contract/promotion.key /tmp/restore-switch-journal-contract/candidate-healthcheck.json
+
+          env \
+            RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE=/tmp/restore-switch-journal-contract/candidate-healthcheck.json \
+            RESTORE_PRIVATE_PROMOTION_INTENT_DIR=/tmp/restore-switch-journal-contract/switch \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-switch-journal-contract/promotion.key \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-intent \
+            >/tmp/restore-switch-journal-contract/switch-intent-result.json
+
+      - name: Verify journal creation and idempotent reuse
+        run: |
+          for attempt in first second; do
+            env \
+              RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE=/tmp/restore-switch-journal-contract/candidate-healthcheck.json \
+              RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE=/tmp/restore-switch-journal-contract/switch/promotion-switch-intent.json \
+              RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-switch-journal-contract/promotion.key \
+              RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_DIR=/tmp/restore-switch-journal-contract/journal \
+              pnpm --silent --filter @masters/db backup:restore-promotion-switch-journal \
+              >"/tmp/restore-switch-journal-contract/journal-${attempt}.json"
+          done
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('/tmp/restore-switch-journal-contract')
+          first = json.loads(root.joinpath('journal-first.json').read_text())
+          second = json.loads(root.joinpath('journal-second.json').read_text())
+          journal_path = root.joinpath('journal/promotion-switch-journal.json')
+          journal = json.loads(journal_path.read_text())
+
+          assert first['mode'] == 'ISOLATED_RESTORE_PROMOTION_SWITCH_JOURNAL'
+          assert first['status'] == 'PENDING_JOURNAL_READY'
+          assert first['switchIntentVerified'] is True
+          assert first['journalCreated'] is True
+          assert first['journalReused'] is False
+          assert first['productionSwitchAuthorized'] is True
+          assert first['productionMutationAllowed'] is False
+          assert first['productionMutationStarted'] is False
+          assert first['promotionExecuted'] is False
+          assert second['journalCreated'] is False
+          assert second['journalReused'] is True
+          assert second['journalFingerprint'] == first['journalFingerprint']
+          assert second['journalSignature'] == first['journalSignature']
+          assert journal['record']['phase'] == 'PENDING'
+          assert journal['record']['journalPersistenceScope'] == 'HOST_DURABLE_OUTSIDE_RESTORE_WORKSPACE'
+          assert journal['record']['journalRequiredBeforeMutation'] is True
+          assert journal['record']['productionMutationStarted'] is False
+          assert journal['record']['promotionExecuted'] is False
+          assert journal['record']['selectorOverride'] == 'infra/docker-compose.restore-promotion-selector.yml'
+          assert (root.joinpath('journal').stat().st_mode & 0o777) == 0o700
+          assert (journal_path.stat().st_mode & 0o777) == 0o600
+          PY
+
+      - name: Verify fresh candidate-set drift invalidates the signed switch intent
+        run: |
+          cp /tmp/restore-switch-journal-contract/candidate-healthcheck.json /tmp/restore-switch-journal-contract/candidate-healthcheck-drift.json
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          path = Path('/tmp/restore-switch-journal-contract/candidate-healthcheck-drift.json')
+          report = json.loads(path.read_text())
+          report['candidates'][1]['candidateVolumeName'] = 'master-diagnostics-restore-fedcba9876543210abcd-reports'
+          body = {
+              'healthcheckVersion': report['healthcheckVersion'],
+              'planFingerprint': report['planFingerprint'],
+              'activeVolumeSetFingerprint': report['activeVolumeSetFingerprint'],
+              'candidateSetId': report['candidateSetId'],
+              'candidates': report['candidates'],
+          }
+          report['candidateSetFingerprint'] = 'sha256:' + hashlib.sha256(
+              json.dumps(body, sort_keys=True, separators=(',', ':')).encode()
+          ).hexdigest()
+          path.write_text(json.dumps(report, separators=(',', ':')) + '\n')
+          PY
+          set +e
+          env \
+            RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE=/tmp/restore-switch-journal-contract/candidate-healthcheck-drift.json \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE=/tmp/restore-switch-journal-contract/switch/promotion-switch-intent.json \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-switch-journal-contract/promotion.key \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_DIR=/tmp/restore-switch-journal-contract/journal \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-journal \
+            >/tmp/restore-switch-journal-contract/drift.out 2>/tmp/restore-switch-journal-contract/drift.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'does not match candidate-set healthcheck evidence' /tmp/restore-switch-journal-contract/drift.err
