@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Prepare a signed, non-mutating backup-privacy runtime activation plan."""
+"""Prepare a signed, byte-reversible, non-mutating backup-privacy activation plan."""
 from __future__ import annotations
 
 import argparse, base64, hashlib, hmac, json, os, re, stat, subprocess, sys
 from pathlib import Path
 from typing import Any
 
-SIGNING_DOMAIN = b"masters:backup-privacy-activation-plan:v1\n"
+PLAN_VERSION = 2
+SIGNING_DOMAIN = b"masters:backup-privacy-activation-plan:v2\n"
 SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 ATTESTATION_ID = re.compile(r"^attestation-[0-9a-f]{32}$")
 TARGET_ORDER = (
@@ -23,6 +24,7 @@ TARGET = {
     "PRIVACY_BACKUP_BOUNDED_RETENTION_CONFIGURED": "true",
     "PRIVACY_BACKUP_RESTORE_RECONCILIATION": "true",
 }
+PLAIN_ENV = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
 
 
 def fail(code: str, message: str) -> "NoReturn":
@@ -52,45 +54,104 @@ def read_key(path: Path) -> bytes:
 def read_env(path: Path) -> bytes:
     if not path.is_absolute() or path.is_symlink() or not path.is_file():
         fail("ENV_FILE_UNSAFE", "env file must be an absolute regular non-symlink file")
-    mode = stat.S_IMODE(path.stat().st_mode)
-    if mode & 0o022:
+    if stat.S_IMODE(path.stat().st_mode) & 0o022:
         fail("ENV_FILE_PERMISSIONS_UNSAFE", "env file must not be group/world writable")
     return path.read_bytes()
 
 
-def build_target_env(raw: bytes) -> tuple[bytes, dict[str, str]]:
+def split_line(line: str) -> tuple[str, str]:
+    if line.endswith("\r\n"):
+        return line[:-2], "\r\n"
+    if line.endswith("\n"):
+        return line[:-1], "\n"
+    if line.endswith("\r"):
+        fail("ENV_LINE_ENDING_UNSUPPORTED", "CR-only line endings are not supported")
+    return line, ""
+
+
+def choose_append_eol(lines: list[str]) -> str:
+    endings = {split_line(line)[1] for line in lines if split_line(line)[1]}
+    if len(endings) > 1:
+        fail("ENV_LINE_ENDINGS_MIXED", "mixed LF/CRLF line endings are not supported for reversible activation")
+    return next(iter(endings), "\n")
+
+
+def build_reversible_target_env(raw: bytes) -> tuple[bytes, list[dict[str, Any]], dict[str, Any]]:
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ValueError("ENV_FILE_ENCODING_INVALID: env file must be UTF-8") from exc
-    lines = text.splitlines()
+
+    lines = text.splitlines(keepends=True)
+    if text and not lines:
+        lines = [text]
     seen: dict[str, int] = {}
     values: dict[str, str] = {}
-    parsed = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
-    for idx, line in enumerate(lines):
-        match = parsed.fullmatch(line)
+    patches: list[dict[str, Any]] = []
+
+    for index, raw_line in enumerate(lines):
+        body, eol = split_line(raw_line)
+        match = PLAIN_ENV.fullmatch(body)
         if not match:
             for key in TARGET_ORDER:
-                if line.lstrip().startswith(key):
+                if body.lstrip().startswith(key):
                     fail("ENV_TARGET_LINE_INVALID", f"target variable {key} must use plain KEY=VALUE syntax")
             continue
         key, value = match.group(1), match.group(2)
-        if key in TARGET:
-            if key in seen:
-                fail("ENV_TARGET_DUPLICATE", f"target variable {key} occurs more than once")
-            seen[key] = idx
-            values[key] = value
+        if key not in TARGET:
+            continue
+        if key in seen:
+            fail("ENV_TARGET_DUPLICATE", f"target variable {key} occurs more than once")
+        seen[key] = index
+        values[key] = value
+        patches.append({
+            "key": key,
+            "originalPresent": True,
+            "originalLineIndex": index,
+            "originalValue": value,
+            "originalLineEnding": "CRLF" if eol == "\r\n" else "LF" if eol == "\n" else "NONE",
+            "targetValue": TARGET[key],
+        })
+
     if values.get("PRIVACY_BACKUP_STATE") != "DISABLED":
         fail("BACKUP_CAPABILITY_NOT_DISABLED", "activation planning requires PRIVACY_BACKUP_STATE=DISABLED")
 
-    result = list(lines)
-    for key in TARGET_ORDER:
-        replacement = f"{key}={TARGET[key]}"
-        if key in seen:
-            result[seen[key]] = replacement
-        else:
-            result.append(replacement)
-    return ("\n".join(result) + "\n").encode("utf-8"), values
+    append_eol = choose_append_eol(lines)
+    original_had_trailing_eol = bool(text.endswith("\n"))
+    target_lines = list(lines)
+
+    for patch in patches:
+        index = patch["originalLineIndex"]
+        _, eol = split_line(target_lines[index])
+        target_lines[index] = f"{patch['key']}={patch['targetValue']}{eol}"
+
+    missing = [key for key in TARGET_ORDER if key not in seen]
+    if missing and target_lines and split_line(target_lines[-1])[1] == "":
+        target_lines[-1] = target_lines[-1] + append_eol
+
+    for key in missing:
+        index = len(target_lines)
+        target_lines.append(f"{key}={TARGET[key]}{append_eol}")
+        patches.append({
+            "key": key,
+            "originalPresent": False,
+            "originalLineIndex": None,
+            "originalValue": None,
+            "originalLineEnding": None,
+            "targetValue": TARGET[key],
+            "targetAppendedLineIndex": index,
+        })
+
+    patch_by_key = {item["key"]: item for item in patches}
+    ordered_patches = [patch_by_key[key] for key in TARGET_ORDER]
+    target_raw = "".join(target_lines).encode("utf-8")
+    rollback = {
+        "strategy": "REVERSE_ONLY_BOUND_BACKUP_PRIVACY_LINES_V1",
+        "originalHadTrailingLineEnding": original_had_trailing_eol,
+        "appendLineEnding": "CRLF" if append_eol == "\r\n" else "LF",
+        "patches": ordered_patches,
+    }
+    return target_raw, ordered_patches, rollback
 
 
 def verify_attestation(checker: Path, attestation: Path, key_file: Path) -> dict[str, Any]:
@@ -124,7 +185,7 @@ def safe_output_dir(path: Path) -> None:
     os.chmod(path, 0o700)
 
 
-def make_record(env_path: Path, raw: bytes, target_raw: bytes, attestation_path: Path, att: dict[str, Any]) -> dict[str, Any]:
+def make_record(env_path: Path, raw: bytes, target_raw: bytes, rollback: dict[str, Any], attestation_path: Path, att: dict[str, Any]) -> dict[str, Any]:
     attestation_id = att.get("attestationId")
     attestation_fp = att.get("attestationFingerprint")
     if not isinstance(attestation_id, str) or not ATTESTATION_ID.fullmatch(attestation_id):
@@ -139,10 +200,11 @@ def make_record(env_path: Path, raw: bytes, target_raw: bytes, attestation_path:
         "currentEnvFingerprint": sha256_bytes(raw),
         "targetEnvFingerprint": sha256_bytes(target_raw),
         "activationTarget": TARGET,
+        "rollbackDescriptor": rollback,
     }
     activation_id = "activation-" + hashlib.sha256(canonical_json(binding).encode()).hexdigest()[:32]
     record: dict[str, Any] = {
-        "activationPlanVersion": 1,
+        "activationPlanVersion": PLAN_VERSION,
         "activationId": activation_id,
         **binding,
         "expectedPreState": "DISABLED",
@@ -150,6 +212,8 @@ def make_record(env_path: Path, raw: bytes, target_raw: bytes, attestation_path:
         "atomicReplaceRequired": True,
         "postWriteRuntimeAttestationRequired": True,
         "rollbackOnValidationFailureRequired": True,
+        "exactRollbackReconstructionRequired": True,
+        "nonTargetEnvBytesMustRemainUnchanged": True,
         "runtimeConfigurationChanged": False,
         "activationExecuted": False,
     }
@@ -193,19 +257,21 @@ def main() -> int:
     try:
         att = verify_attestation(args.attestation_checker, args.attestation, args.key_file)
         raw = read_env(args.env_file)
-        target_raw, _ = build_target_env(raw)
+        target_raw, _, rollback = build_reversible_target_env(raw)
         safe_output_dir(args.output_dir)
         key = read_key(args.key_file)
-        record = make_record(args.env_file, raw, target_raw, args.attestation, att)
+        record = make_record(args.env_file, raw, target_raw, rollback, args.attestation, att)
         envelope = {"envelopeVersion": 1, "record": record, "signature": sign_record(record, key)}
         path, created = persist(args.output_dir, envelope)
         print(json.dumps({
             "mode": "BACKUP_PRIVACY_ACTIVATION_PLAN",
             "status": "ACTIVATION_PLAN_READY",
+            "activationPlanVersion": PLAN_VERSION,
             "activationId": record["activationId"],
             "planFingerprint": record["planFingerprint"],
             "currentEnvFingerprint": record["currentEnvFingerprint"],
             "targetEnvFingerprint": record["targetEnvFingerprint"],
+            "rollbackStrategy": rollback["strategy"],
             "planPath": str(path),
             "planCreated": created,
             "planReused": not created,
