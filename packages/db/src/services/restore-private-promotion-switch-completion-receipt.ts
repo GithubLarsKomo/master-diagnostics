@@ -155,13 +155,18 @@ function verifyHealthcheck(
 
 function requireCandidateSelectedEvent(
   events: readonly Readonly<SignedRestorePrivatePromotionSwitchExecutionEventEnvelope>[],
+  allowCompleted: boolean,
 ): Readonly<SignedRestorePrivatePromotionSwitchExecutionEventEnvelope> {
+  const candidateSelected = events.find((event) => event.record.phase === 'CANDIDATE_SELECTED');
   const last = events.at(-1);
-  if (!last || last.record.phase !== 'CANDIDATE_SELECTED' || last.record.targetVolumeSet !== 'CANDIDATE') {
-    throw new Error('Restore promotion completion receipt requires CANDIDATE_SELECTED as latest execution evidence');
+  if (!candidateSelected || candidateSelected.record.targetVolumeSet !== 'CANDIDATE' || !last) {
+    throw new Error('Restore promotion completion receipt requires CANDIDATE_SELECTED execution evidence');
   }
-  assertHmac(last.signature, 'Candidate-selected event signature');
-  return last;
+  if (last.record.phase !== 'CANDIDATE_SELECTED' && !(allowCompleted && last.record.phase === 'COMPLETED')) {
+    throw new Error('Restore promotion completion receipt is incompatible with rollback or non-completion execution evidence');
+  }
+  assertHmac(candidateSelected.signature, 'Candidate-selected event signature');
+  return candidateSelected;
 }
 
 function validateRecord(
@@ -238,7 +243,7 @@ export function createRestorePrivatePromotionSwitchCompletionReceiptRecord(
   healthcheck: Readonly<RestorePrivatePromotionPostSwitchHealthcheck>,
   completedAt: string,
 ): Readonly<RestorePrivatePromotionSwitchCompletionReceiptRecord> {
-  const candidateSelected = requireCandidateSelectedEvent(events);
+  const candidateSelected = requireCandidateSelectedEvent(events, false);
   verifyHealthcheck(healthcheck, journal);
   assertTimestamp(completedAt, 'Restore promotion completion receipt completedAt');
   const record = Object.freeze({
@@ -277,7 +282,7 @@ export async function readVerifiedRestorePrivatePromotionSwitchCompletionReceipt
   if (basename(filePath) !== RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_FILE_NAME) {
     throw new Error('Restore promotion completion receipt file name is invalid');
   }
-  const candidateSelected = requireCandidateSelectedEvent(events);
+  const candidateSelected = requireCandidateSelectedEvent(events, true);
   const stat = await lstat(filePath);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Restore promotion completion receipt must be a regular file');
   const parsed = JSON.parse(await readFile(filePath, 'utf8')) as Partial<SignedRestorePrivatePromotionSwitchCompletionReceiptEnvelope>;
