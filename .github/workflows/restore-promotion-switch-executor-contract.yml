@@ -48,6 +48,7 @@ jobs:
           assert 'persist_event ROLLBACK_VERIFIED' in executor
           assert 'create_completion_receipt' in executor
           assert executor.index('create_completion_receipt') < executor.rindex('persist_event COMPLETED')
+          assert '--allow-explicit-volume-name-drift' in executor
           assert 'docker volume rm' not in executor
           assert 'docker volume create' not in executor
           assert 'docker cp ' not in executor
@@ -158,7 +159,8 @@ jobs:
           docker inspect "$(docker compose -p "$project" -f "$root/compose.yml" ps -q app)" >"$root/app-inspect.json"
           docker inspect "$(docker compose -p "$project" -f "$root/compose.yml" ps -q libsql)" >"$root/libsql-inspect.json"
           python3 infra/backup/resolve-active-club-volumes.py \
-            --compose-json "$root/compose.json" --app-inspect-json "$root/app-inspect.json" --libsql-inspect-json "$root/libsql-inspect.json" --format lines >"$root/current.txt"
+            --compose-json "$root/compose.json" --app-inspect-json "$root/app-inspect.json" --libsql-inspect-json "$root/libsql-inspect.json" \
+            --allow-explicit-volume-name-drift --format lines >"$root/current.txt"
           diff -u <(printf '%s\n' "${cand[@]}") "$root/current.txt"
           for service in export-cleanup retention-scan caddy; do docker inspect "$(docker compose -p "$project" -f "$root/compose.yml" ps -q "$service")" >"$root/${service}-inspect.json"; done
           docker volume inspect "${rb[@]}" >"$root/rollback-inspect.json"
@@ -191,7 +193,8 @@ jobs:
           docker inspect "$(docker compose -p "$project" -f "$root/compose.yml" ps -q app)" >"$root/app-inspect.json"
           docker inspect "$(docker compose -p "$project" -f "$root/compose.yml" ps -q libsql)" >"$root/libsql-inspect.json"
           python3 infra/backup/resolve-active-club-volumes.py \
-            --compose-json "$root/compose.json" --app-inspect-json "$root/app-inspect.json" --libsql-inspect-json "$root/libsql-inspect.json" --format lines >"$root/current.txt"
+            --compose-json "$root/compose.json" --app-inspect-json "$root/app-inspect.json" --libsql-inspect-json "$root/libsql-inspect.json" \
+            --allow-explicit-volume-name-drift --format lines >"$root/current.txt"
           diff -u <(printf '%s\n' "${rb[@]}") "$root/current.txt"
           test "$(docker compose -p "$project" -f "$root/compose.yml" ps -q caddy)" = "$caddy_before"
 
