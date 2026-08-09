@@ -4,16 +4,24 @@ on:
   pull_request:
     paths:
       - '.github/workflows/restore-promotion-switch-completion-receipt-contract.yml'
+      - 'packages/db/package.json'
+      - 'packages/db/src/index.ts'
       - 'packages/db/src/services/restore-private-promotion-switch-completion-receipt.ts'
       - 'packages/db/src/prepare-restore-private-promotion-switch-completion-receipt.ts'
+      - 'packages/db/src/record-restore-private-promotion-switch-event.ts'
+      - 'packages/db/src/assess-restore-private-promotion-switch-execution.ts'
       - 'packages/db/test/restore-private-promotion-switch-completion-receipt.test.ts'
       - 'docs/restore-private-promotion-switch-completion-receipt.md'
   push:
     branches: [main]
     paths:
       - '.github/workflows/restore-promotion-switch-completion-receipt-contract.yml'
+      - 'packages/db/package.json'
+      - 'packages/db/src/index.ts'
       - 'packages/db/src/services/restore-private-promotion-switch-completion-receipt.ts'
       - 'packages/db/src/prepare-restore-private-promotion-switch-completion-receipt.ts'
+      - 'packages/db/src/record-restore-private-promotion-switch-event.ts'
+      - 'packages/db/src/assess-restore-private-promotion-switch-execution.ts'
       - 'packages/db/test/restore-private-promotion-switch-completion-receipt.test.ts'
       - 'docs/restore-private-promotion-switch-completion-receipt.md'
 
@@ -37,12 +45,18 @@ jobs:
       - name: Verify signed completion receipt contract
         run: pnpm --filter @masters/db exec vitest run test/restore-private-promotion-switch-completion-receipt.test.ts
 
-      - name: Verify receipt core is evidence-only
+      - name: Verify receipt is mandatory for operational completion
         run: |
           python3 - <<'PY'
           from pathlib import Path
+
           core = Path('packages/db/src/services/restore-private-promotion-switch-completion-receipt.ts').read_text()
-          cli = Path('packages/db/src/prepare-restore-private-promotion-switch-completion-receipt.ts').read_text()
+          receipt_cli = Path('packages/db/src/prepare-restore-private-promotion-switch-completion-receipt.ts').read_text()
+          event_cli = Path('packages/db/src/record-restore-private-promotion-switch-event.ts').read_text()
+          assessment_cli = Path('packages/db/src/assess-restore-private-promotion-switch-execution.ts').read_text()
+          package = Path('packages/db/package.json').read_text()
+          index = Path('packages/db/src/index.ts').read_text()
+
           for token in (
               'SIGNED_SWITCH_RECEIPT_AFTER_POST_SWITCH_HEALTHCHECK',
               'CANDIDATE_SELECTED',
@@ -52,8 +66,20 @@ jobs:
               'productionMutationCompleted',
               'promotionExecuted',
           ):
-              assert token in core or token in cli
-          combined = core + '\n' + cli
+              assert token in core or token in receipt_cli
+
+          assert 'backup:restore-promotion-switch-completion-receipt' in package
+          assert "restore-private-promotion-switch-completion-receipt" in index
+          assert 'RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_DIR' not in receipt_cli
+          assert 'RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR' in receipt_cli
+          assert "phase === 'COMPLETED'" in event_cli
+          assert 'readVerifiedRestorePrivatePromotionSwitchCompletionReceipt' in event_cli
+          assert "assessment.status === 'COMPLETED'" in assessment_cli
+          assert 'readVerifiedRestorePrivatePromotionSwitchCompletionReceipt' in assessment_cli
+          assert 'completionReceiptVerified' in event_cli
+          assert 'completionReceiptVerified' in assessment_cli
+
+          combined = core + '\n' + receipt_cli
           for forbidden in (
               'docker compose',
               'docker volume',
