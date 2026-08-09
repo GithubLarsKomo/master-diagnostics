@@ -37,6 +37,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
       - name: Verify syntax and bounded mutation surface
         run: |
           bash -n infra/backup/check-backup-privacy-runtime.sh
@@ -45,17 +56,56 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           text=Path('infra/backup/execute-backup-privacy-activation.py').read_text()
+          checker=Path('infra/backup/check-backup-privacy-runtime.sh').read_text()
           assert 'os.replace(' in text
           assert 'fcntl.flock' in text
           assert 'os.fsync' in text
           assert 'ROLLBACK_STARTED' in text
           assert 'ROLLBACK_VERIFIED' in text
           assert 'COMPLETED' in text
+          assert 'LIVE_RUNTIME_ATTESTATION_REQUIRED' in checker
+          assert 'STATIC_ENV_POLICY_ONLY' in checker
           for forbidden in ('docker compose','docker volume','compose restart','compose up'):
               assert forbidden not in text, forbidden
           PY
 
-      - name: Verify target, crash-retry, rollback, drift and tamper contracts
+      - name: Verify canonical checker cannot authorize ENABLED from static env values
+        run: |
+          set -Eeuo pipefail
+          set +e
+          PRIVACY_BACKUP_STATE=ENABLED \
+          PRIVACY_BACKUP_POLICY_VERSION=1.0.0 \
+          PRIVACY_BACKUP_ENCRYPTED_AT_REST=true \
+          PRIVACY_BACKUP_BOUNDED_RETENTION_CONFIGURED=true \
+          PRIVACY_BACKUP_RESTORE_RECONCILIATION=true \
+            bash infra/backup/check-backup-privacy-runtime.sh >/tmp/static-enabled.json
+          code=$?
+          set -e
+          test "$code" -ne 0
+          python3 - <<'PY'
+          import json
+          result=json.load(open('/tmp/static-enabled.json'))
+          assert result['readyForIrreversibleProcessing'] is False
+          assert result['backupState']=='ENABLED'
+          assert result['attestationScope']=='STATIC_ENV_POLICY_ONLY'
+          assert result['blockers']==['LIVE_RUNTIME_ATTESTATION_REQUIRED']
+          PY
+
+      - name: Verify canonical checker still supports DISABLED rollback policy validation
+        run: |
+          set -Eeuo pipefail
+          PRIVACY_BACKUP_STATE=DISABLED \
+          PRIVACY_NOTIFICATIONS_STATE=DISABLED \
+            bash infra/backup/check-backup-privacy-runtime.sh >/tmp/static-disabled.json
+          python3 - <<'PY'
+          import json
+          result=json.load(open('/tmp/static-disabled.json'))
+          assert result['readyForIrreversibleProcessing'] is True
+          assert result['backupState']=='DISABLED'
+          assert result['blockers']==[]
+          PY
+
+      - name: Verify target, crash-retry, rollback, drift and tamper contracts with explicit simulated live checker
         run: bash infra/backup/test-backup-privacy-activation-executor.sh
 
       - name: Verify release and operational gates remain open
