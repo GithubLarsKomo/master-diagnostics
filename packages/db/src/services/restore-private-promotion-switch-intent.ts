@@ -104,7 +104,7 @@ function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(',')}]`;
   const object = value as Record<string, unknown>;
   return `{${Object.keys(object)
-    .sort((left, right) => left.localeCompare(right))
+    .sort()
     .map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`)
     .join(',')}}`;
 }
