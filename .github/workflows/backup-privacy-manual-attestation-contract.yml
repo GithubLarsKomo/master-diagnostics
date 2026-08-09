@@ -26,6 +26,8 @@ on:
 jobs:
   contract:
     runs-on: ubuntu-latest
+    env:
+      PRIVACY_BACKUP_STATE: DISABLED
     steps:
       - uses: actions/checkout@v4
 
@@ -49,18 +51,14 @@ jobs:
           PY
           chmod 600 "$root/drill.key" "$root/attestation.key" "$root/phases.json"
           python3 infra/backup/write-restore-rto-drill-report.py \
-            --output-dir "$root/reports" \
-            --key-file "$root/drill.key" \
+            --output-dir "$root/reports" --key-file "$root/drill.key" \
             --drill-id drill-11111111111111111111111111111111 \
             --bundle-name masters-backup-20260809T100000Z-11111111-1111-1111-1111-111111111111.mdbak \
             --bundle-sha256 sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
             --staging-name restore-20260809T100100Z-22222222-2222-2222-2222-222222222222 \
             --candidate-set-id restore-0123456789abcdefabcd \
-            --started-at 2026-08-09T10:00:00.000Z \
-            --completed-at 2026-08-09T10:02:00.000Z \
-            --duration-seconds 120 \
-            --status COMPLETED \
-            --terminal-phase EXECUTE_SWITCH \
+            --started-at 2026-08-09T10:00:00.000Z --completed-at 2026-08-09T10:02:00.000Z \
+            --duration-seconds 120 --status COMPLETED --terminal-phase EXECUTE_SWITCH \
             --phases-file "$root/phases.json" >/dev/null
 
       - name: Create and verify signed manual attestation
@@ -70,18 +68,14 @@ jobs:
           python3 infra/backup/write-backup-privacy-manual-attestation.py \
             --readiness-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-readiness.py" \
             --drill-report "$root/reports/drill-11111111111111111111111111111111.json" \
-            --drill-key-file "$root/drill.key" \
-            --attestation-key-file "$root/attestation.key" \
+            --drill-key-file "$root/drill.key" --attestation-key-file "$root/attestation.key" \
             --output-dir "$root/attestations" \
             --attestation-id attestation-22222222222222222222222222222222 \
-            --attestor-id ci-operator \
-            --attested-at 2026-08-09T10:05:00.000Z \
-            --acknowledge-operational-responsibility \
-            >"$root/writer.json"
+            --attestor-id ci-operator --attested-at 2026-08-09T10:05:00.000Z \
+            --acknowledge-operational-responsibility >"$root/writer.json"
           python3 infra/backup/check-backup-privacy-manual-attestation.py \
             --attestation "$root/attestations/attestation-22222222222222222222222222222222.json" \
-            --key-file "$root/attestation.key" \
-            >"$root/verified.json"
+            --key-file "$root/attestation.key" >"$root/verified.json"
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -130,20 +124,31 @@ jobs:
           test "$code" -ne 0
           grep -q 'ATTESTATION_CONFLICT' /tmp/conflict.err
 
-      - name: Verify explicit operational acknowledgement is mandatory
+      - name: Verify explicit acknowledgement and real disabled state are mandatory
         run: |
-          set +e
+          set -Eeuo pipefail
           root=/tmp/backup-privacy-attestation
+          set +e
           python3 infra/backup/write-backup-privacy-manual-attestation.py \
             --readiness-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-readiness.py" \
             --drill-report "$root/reports/drill-11111111111111111111111111111111.json" \
             --drill-key-file "$root/drill.key" --attestation-key-file "$root/attestation.key" \
             --output-dir "$root/attestations" --attestation-id attestation-33333333333333333333333333333333 \
             --attestor-id ci-operator --attested-at 2026-08-09T10:06:00.000Z >/tmp/no-ack.out 2>/tmp/no-ack.err
-          code=$?
+          no_ack=$?
+          PRIVACY_BACKUP_STATE=ENABLED python3 infra/backup/write-backup-privacy-manual-attestation.py \
+            --readiness-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-readiness.py" \
+            --drill-report "$root/reports/drill-11111111111111111111111111111111.json" \
+            --drill-key-file "$root/drill.key" --attestation-key-file "$root/attestation.key" \
+            --output-dir "$root/attestations" --attestation-id attestation-44444444444444444444444444444444 \
+            --attestor-id ci-operator --attested-at 2026-08-09T10:07:00.000Z \
+            --acknowledge-operational-responsibility >/tmp/enabled.out 2>/tmp/enabled.err
+          enabled=$?
           set -e
-          test "$code" -ne 0
+          test "$no_ack" -ne 0
+          test "$enabled" -ne 0
           grep -q 'OPERATIONAL_ACKNOWLEDGEMENT_REQUIRED' /tmp/no-ack.err
+          grep -q 'READINESS_NOT_MET' /tmp/enabled.err
 
       - name: Verify HMAC or content tampering is blocked
         run: |
@@ -151,19 +156,18 @@ jobs:
           root=/tmp/backup-privacy-attestation
           mkdir -p "$root/tampered"
           cp "$root/attestations/attestation-22222222222222222222222222222222.json" \
-             "$root/tampered/attestation-44444444444444444444444444444444.json"
-          chmod 600 "$root/tampered/attestation-44444444444444444444444444444444.json"
+             "$root/tampered/attestation-55555555555555555555555555555555.json"
+          chmod 600 "$root/tampered/attestation-55555555555555555555555555555555.json"
           python3 - <<'PY'
           import json
           from pathlib import Path
-          p=Path('/tmp/backup-privacy-attestation/tampered/attestation-44444444444444444444444444444444.json')
-          d=json.loads(p.read_text())
-          d['record']['attestorId']='tampered-operator'
+          p=Path('/tmp/backup-privacy-attestation/tampered/attestation-55555555555555555555555555555555.json')
+          d=json.loads(p.read_text()); d['record']['attestorId']='tampered-operator'
           p.write_text(json.dumps(d,indent=2)+'\n')
           PY
           set +e
           python3 infra/backup/check-backup-privacy-manual-attestation.py \
-            --attestation "$root/tampered/attestation-44444444444444444444444444444444.json" \
+            --attestation "$root/tampered/attestation-55555555555555555555555555555555.json" \
             --key-file "$root/attestation.key" >"$root/tampered-result.json"
           code=$?
           set -e
@@ -181,12 +185,10 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          paths=[
-            Path('infra/backup/write-backup-privacy-manual-attestation.py'),
-            Path('infra/backup/check-backup-privacy-manual-attestation.py'),
-          ]
-          combined='\n'.join(p.read_text() for p in paths)
-          for token in ('docker compose','docker volume','sed -i','.env','PRIVACY_BACKUP_STATE=ENABLED'):
+          combined='\n'.join(Path(p).read_text() for p in (
+            'infra/backup/write-backup-privacy-manual-attestation.py',
+            'infra/backup/check-backup-privacy-manual-attestation.py'))
+          for token in ('docker compose','docker volume','sed -i','PRIVACY_BACKUP_STATE=ENABLED'):
             assert token not in combined
           assert 'runtimeConfigurationChanged' in combined
           assert 'automaticActivationPerformed' in combined
