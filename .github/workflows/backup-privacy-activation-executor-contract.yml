@@ -1,0 +1,322 @@
+name: Backup Privacy Activation Executor Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-activation-executor-contract.yml'
+      - 'infra/backup/execute-backup-privacy-activation.py'
+      - 'infra/backup/check-backup-privacy-runtime-env.py'
+      - 'infra/backup/backup-privacy-activation-execution.py'
+      - 'infra/backup/prepare-backup-privacy-activation-plan.py'
+      - 'infra/backup/check-backup-privacy-activation-plan.py'
+      - 'docs/backup-privacy-activation-executor.md'
+      - '.env.example'
+      - 'TASKS.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-activation-executor-contract.yml'
+      - 'infra/backup/execute-backup-privacy-activation.py'
+      - 'infra/backup/check-backup-privacy-runtime-env.py'
+      - 'infra/backup/backup-privacy-activation-execution.py'
+      - 'infra/backup/prepare-backup-privacy-activation-plan.py'
+      - 'infra/backup/check-backup-privacy-activation-plan.py'
+      - 'docs/backup-privacy-activation-executor.md'
+      - '.env.example'
+      - 'TASKS.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    env:
+      PRIVACY_BACKUP_STATE: DISABLED
+      ROOT: /tmp/backup-privacy-activation-executor
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify Python syntax and bounded mutation surface
+        run: |
+          python3 -m py_compile \
+            infra/backup/check-backup-privacy-runtime-env.py \
+            infra/backup/execute-backup-privacy-activation.py
+          python3 - <<'PY'
+          from pathlib import Path
+          executor=Path('infra/backup/execute-backup-privacy-activation.py').read_text()
+          checker=Path('infra/backup/check-backup-privacy-runtime-env.py').read_text()
+          assert 'os.replace(' in executor
+          assert 'os.fsync(' in executor
+          assert 'ROLLBACK_STARTED' in executor
+          assert 'activation-completed.json' in executor
+          assert 'activation-rolled-back.json' in executor
+          assert 'privacy-capabilities:check' in checker
+          for text in (executor,checker):
+              assert 'docker compose' not in text
+              assert 'docker volume' not in text
+              assert '/var/lib/sqld' not in text
+          PY
+
+      - name: Prepare signed operational evidence for isolated env cases
+        run: |
+          set -Eeuo pipefail
+          root="$ROOT"
+          rm -rf "$root"
+          mkdir -p "$root/reports" "$root/attestations"
+          chmod 700 "$root/reports" "$root/attestations"
+          python3 - <<'PY'
+          import base64,json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT'])
+          root.joinpath('key').write_text(base64.b64encode(bytes([97])*32).decode()+'\n')
+          phases=[{'name':n,'status':'COMPLETED','durationSeconds':10,'exitCode':0} for n in ('VERIFY_BACKUP','STAGE_RESTORE','PRIVACY_REPLAY','AUTHORIZE_PROMOTION','PREPARE_PROMOTION_PLAN','PREPARE_CANDIDATES','AUTHORIZE_SWITCH','EXECUTE_SWITCH')]
+          root.joinpath('phases.json').write_text(json.dumps(phases)+'\n')
+          root.joinpath('original.env').write_text('APP_HOST=localhost\nBETTER_AUTH_SECRET=ci-secret-value\nPRIVACY_BACKUP_STATE=DISABLED\nPRIVACY_NOTIFICATIONS_STATE=DISABLED\n')
+          PY
+          chmod 600 "$root/key" "$root/phases.json" "$root/original.env"
+          python3 infra/backup/write-restore-rto-drill-report.py \
+            --output-dir "$root/reports" --key-file "$root/key" \
+            --drill-id drill-55555555555555555555555555555555 \
+            --bundle-name masters-backup-20260810T000000Z-55555555-5555-5555-5555-555555555555.mdbak \
+            --bundle-sha256 sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --staging-name restore-20260810T000100Z-66666666-6666-6666-6666-666666666666 \
+            --candidate-set-id restore-0123456789abcdefabcd \
+            --started-at 2026-08-10T00:00:00.000Z --completed-at 2026-08-10T00:02:00.000Z \
+            --duration-seconds 120 --status COMPLETED --terminal-phase EXECUTE_SWITCH \
+            --phases-file "$root/phases.json" >/dev/null
+          python3 infra/backup/write-backup-privacy-manual-attestation.py \
+            --readiness-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-readiness.py" \
+            --drill-report "$root/reports/drill-55555555555555555555555555555555.json" \
+            --drill-key-file "$root/key" --attestation-key-file "$root/key" \
+            --output-dir "$root/attestations" --attestation-id attestation-66666666666666666666666666666666 \
+            --attestor-id ci-operator --attested-at 2026-08-10T00:05:00.000Z \
+            --acknowledge-operational-responsibility >/dev/null
+
+          for case in success crash rollback rollback-crash drift; do
+            cp "$root/original.env" "$root/$case.env"
+            chmod 600 "$root/$case.env"
+            mkdir -p "$root/$case-plans" "$root/$case-executions"
+            chmod 700 "$root/$case-plans" "$root/$case-executions"
+            python3 infra/backup/prepare-backup-privacy-activation-plan.py \
+              --attestation-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-manual-attestation.py" \
+              --attestation "$root/attestations/attestation-66666666666666666666666666666666.json" \
+              --key-file "$root/key" --env-file "$root/$case.env" --output-dir "$root/$case-plans" >"$root/$case-plan-output.json"
+            plan=$(python3 -c "import json;print(json.load(open('$root/$case-plan-output.json'))['planPath'])")
+            python3 infra/backup/backup-privacy-activation-execution.py prepare \
+              --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+              --plan "$plan" --key-file "$root/key" --env-file "$root/$case.env" \
+              --output-root "$root/$case-executions" --started-at 2026-08-10T00:06:00.000Z >"$root/$case-pending-output.json"
+            pending=$(python3 -c "import json;print(json.load(open('$root/$case-pending-output.json'))['executionPath'])")
+            printf '%s\n' "$plan" >"$root/$case-plan-path"
+            printf '%s\n' "$pending" >"$root/$case-pending-path"
+          done
+
+      - name: Verify real runtime checker against signed DISABLED pre-state
+        run: |
+          python3 infra/backup/check-backup-privacy-runtime-env.py \
+            --repo-root "$GITHUB_WORKSPACE" --env-file "$ROOT/success.env" --expected-backup-state DISABLED >"$ROOT/pre-runtime.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads(Path(os.environ['ROOT']+'/pre-runtime.json').read_text())
+          assert r['status']=='RUNTIME_PRIVACY_VERIFIED'
+          assert r['backupState']=='DISABLED'
+          assert r['readyForIrreversibleProcessing'] is True
+          assert r['blockers']==[]
+          assert r['attestationFingerprint'].startswith('sha256:')
+          PY
+
+      - name: Verify atomic success path and idempotent terminal retry
+        run: |
+          set -Eeuo pipefail
+          root="$ROOT"; plan=$(cat "$root/success-plan-path"); pending=$(cat "$root/success-pending-path")
+          before_secret=$(grep '^BETTER_AUTH_SECRET=' "$root/success.env")
+          python3 infra/backup/execute-backup-privacy-activation.py \
+            --execution-checker "$GITHUB_WORKSPACE/infra/backup/backup-privacy-activation-execution.py" \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --runtime-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-runtime-env.py" \
+            --repo-root "$GITHUB_WORKSPACE" --plan "$plan" --key-file "$root/key" \
+            --env-file "$root/success.env" --pending-execution "$pending" >"$root/success-result.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT']); r=json.loads(root.joinpath('success-result.json').read_text())
+          assert r['status']=='COMPLETED'
+          assert r['runtimeConfigurationChanged'] is True and r['activationExecuted'] is True
+          assert r['envMutationPerformed'] is True and r['rollbackPerformed'] is False
+          env=root.joinpath('success.env').read_text()
+          assert 'PRIVACY_BACKUP_STATE=ENABLED' in env
+          assert 'PRIVACY_BACKUP_POLICY_VERSION=1.0.0' in env
+          assert 'BETTER_AUTH_SECRET=ci-secret-value' in env
+          PY
+          after_secret=$(grep '^BETTER_AUTH_SECRET=' "$root/success.env")
+          test "$before_secret" = "$after_secret"
+          test "$(stat -c '%a' "$root/success.env")" = 600
+          test "$(stat -c '%a' "$(dirname "$pending")/activation-mutation-started.json")" = 600
+          test "$(stat -c '%a' "$(dirname "$pending")/activation-completed.json")" = 600
+
+          python3 infra/backup/execute-backup-privacy-activation.py \
+            --execution-checker "$GITHUB_WORKSPACE/infra/backup/backup-privacy-activation-execution.py" \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --runtime-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-runtime-env.py" \
+            --repo-root "$GITHUB_WORKSPACE" --plan "$plan" --key-file "$root/key" \
+            --env-file "$root/success.env" --pending-execution "$pending" >"$root/success-retry.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads(Path(os.environ['ROOT']+'/success-retry.json').read_text())
+          assert r['status']=='COMPLETED' and r['envMutationPerformed'] is False and r['activationExecuted'] is True
+          PY
+
+      - name: Recover crash after atomic target write without rewriting target
+        run: |
+          set -Eeuo pipefail
+          root="$ROOT"; plan=$(cat "$root/crash-plan-path"); pending=$(cat "$root/crash-pending-path")
+          python3 - "$GITHUB_WORKSPACE" "$plan" "$root/key" "$root/crash.env" "$pending" <<'PY'
+          import argparse,importlib.util,sys
+          from pathlib import Path
+          repo=Path(sys.argv[1]); plan=Path(sys.argv[2]); key=Path(sys.argv[3]); env=Path(sys.argv[4]); pending=Path(sys.argv[5])
+          p=repo/'infra/backup/execute-backup-privacy-activation.py'; spec=importlib.util.spec_from_file_location('executor',p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          args=argparse.Namespace(
+              execution_checker=repo/'infra/backup/backup-privacy-activation-execution.py',
+              plan_checker=repo/'infra/backup/check-backup-privacy-activation-plan.py',
+              runtime_checker=repo/'infra/backup/check-backup-privacy-runtime-env.py',
+              repo_root=repo,plan=plan,key_file=key,env_file=env,pending_execution=pending,
+          )
+          ctx=m.load_context(args); k=m.read_key(key); ok,att,_=m.runtime_attestation(args,'DISABLED'); assert ok
+          started=m.ensure_receipt(ctx,k,'MUTATION_STARTED',None,attestation_fingerprint=att['attestationFingerprint'])
+          raw,_=m.read_env(env); target=m.reconstruct_target(raw,ctx['record']); m.atomic_replace_env(env,ctx['record']['currentEnvFingerprint'],target,ctx['record']['targetEnvFingerprint'])
+          print(started['signature'])
+          PY
+          target_before=$(sha256sum "$root/crash.env" | awk '{print $1}')
+          python3 infra/backup/execute-backup-privacy-activation.py \
+            --execution-checker "$GITHUB_WORKSPACE/infra/backup/backup-privacy-activation-execution.py" \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --runtime-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-runtime-env.py" \
+            --repo-root "$GITHUB_WORKSPACE" --plan "$plan" --key-file "$root/key" \
+            --env-file "$root/crash.env" --pending-execution "$pending" >"$root/crash-result.json"
+          target_after=$(sha256sum "$root/crash.env" | awk '{print $1}')
+          test "$target_before" = "$target_after"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads(Path(os.environ['ROOT']+'/crash-result.json').read_text())
+          assert r['status']=='COMPLETED' and r['envMutationPerformed'] is False
+          PY
+
+      - name: Verify automatic byte-exact rollback on failed ENABLED runtime validation
+        run: |
+          set -Eeuo pipefail
+          root="$ROOT"; plan=$(cat "$root/rollback-plan-path"); pending=$(cat "$root/rollback-pending-path")
+          cat >"$root/fail-enabled-runtime.py" <<'PY'
+          #!/usr/bin/env python3
+          import argparse,os,subprocess,sys
+          p=argparse.ArgumentParser();p.add_argument('--repo-root');p.add_argument('--env-file');p.add_argument('--expected-backup-state');a=p.parse_args()
+          if a.expected_backup_state=='ENABLED':
+              print('{"mode":"BACKUP_PRIVACY_RUNTIME_ENV_ATTESTATION","status":"BLOCKED","blocker":"SIMULATED_ENABLED_VALIDATION_FAILURE","expectedBackupState":"ENABLED"}')
+              raise SystemExit(1)
+          real=os.environ['REAL_RUNTIME_CHECKER']
+          raise SystemExit(subprocess.run([sys.executable,real,'--repo-root',a.repo_root,'--env-file',a.env_file,'--expected-backup-state',a.expected_backup_state]).returncode)
+          PY
+          chmod 700 "$root/fail-enabled-runtime.py"
+          original=$(sha256sum "$root/rollback.env" | awk '{print $1}')
+          REAL_RUNTIME_CHECKER="$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-runtime-env.py" \
+          python3 infra/backup/execute-backup-privacy-activation.py \
+            --execution-checker "$GITHUB_WORKSPACE/infra/backup/backup-privacy-activation-execution.py" \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --runtime-checker "$root/fail-enabled-runtime.py" --repo-root "$GITHUB_WORKSPACE" \
+            --plan "$plan" --key-file "$root/key" --env-file "$root/rollback.env" --pending-execution "$pending" >"$root/rollback-result.json"
+          restored=$(sha256sum "$root/rollback.env" | awk '{print $1}')
+          test "$original" = "$restored"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT']); r=json.loads(root.joinpath('rollback-result.json').read_text())
+          assert r['status']=='ROLLED_BACK'
+          assert r['runtimeConfigurationChanged'] is False and r['activationExecuted'] is False
+          assert r['envMutationPerformed'] is True and r['rollbackPerformed'] is True
+          env=root.joinpath('rollback.env').read_text()
+          assert 'PRIVACY_BACKUP_STATE=DISABLED' in env and 'BETTER_AUTH_SECRET=ci-secret-value' in env
+          PY
+          test -f "$(dirname "$pending")/activation-rollback-started.json"
+          test -f "$(dirname "$pending")/activation-rolled-back.json"
+
+      - name: Recover crash after rollback bytes were restored before terminal receipt
+        run: |
+          set -Eeuo pipefail
+          root="$ROOT"; plan=$(cat "$root/rollback-crash-plan-path"); pending=$(cat "$root/rollback-crash-pending-path")
+          python3 - "$GITHUB_WORKSPACE" "$plan" "$root/key" "$root/rollback-crash.env" "$pending" <<'PY'
+          import argparse,importlib.util,sys
+          from pathlib import Path
+          repo=Path(sys.argv[1]); plan=Path(sys.argv[2]); key=Path(sys.argv[3]); env=Path(sys.argv[4]); pending=Path(sys.argv[5])
+          p=repo/'infra/backup/execute-backup-privacy-activation.py'; spec=importlib.util.spec_from_file_location('executor',p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          args=argparse.Namespace(execution_checker=repo/'infra/backup/backup-privacy-activation-execution.py',plan_checker=repo/'infra/backup/check-backup-privacy-activation-plan.py',runtime_checker=repo/'infra/backup/check-backup-privacy-runtime-env.py',repo_root=repo,plan=plan,key_file=key,env_file=env,pending_execution=pending)
+          ctx=m.load_context(args); k=m.read_key(key); ok,att,_=m.runtime_attestation(args,'DISABLED'); assert ok
+          started=m.ensure_receipt(ctx,k,'MUTATION_STARTED',None,attestation_fingerprint=att['attestationFingerprint'])
+          raw,_=m.read_env(env); target=m.reconstruct_target(raw,ctx['record']); m.atomic_replace_env(env,ctx['record']['currentEnvFingerprint'],target,ctx['record']['targetEnvFingerprint'])
+          rb=m.ensure_receipt(ctx,k,'ROLLBACK_STARTED',started['signature'],validation_evidence_sha256='sha256:'+'f'*64)
+          raw,_=m.read_env(env); restored=m.reconstruct_rollback(raw,ctx['record']); m.atomic_replace_env(env,ctx['record']['targetEnvFingerprint'],restored,ctx['record']['currentEnvFingerprint'])
+          print(rb['signature'])
+          PY
+          pre=$(sha256sum "$root/rollback-crash.env" | awk '{print $1}')
+          python3 infra/backup/execute-backup-privacy-activation.py \
+            --execution-checker "$GITHUB_WORKSPACE/infra/backup/backup-privacy-activation-execution.py" \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --runtime-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-runtime-env.py" \
+            --repo-root "$GITHUB_WORKSPACE" --plan "$plan" --key-file "$root/key" \
+            --env-file "$root/rollback-crash.env" --pending-execution "$pending" >"$root/rollback-crash-result.json"
+          post=$(sha256sum "$root/rollback-crash.env" | awk '{print $1}')
+          test "$pre" = "$post"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads(Path(os.environ['ROOT']+'/rollback-crash-result.json').read_text())
+          assert r['status']=='ROLLED_BACK' and r['rollbackPerformed'] is False
+          PY
+
+      - name: Verify drift and terminal receipt tampering fail closed
+        run: |
+          set -Eeuo pipefail
+          root="$ROOT"; plan=$(cat "$root/drift-plan-path"); pending=$(cat "$root/drift-pending-path")
+          sed -i 's/APP_HOST=localhost/APP_HOST=drift.example/' "$root/drift.env"
+          set +e
+          python3 infra/backup/execute-backup-privacy-activation.py \
+            --execution-checker "$GITHUB_WORKSPACE/infra/backup/backup-privacy-activation-execution.py" \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --runtime-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-runtime-env.py" \
+            --repo-root "$GITHUB_WORKSPACE" --plan "$plan" --key-file "$root/key" \
+            --env-file "$root/drift.env" --pending-execution "$pending" >"$root/drift-result.json"
+          code=$?; set -e; test "$code" -ne 0
+          grep -q 'ACTIVATION_EXECUTION_NOT_READY' "$root/drift-result.json"
+
+          success_pending=$(cat "$root/success-pending-path")
+          completion="$(dirname "$success_pending")/activation-completed.json"
+          python3 - "$completion" <<'PY'
+          import json,sys
+          from pathlib import Path
+          p=Path(sys.argv[1]); d=json.loads(p.read_text()); d['record']['recordedAt']='2026-08-10T00:10:00.000Z'; p.write_text(json.dumps(d,indent=2)+'\n'); p.chmod(0o600)
+          PY
+          set +e
+          python3 infra/backup/execute-backup-privacy-activation.py \
+            --execution-checker "$GITHUB_WORKSPACE/infra/backup/backup-privacy-activation-execution.py" \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --runtime-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-runtime-env.py" \
+            --repo-root "$GITHUB_WORKSPACE" --plan "$(cat "$root/success-plan-path")" --key-file "$root/key" \
+            --env-file "$root/success.env" --pending-execution "$success_pending" >"$root/tampered-result.json"
+          code=$?; set -e; test "$code" -ne 0
+          grep -q 'ACTIVATION_RECEIPT_SIGNATURE_MISMATCH' "$root/tampered-result.json"
+
+      - name: Verify repository release state is still not activated
+        run: |
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
