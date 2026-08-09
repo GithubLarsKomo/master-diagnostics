@@ -1,0 +1,240 @@
+name: Backup Privacy Activation Execution Evidence Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-activation-execution-evidence-contract.yml'
+      - 'infra/backup/backup-privacy-activation-execution.py'
+      - 'infra/backup/prepare-backup-privacy-activation-plan.py'
+      - 'infra/backup/check-backup-privacy-activation-plan.py'
+      - 'infra/backup/write-backup-privacy-manual-attestation.py'
+      - 'infra/backup/check-backup-privacy-manual-attestation.py'
+      - 'docs/backup-privacy-activation-execution.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-activation-execution-evidence-contract.yml'
+      - 'infra/backup/backup-privacy-activation-execution.py'
+      - 'infra/backup/prepare-backup-privacy-activation-plan.py'
+      - 'infra/backup/check-backup-privacy-activation-plan.py'
+      - 'infra/backup/write-backup-privacy-manual-attestation.py'
+      - 'infra/backup/check-backup-privacy-manual-attestation.py'
+      - 'docs/backup-privacy-activation-execution.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    env:
+      PRIVACY_BACKUP_STATE: DISABLED
+      ROOT: /tmp/backup-privacy-activation-execution
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare signed drill, attestation and reversible activation plan
+        run: |
+          set -Eeuo pipefail
+          root="$ROOT"
+          rm -rf "$root"
+          mkdir -p "$root/reports" "$root/attestations" "$root/plans" "$root/executions"
+          chmod 700 "$root/reports" "$root/attestations" "$root/plans" "$root/executions"
+          python3 - <<'PY'
+          import base64,json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT'])
+          root.joinpath('key').write_text(base64.b64encode(bytes([83])*32).decode()+'\n')
+          phases=[{'name':n,'status':'COMPLETED','durationSeconds':10,'exitCode':0} for n in ('VERIFY_BACKUP','STAGE_RESTORE','PRIVACY_REPLAY','AUTHORIZE_PROMOTION','PREPARE_PROMOTION_PLAN','PREPARE_CANDIDATES','AUTHORIZE_SWITCH','EXECUTE_SWITCH')]
+          root.joinpath('phases.json').write_text(json.dumps(phases)+'\n')
+          root.joinpath('club.env').write_text('APP_HOST=localhost\nBETTER_AUTH_SECRET=ci-secret-value\nPRIVACY_BACKUP_STATE=DISABLED\nPRIVACY_NOTIFICATIONS_STATE=DISABLED\n')
+          PY
+          chmod 600 "$root/key" "$root/phases.json" "$root/club.env"
+          python3 infra/backup/write-restore-rto-drill-report.py \
+            --output-dir "$root/reports" --key-file "$root/key" \
+            --drill-id drill-33333333333333333333333333333333 \
+            --bundle-name masters-backup-20260809T120000Z-33333333-3333-3333-3333-333333333333.mdbak \
+            --bundle-sha256 sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --staging-name restore-20260809T120100Z-44444444-4444-4444-4444-444444444444 \
+            --candidate-set-id restore-0123456789abcdefabcd \
+            --started-at 2026-08-09T12:00:00.000Z --completed-at 2026-08-09T12:02:00.000Z \
+            --duration-seconds 120 --status COMPLETED --terminal-phase EXECUTE_SWITCH \
+            --phases-file "$root/phases.json" >/dev/null
+          python3 infra/backup/write-backup-privacy-manual-attestation.py \
+            --readiness-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-readiness.py" \
+            --drill-report "$root/reports/drill-33333333333333333333333333333333.json" \
+            --drill-key-file "$root/key" --attestation-key-file "$root/key" \
+            --output-dir "$root/attestations" --attestation-id attestation-44444444444444444444444444444444 \
+            --attestor-id ci-operator --attested-at 2026-08-09T12:05:00.000Z \
+            --acknowledge-operational-responsibility >/dev/null
+          python3 infra/backup/prepare-backup-privacy-activation-plan.py \
+            --attestation-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-manual-attestation.py" \
+            --attestation "$root/attestations/attestation-44444444444444444444444444444444.json" \
+            --key-file "$root/key" --env-file "$root/club.env" --output-dir "$root/plans" >"$root/plan-output.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT'])
+          p=json.loads(root.joinpath('plan-output.json').read_text())
+          root.joinpath('plan-path').write_text(p['planPath'])
+          PY
+
+      - name: Persist PENDING evidence before any env mutation
+        run: |
+          set -Eeuo pipefail
+          root="$ROOT"; plan=$(cat "$root/plan-path")
+          before=$(sha256sum "$root/club.env" | awk '{print $1}')
+          python3 infra/backup/backup-privacy-activation-execution.py prepare \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --plan "$plan" --key-file "$root/key" --env-file "$root/club.env" \
+            --output-root "$root/executions" --started-at 2026-08-09T12:06:00.000Z >"$root/execution.json"
+          after=$(sha256sum "$root/club.env" | awk '{print $1}')
+          test "$before" = "$after"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT'])
+          r=json.loads(root.joinpath('execution.json').read_text())
+          assert r['status']=='ACTIVATION_EXECUTION_PENDING'
+          assert r['envState']=='PRE_WRITE'
+          assert r['executionCreated'] is True and r['executionReused'] is False
+          assert r['activationMutationAllowed'] is True
+          assert r['postWriteValidationRequired'] is False
+          assert r['runtimeConfigurationChanged'] is False
+          assert r['activationExecuted'] is False
+          root.joinpath('execution-path').write_text(r['executionPath'])
+          PY
+          execution=$(cat "$root/execution-path")
+          test "$(stat -c '%a' "$(dirname "$execution")")" = 700
+          test "$(stat -c '%a' "$execution")" = 600
+
+      - name: Verify deterministic retry and read-only READY_TO_APPLY assessment
+        run: |
+          set -Eeuo pipefail
+          root="$ROOT"; plan=$(cat "$root/plan-path"); execution=$(cat "$root/execution-path")
+          python3 infra/backup/backup-privacy-activation-execution.py prepare \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --plan "$plan" --key-file "$root/key" --env-file "$root/club.env" \
+            --output-root "$root/executions" >"$root/retry.json"
+          python3 infra/backup/backup-privacy-activation-execution.py check \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --plan "$plan" --key-file "$root/key" --env-file "$root/club.env" \
+            --execution "$execution" >"$root/assessment-pre.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT'])
+          retry=json.loads(root.joinpath('retry.json').read_text())
+          a=json.loads(root.joinpath('assessment-pre.json').read_text())
+          assert retry['executionCreated'] is False and retry['executionReused'] is True
+          assert retry['envState']=='PRE_WRITE'
+          assert a['status']=='READY_TO_APPLY' and a['envState']=='PRE_WRITE'
+          assert a['activationMutationAllowed'] is True and a['postWriteValidationRequired'] is False
+          PY
+
+      - name: Simulate a crash after future atomic env replacement and recover READY_TO_VALIDATE
+        run: |
+          set -Eeuo pipefail
+          root="$ROOT"; plan=$(cat "$root/plan-path"); execution=$(cat "$root/execution-path")
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT'])
+          plan=json.loads(Path(root.joinpath('plan-path').read_text()).read_text())['record']
+          target=plan['activationTarget']
+          raw=root.joinpath('club.env').read_text().splitlines(keepends=True)
+          seen=set(); out=[]
+          for line in raw:
+              ending='\r\n' if line.endswith('\r\n') else '\n' if line.endswith('\n') else ''
+              body=line[:-len(ending)] if ending else line
+              key=body.split('=',1)[0] if '=' in body else None
+              if key in target:
+                  out.append(f'{key}={target[key]}{ending}'); seen.add(key)
+              else:
+                  out.append(line)
+          append='\r\n' if any(x.endswith('\r\n') for x in raw) else '\n'
+          if out and not (out[-1].endswith('\n') or out[-1].endswith('\r\n')):
+              out[-1]+=append
+          for key in ('PRIVACY_BACKUP_STATE','PRIVACY_BACKUP_POLICY_VERSION','PRIVACY_BACKUP_ENCRYPTED_AT_REST','PRIVACY_BACKUP_BOUNDED_RETENTION_CONFIGURED','PRIVACY_BACKUP_RESTORE_RECONCILIATION'):
+              if key not in seen: out.append(f'{key}={target[key]}{append}')
+          root.joinpath('club.env').write_bytes(''.join(out).encode())
+          PY
+          chmod 600 "$root/club.env"
+          python3 infra/backup/backup-privacy-activation-execution.py check \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --plan "$plan" --key-file "$root/key" --env-file "$root/club.env" --execution "$execution" >"$root/assessment-post.json"
+          python3 infra/backup/backup-privacy-activation-execution.py prepare \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --plan "$plan" --key-file "$root/key" --env-file "$root/club.env" --output-root "$root/executions" >"$root/retry-post.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT'])
+          a=json.loads(root.joinpath('assessment-post.json').read_text())
+          r=json.loads(root.joinpath('retry-post.json').read_text())
+          assert a['status']=='READY_TO_VALIDATE' and a['envState']=='POST_WRITE'
+          assert a['activationMutationAllowed'] is False and a['postWriteValidationRequired'] is True
+          assert a['runtimeConfigurationChanged'] is True and a['activationExecuted'] is False
+          assert r['executionReused'] is True and r['envState']=='POST_WRITE'
+          PY
+
+      - name: Block target state without PENDING evidence and block unrelated env drift
+        run: |
+          set -Eeuo pipefail
+          root="$ROOT"; plan=$(cat "$root/plan-path")
+          mkdir -p "$root/no-evidence"; chmod 700 "$root/no-evidence"
+          set +e
+          python3 infra/backup/backup-privacy-activation-execution.py prepare \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --plan "$plan" --key-file "$root/key" --env-file "$root/club.env" --output-root "$root/no-evidence" >"$root/no-evidence.json"
+          code=$?; set -e; test "$code" -ne 0
+          grep -q 'TARGET_STATE_WITHOUT_EXECUTION_EVIDENCE' "$root/no-evidence.json"
+          cp "$root/club.env" "$root/target.env"
+          sed -i 's/APP_HOST=localhost/APP_HOST=drift.example/' "$root/club.env"; chmod 600 "$root/club.env"
+          execution=$(cat "$root/execution-path")
+          set +e
+          python3 infra/backup/backup-privacy-activation-execution.py check \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --plan "$plan" --key-file "$root/key" --env-file "$root/club.env" --execution "$execution" >"$root/drift.json"
+          code=$?; set -e; test "$code" -ne 0
+          grep -q 'ENV_FINGERPRINT_DRIFT' "$root/drift.json"
+          mv "$root/target.env" "$root/club.env"; chmod 600 "$root/club.env"
+
+      - name: Verify HMAC tampering blocks assessment
+        run: |
+          set -Eeuo pipefail
+          root="$ROOT"; plan=$(cat "$root/plan-path"); execution=$(cat "$root/execution-path")
+          mkdir -p "$root/tampered/$(basename "$(dirname "$execution")")"
+          chmod 700 "$root/tampered" "$root/tampered/$(basename "$(dirname "$execution")")"
+          tampered="$root/tampered/$(basename "$(dirname "$execution")")/activation-execution-pending.json"
+          cp "$execution" "$tampered"; chmod 600 "$tampered"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT'])
+          path=next(root.glob('tampered/activation-*/activation-execution-pending.json'))
+          data=json.loads(path.read_text()); data['record']['targetEnvFingerprint']='sha256:'+'f'*64
+          path.write_text(json.dumps(data,indent=2)+'\n'); path.chmod(0o600)
+          PY
+          set +e
+          python3 infra/backup/backup-privacy-activation-execution.py check \
+            --plan-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-plan.py" \
+            --plan "$plan" --key-file "$root/key" --env-file "$root/club.env" --execution "$tampered" >"$root/tampered.json"
+          code=$?; set -e; test "$code" -ne 0
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads(Path(os.environ['ROOT']).joinpath('tampered.json').read_text())
+          assert r['status']=='BLOCKED'
+          assert r['blocker'] in ('ACTIVATION_EXECUTION_BINDING_MISMATCH','ACTIVATION_EXECUTION_FINGERPRINT_MISMATCH','ACTIVATION_EXECUTION_SIGNATURE_MISMATCH')
+          assert r['activationMutationAllowed'] is False
+          PY
+
+      - name: Enforce evidence-only boundary
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('infra/backup/backup-privacy-activation-execution.py').read_text()
+          for token in ('os.replace(', 'docker compose', 'docker volume', 'compose up', 'compose restart'):
+              assert token not in text
+          assert 'executionMutationStarted' in text
+          assert 'pendingEvidenceRequiredBeforeMutation' in text
+          assert 'READY_TO_APPLY' in text and 'READY_TO_VALIDATE' in text
+          PY
