@@ -4,7 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 COMPOSE_FILE="${ROOT_DIR}/infra/docker-compose.club.yml"
-ENV_FILE="${ROOT_DIR}/.env"
+ENV_FILE="${BACKUP_PRIVACY_RUNTIME_ENV_FILE:-${ROOT_DIR}/.env}"
 CUTOVER_TOOL="${SCRIPT_DIR}/backup-privacy-runtime-cutover.py"
 OUTPUT_ROOT="${BACKUP_PRIVACY_RUNTIME_CUTOVER_HOST_DIR:-/var/lib/master-diagnostics/backup-privacy-runtime-cutovers}"
 
