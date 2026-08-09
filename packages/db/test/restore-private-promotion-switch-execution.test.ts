@@ -65,6 +65,16 @@ const candidateVolumes: Readonly<RestorePrivatePromotionCurrentVolumeSet> = Obje
   dataSubjectDelivery: `master-diagnostics-${candidateSetId}-data-subject-delivery`,
 });
 
+const partialCandidateVolumes: Readonly<RestorePrivatePromotionCurrentVolumeSet> = Object.freeze({
+  ...rollbackVolumes,
+  libsql: candidateVolumes.libsql,
+});
+
+const partialRollbackVolumes: Readonly<RestorePrivatePromotionCurrentVolumeSet> = Object.freeze({
+  ...candidateVolumes,
+  libsql: rollbackVolumes.libsql,
+});
+
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'restore-switch-execution-'));
   const keyFile = join(root, 'promotion.key');
@@ -86,21 +96,20 @@ describe('restore private promotion switch execution evidence', () => {
     });
   });
 
-  it('recovers deterministically when candidate activation outruns its evidence write', async () => {
+  it('recovers exact and partial candidate activation after CUTOVER_STARTED', async () => {
     const { root, keyFile } = await fixture();
-    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(
-      root,
-      keyFile,
-      journal(),
-      'CUTOVER_STARTED',
-      '2026-08-09T09:01:00.000Z',
-    );
+    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'CUTOVER_STARTED', '2026-08-09T09:01:00.000Z');
     const evidence = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(root, keyFile, journal());
     expect(assessRestorePrivatePromotionSwitchExecution(journal(), evidence, candidateVolumes)).toMatchObject({
       status: 'RECOVER_CANDIDATE_SELECTION',
       currentVolumeSet: 'CANDIDATE',
-      lastPhase: 'CUTOVER_STARTED',
       productionMutationAllowed: false,
+    });
+    expect(assessRestorePrivatePromotionSwitchExecution(journal(), evidence, partialCandidateVolumes)).toMatchObject({
+      status: 'READY_TO_SELECT_CANDIDATE',
+      currentVolumeSet: 'MIXED_KNOWN',
+      reason: 'CUTOVER_STARTED_WITH_PARTIAL_KNOWN_CANDIDATE_SELECTION',
+      productionMutationAllowed: true,
     });
   });
 
@@ -109,77 +118,93 @@ describe('restore private promotion switch execution evidence', () => {
     const first = await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'CUTOVER_STARTED', '2026-08-09T09:01:00.000Z');
     const second = await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'CANDIDATE_SELECTED', '2026-08-09T09:02:00.000Z');
     expect(second.envelope.record.previousEventSignature).toBe(first.envelope.signature);
+    expect(second.envelope.record.sequence).toBe(2);
     let evidence = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(root, keyFile, journal());
     expect(assessRestorePrivatePromotionSwitchExecution(journal(), evidence, candidateVolumes)).toMatchObject({
       status: 'VERIFY_CANDIDATE',
-      nextAllowedEvents: ['COMPLETED', 'ROLLBACK_SELECTED'],
+      nextAllowedEvents: ['COMPLETED', 'ROLLBACK_STARTED'],
     });
 
     const completed = await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'COMPLETED', '2026-08-09T09:03:00.000Z');
     expect(completed.envelope.record.previousEventSignature).toBe(second.envelope.signature);
+    expect(completed.envelope.record.targetVolumeSet).toBe('CANDIDATE');
     evidence = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(root, keyFile, journal());
     expect(assessRestorePrivatePromotionSwitchExecution(journal(), evidence, candidateVolumes)).toMatchObject({
       status: 'COMPLETED',
       currentVolumeSet: 'CANDIDATE',
       promotionExecuted: true,
-      productionMutationAllowed: false,
       nextAllowedEvents: [],
     });
   });
 
-  it('supports rollback and detects a crash after rollback selection but before its evidence write', async () => {
+  it('supports rollback before a full candidate selection and recovers partial rollback', async () => {
     const { root, keyFile } = await fixture();
     await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'CUTOVER_STARTED', '2026-08-09T09:01:00.000Z');
-    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'CANDIDATE_SELECTED', '2026-08-09T09:02:00.000Z');
+    const rollbackStarted = await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'ROLLBACK_STARTED', '2026-08-09T09:02:00.000Z');
+    expect(rollbackStarted.envelope.record.sequence).toBe(2);
+    expect(rollbackStarted.envelope.record.targetVolumeSet).toBe('ROLLBACK');
     let evidence = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(root, keyFile, journal());
+    expect(assessRestorePrivatePromotionSwitchExecution(journal(), evidence, partialRollbackVolumes)).toMatchObject({
+      status: 'READY_TO_SELECT_ROLLBACK',
+      currentVolumeSet: 'MIXED_KNOWN',
+      productionMutationAllowed: true,
+    });
     expect(assessRestorePrivatePromotionSwitchExecution(journal(), evidence, rollbackVolumes)).toMatchObject({
       status: 'RECOVER_ROLLBACK_SELECTION',
       currentVolumeSet: 'ROLLBACK',
+      productionMutationAllowed: false,
     });
 
-    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'ROLLBACK_SELECTED', '2026-08-09T09:03:00.000Z');
+    const selected = await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'ROLLBACK_SELECTED', '2026-08-09T09:03:00.000Z');
+    expect(selected.envelope.record.sequence).toBe(3);
     evidence = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(root, keyFile, journal());
     expect(assessRestorePrivatePromotionSwitchExecution(journal(), evidence, rollbackVolumes)).toMatchObject({
       status: 'VERIFY_ROLLBACK',
       nextAllowedEvents: ['ROLLBACK_VERIFIED'],
     });
-
     await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'ROLLBACK_VERIFIED', '2026-08-09T09:04:00.000Z');
     evidence = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(root, keyFile, journal());
-    expect(assessRestorePrivatePromotionSwitchExecution(journal(), evidence, rollbackVolumes)).toMatchObject({
-      status: 'ROLLED_BACK',
-      promotionExecuted: false,
-      nextAllowedEvents: [],
-    });
+    expect(assessRestorePrivatePromotionSwitchExecution(journal(), evidence, rollbackVolumes)).toMatchObject({ status: 'ROLLED_BACK' });
   });
 
-  it('blocks mixed active volume sets and illegal event transitions', async () => {
-    const { root, keyFile } = await fixture();
-    const evidence = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(root, keyFile, journal());
-    expect(assessRestorePrivatePromotionSwitchExecution(journal(), evidence, {
-      ...rollbackVolumes,
-      reports: candidateVolumes.reports,
-    })).toMatchObject({
-      status: 'BLOCKED',
-      reason: 'ACTIVE_VOLUME_SET_MIXED_OR_UNKNOWN',
-    });
-    await expect(ensureSignedRestorePrivatePromotionSwitchExecutionEvent(
-      root,
-      keyFile,
-      journal(),
-      'CANDIDATE_SELECTED',
-      '2026-08-09T09:01:00.000Z',
-    )).rejects.toThrow('is not allowed after current evidence');
-  });
-
-  it('detects event tampering and broken signature chains', async () => {
+  it('supports rollback after candidate selection with a five-step signed chain', async () => {
     const { root, keyFile } = await fixture();
     await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'CUTOVER_STARTED', '2026-08-09T09:01:00.000Z');
+    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'CANDIDATE_SELECTED', '2026-08-09T09:02:00.000Z');
+    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'ROLLBACK_STARTED', '2026-08-09T09:03:00.000Z');
+    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'ROLLBACK_SELECTED', '2026-08-09T09:04:00.000Z');
+    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'ROLLBACK_VERIFIED', '2026-08-09T09:05:00.000Z');
+    const evidence = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(root, keyFile, journal());
+    expect(evidence.map((item) => item.record.sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(evidence.map((item) => item.record.phase)).toEqual([
+      'CUTOVER_STARTED', 'CANDIDATE_SELECTED', 'ROLLBACK_STARTED', 'ROLLBACK_SELECTED', 'ROLLBACK_VERIFIED',
+    ]);
+    expect(assessRestorePrivatePromotionSwitchExecution(journal(), evidence, rollbackVolumes)).toMatchObject({ status: 'ROLLED_BACK' });
+  });
+
+  it('blocks unknown volume names and rollback without ROLLBACK_STARTED evidence', async () => {
+    const { root, keyFile } = await fixture();
+    let evidence = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(root, keyFile, journal());
+    expect(assessRestorePrivatePromotionSwitchExecution(journal(), evidence, {
+      ...rollbackVolumes,
+      reports: 'unexpected_reports',
+    })).toMatchObject({ status: 'BLOCKED', reason: 'ACTIVE_VOLUME_SET_UNKNOWN' });
+
+    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'CUTOVER_STARTED', '2026-08-09T09:01:00.000Z');
+    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'CANDIDATE_SELECTED', '2026-08-09T09:02:00.000Z');
+    evidence = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(root, keyFile, journal());
+    expect(assessRestorePrivatePromotionSwitchExecution(journal(), evidence, rollbackVolumes)).toMatchObject({
+      status: 'BLOCKED',
+      reason: 'ACTIVE_SET_CONFLICTS_WITH_CANDIDATE_SELECTED_EVIDENCE',
+    });
+  });
+
+  it('rejects illegal event transitions and event tampering', async () => {
+    const { root, keyFile } = await fixture();
+    await expect(ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'ROLLBACK_STARTED', '2026-08-09T09:01:00.000Z')).rejects.toThrow('is not allowed after current evidence');
+    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'CUTOVER_STARTED', '2026-08-09T09:01:00.000Z');
     const second = await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(root, keyFile, journal(), 'CANDIDATE_SELECTED', '2026-08-09T09:02:00.000Z');
-    const parsed = JSON.parse(await readFile(second.path, 'utf8')) as {
-      record: { previousEventSignature: string | null };
-      signature: string;
-    };
+    const parsed = JSON.parse(await readFile(second.path, 'utf8')) as { record: { previousEventSignature: string | null }; signature: string };
     parsed.record.previousEventSignature = `hmac-sha256:${'f'.repeat(64)}`;
     await writeFile(second.path, `${JSON.stringify(parsed, null, 2)}\n`);
     await expect(readVerifiedRestorePrivatePromotionSwitchExecutionEvents(root, keyFile, journal())).rejects.toThrow();
