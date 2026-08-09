@@ -1,0 +1,213 @@
+name: Backup Privacy Activation Env Executor Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-activation-env-executor-contract.yml'
+      - 'infra/backup/apply-backup-privacy-activation-env.py'
+      - 'infra/backup/backup-privacy-activation-execution.py'
+      - 'infra/backup/prepare-backup-privacy-activation-plan.py'
+      - 'infra/backup/check-backup-privacy-activation-plan.py'
+      - 'docs/backup-privacy-activation-env-executor.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-activation-env-executor-contract.yml'
+      - 'infra/backup/apply-backup-privacy-activation-env.py'
+      - 'infra/backup/backup-privacy-activation-execution.py'
+      - 'infra/backup/prepare-backup-privacy-activation-plan.py'
+      - 'infra/backup/check-backup-privacy-activation-plan.py'
+      - 'docs/backup-privacy-activation-env-executor.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    env:
+      PRIVACY_BACKUP_STATE: DISABLED
+      ROOT: /tmp/backup-privacy-env-executor
+      PLANNER: ${{ github.workspace }}/infra/backup/prepare-backup-privacy-activation-plan.py
+      PLAN_CHECKER: ${{ github.workspace }}/infra/backup/check-backup-privacy-activation-plan.py
+      EXECUTION_CHECKER: ${{ github.workspace }}/infra/backup/backup-privacy-activation-execution.py
+      EXECUTOR: ${{ github.workspace }}/infra/backup/apply-backup-privacy-activation-env.py
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare authentic reversible plan and execution evidence
+        run: |
+          set -Eeuo pipefail
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/reports" "$ROOT/attestations" "$ROOT/plans" "$ROOT/execution" "$ROOT/execution-crash" "$ROOT/execution-no-intent" "$ROOT/execution-drift"
+          chmod 700 "$ROOT" "$ROOT/reports" "$ROOT/attestations" "$ROOT/plans" "$ROOT/execution" "$ROOT/execution-crash" "$ROOT/execution-no-intent" "$ROOT/execution-drift"
+          python3 - <<'PY'
+          import base64,json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT'])
+          root.joinpath('key').write_text(base64.b64encode(bytes([91])*32).decode()+'\n')
+          phases=[{'name':n,'status':'COMPLETED','durationSeconds':10,'exitCode':0} for n in ('VERIFY_BACKUP','STAGE_RESTORE','PRIVACY_REPLAY','AUTHORIZE_PROMOTION','PREPARE_PROMOTION_PLAN','PREPARE_CANDIDATES','AUTHORIZE_SWITCH','EXECUTE_SWITCH')]
+          root.joinpath('phases.json').write_text(json.dumps(phases)+'\n')
+          raw=b'APP_HOST=localhost\nBETTER_AUTH_SECRET=ci-secret-value\nPRIVACY_BACKUP_STATE=DISABLED\nPRIVACY_NOTIFICATIONS_STATE=DISABLED\n'
+          root.joinpath('club.env').write_bytes(raw)
+          root.joinpath('original.env').write_bytes(raw)
+          PY
+          chmod 600 "$ROOT/key" "$ROOT/phases.json" "$ROOT/club.env" "$ROOT/original.env"
+          python3 infra/backup/write-restore-rto-drill-report.py \
+            --output-dir "$ROOT/reports" --key-file "$ROOT/key" \
+            --drill-id drill-55555555555555555555555555555555 \
+            --bundle-name masters-backup-20260809T130000Z-55555555-5555-5555-5555-555555555555.mdbak \
+            --bundle-sha256 sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --staging-name restore-20260809T130100Z-66666666-6666-6666-6666-666666666666 \
+            --candidate-set-id restore-0123456789abcdefabcd \
+            --started-at 2026-08-09T13:00:00.000Z --completed-at 2026-08-09T13:02:00.000Z \
+            --duration-seconds 120 --status COMPLETED --terminal-phase EXECUTE_SWITCH \
+            --phases-file "$ROOT/phases.json" >/dev/null
+          python3 infra/backup/write-backup-privacy-manual-attestation.py \
+            --readiness-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-readiness.py" \
+            --drill-report "$ROOT/reports/drill-55555555555555555555555555555555.json" \
+            --drill-key-file "$ROOT/key" --attestation-key-file "$ROOT/key" \
+            --output-dir "$ROOT/attestations" --attestation-id attestation-66666666666666666666666666666666 \
+            --attestor-id ci-operator --attested-at 2026-08-09T13:05:00.000Z \
+            --acknowledge-operational-responsibility >/dev/null
+          python3 infra/backup/prepare-backup-privacy-activation-plan.py \
+            --attestation-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-manual-attestation.py" \
+            --attestation "$ROOT/attestations/attestation-66666666666666666666666666666666.json" \
+            --key-file "$ROOT/key" --env-file "$ROOT/club.env" --output-dir "$ROOT/plans" >"$ROOT/plan.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT']); p=json.loads(root.joinpath('plan.json').read_text())
+          root.joinpath('plan-path').write_text(p['planPath'])
+          PY
+          PLAN=$(cat "$ROOT/plan-path")
+          python3 infra/backup/backup-privacy-activation-execution.py prepare \
+            --plan-checker "$PLAN_CHECKER" --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" \
+            --output-root "$ROOT/execution" --started-at 2026-08-09T13:06:00.000Z >"$ROOT/execution.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT']); e=json.loads(root.joinpath('execution.json').read_text())
+          assert e['status']=='ACTIVATION_EXECUTION_PENDING' and e['envState']=='PRE_WRITE'
+          root.joinpath('execution-path').write_text(e['executionPath'])
+          PY
+
+      - name: Apply target atomically and recover idempotently
+        run: |
+          set -Eeuo pipefail
+          PLAN=$(cat "$ROOT/plan-path"); EXECUTION=$(cat "$ROOT/execution-path")
+          before_mode=$(stat -c '%a' "$ROOT/club.env"); before_uid=$(stat -c '%u' "$ROOT/club.env"); before_gid=$(stat -c '%g' "$ROOT/club.env")
+          python3 "$EXECUTOR" apply-target \
+            --planner "$PLANNER" --plan-checker "$PLAN_CHECKER" --execution-checker "$EXECUTION_CHECKER" \
+            --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" --execution "$EXECUTION" >"$ROOT/target.json"
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT']); plan=json.loads(Path(root.joinpath('plan-path').read_text()).read_text())['record']; r=json.loads(root.joinpath('target.json').read_text())
+          assert r['status']=='TARGET_APPLIED' and r['envMutationApplied'] is True
+          assert r['postWriteValidationRequired'] is True and r['runtimeConfigurationChanged'] is True and r['activationExecuted'] is False
+          actual='sha256:'+hashlib.sha256(root.joinpath('club.env').read_bytes()).hexdigest(); assert actual==plan['targetEnvFingerprint']
+          text=root.joinpath('club.env').read_text(); assert 'APP_HOST=localhost\n' in text and 'BETTER_AUTH_SECRET=ci-secret-value\n' in text
+          assert 'PRIVACY_BACKUP_STATE=ENABLED\n' in text
+          PY
+          test "$(stat -c '%a' "$ROOT/club.env")" = "$before_mode"
+          test "$(stat -c '%u' "$ROOT/club.env")" = "$before_uid"
+          test "$(stat -c '%g' "$ROOT/club.env")" = "$before_gid"
+          before_retry=$(sha256sum "$ROOT/club.env" | awk '{print $1}')
+          python3 "$EXECUTOR" apply-target \
+            --planner "$PLANNER" --plan-checker "$PLAN_CHECKER" --execution-checker "$EXECUTION_CHECKER" \
+            --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" --execution "$EXECUTION" >"$ROOT/target-retry.json"
+          after_retry=$(sha256sum "$ROOT/club.env" | awk '{print $1}'); test "$before_retry" = "$after_retry"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads(Path(os.environ['ROOT']).joinpath('target-retry.json').read_text())
+          assert r['status']=='TARGET_ALREADY_APPLIED' and r['envMutationApplied'] is False
+          PY
+
+      - name: Persist rollback intent before rollback and restore exact original bytes
+        run: |
+          set -Eeuo pipefail
+          PLAN=$(cat "$ROOT/plan-path"); EXECUTION=$(cat "$ROOT/execution-path")
+          target_hash=$(sha256sum "$ROOT/club.env" | awk '{print $1}')
+          python3 "$EXECUTOR" prepare-rollback \
+            --planner "$PLANNER" --plan-checker "$PLAN_CHECKER" --execution-checker "$EXECUTION_CHECKER" \
+            --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" --execution "$EXECUTION" \
+            --reason-code OPERATOR_ABORT_BEFORE_RUNTIME_ACTIVATION >"$ROOT/rollback-intent.json"
+          test "$target_hash" = "$(sha256sum "$ROOT/club.env" | awk '{print $1}')"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['ROOT']); r=json.loads(root.joinpath('rollback-intent.json').read_text())
+          assert r['status']=='ROLLBACK_INTENT_PENDING' and r['rollbackMutationAllowed'] is True
+          p=Path(r['rollbackIntentPath']); assert oct(p.stat().st_mode & 0o777)=='0o600'
+          root.joinpath('rollback-intent-path').write_text(str(p))
+          PY
+          python3 "$EXECUTOR" apply-rollback \
+            --planner "$PLANNER" --plan-checker "$PLAN_CHECKER" --execution-checker "$EXECUTION_CHECKER" \
+            --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" --execution "$EXECUTION" >"$ROOT/rollback.json"
+          cmp "$ROOT/original.env" "$ROOT/club.env"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads(Path(os.environ['ROOT']).joinpath('rollback.json').read_text())
+          assert r['status']=='ROLLBACK_APPLIED' and r['envMutationApplied'] is True
+          assert r['rollbackValidationRequired'] is True and r['runtimeConfigurationChanged'] is False and r['activationExecuted'] is False
+          PY
+          python3 "$EXECUTOR" apply-rollback \
+            --planner "$PLANNER" --plan-checker "$PLAN_CHECKER" --execution-checker "$EXECUTION_CHECKER" \
+            --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" --execution "$EXECUTION" >"$ROOT/rollback-retry.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads(Path(os.environ['ROOT']).joinpath('rollback-retry.json').read_text())
+          assert r['status']=='ROLLBACK_ALREADY_APPLIED' and r['envMutationApplied'] is False and r['rollbackValidationRequired'] is True
+          PY
+
+      - name: Recover crash after rollback replace only when signed rollback intent exists
+        run: |
+          set -Eeuo pipefail
+          PLAN=$(cat "$ROOT/plan-path")
+          cp "$ROOT/original.env" "$ROOT/club.env"; chmod 600 "$ROOT/club.env"
+          python3 "$EXECUTION_CHECKER" prepare --plan-checker "$PLAN_CHECKER" --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" --output-root "$ROOT/execution-crash" >"$ROOT/crash-execution.json"
+          CRASH_EXECUTION=$(python3 -c "import json,os;print(json.load(open(os.environ['ROOT']+'/crash-execution.json'))['executionPath'])")
+          python3 "$EXECUTOR" apply-target --planner "$PLANNER" --plan-checker "$PLAN_CHECKER" --execution-checker "$EXECUTION_CHECKER" --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" --execution "$CRASH_EXECUTION" >/dev/null
+          python3 "$EXECUTOR" prepare-rollback --planner "$PLANNER" --plan-checker "$PLAN_CHECKER" --execution-checker "$EXECUTION_CHECKER" --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" --execution "$CRASH_EXECUTION" --reason-code POST_WRITE_RUNTIME_ATTESTATION_FAILED >/dev/null
+          cp "$ROOT/original.env" "$ROOT/club.env"; chmod 600 "$ROOT/club.env"
+          python3 "$EXECUTOR" apply-rollback --planner "$PLANNER" --plan-checker "$PLAN_CHECKER" --execution-checker "$EXECUTION_CHECKER" --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" --execution "$CRASH_EXECUTION" >"$ROOT/crash-recovery.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads(Path(os.environ['ROOT']).joinpath('crash-recovery.json').read_text())
+          assert r['status']=='ROLLBACK_ALREADY_APPLIED' and r['envMutationApplied'] is False
+          PY
+
+      - name: Fail closed without rollback intent and on env drift
+        run: |
+          set -Eeuo pipefail
+          PLAN=$(cat "$ROOT/plan-path")
+          cp "$ROOT/original.env" "$ROOT/club.env"; chmod 600 "$ROOT/club.env"
+          python3 "$EXECUTION_CHECKER" prepare --plan-checker "$PLAN_CHECKER" --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" --output-root "$ROOT/execution-no-intent" >"$ROOT/no-intent-execution.json"
+          NO_INTENT=$(python3 -c "import json,os;print(json.load(open(os.environ['ROOT']+'/no-intent-execution.json'))['executionPath'])")
+          python3 "$EXECUTOR" apply-target --planner "$PLANNER" --plan-checker "$PLAN_CHECKER" --execution-checker "$EXECUTION_CHECKER" --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" --execution "$NO_INTENT" >/dev/null
+          set +e
+          python3 "$EXECUTOR" apply-rollback --planner "$PLANNER" --plan-checker "$PLAN_CHECKER" --execution-checker "$EXECUTION_CHECKER" --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" --execution "$NO_INTENT" >"$ROOT/no-intent.json"
+          code=$?; set -e; test "$code" -ne 0; grep -q 'ACTIVATION_ROLLBACK_INTENT_MISSING' "$ROOT/no-intent.json"
+          cp "$ROOT/original.env" "$ROOT/club.env"; chmod 600 "$ROOT/club.env"
+          python3 "$EXECUTION_CHECKER" prepare --plan-checker "$PLAN_CHECKER" --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" --output-root "$ROOT/execution-drift" >"$ROOT/drift-execution.json"
+          DRIFT_EXECUTION=$(python3 -c "import json,os;print(json.load(open(os.environ['ROOT']+'/drift-execution.json'))['executionPath'])")
+          printf 'UNRELATED_DRIFT=true\n' >>"$ROOT/club.env"
+          set +e
+          python3 "$EXECUTOR" apply-target --planner "$PLANNER" --plan-checker "$PLAN_CHECKER" --execution-checker "$EXECUTION_CHECKER" --plan "$PLAN" --key-file "$ROOT/key" --env-file "$ROOT/club.env" --execution "$DRIFT_EXECUTION" >"$ROOT/drift.json"
+          code=$?; set -e; test "$code" -ne 0; grep -q 'ACTIVATION_EXECUTION_NOT_VERIFIED' "$ROOT/drift.json"
+
+      - name: Enforce bounded mutation surface
+        run: |
+          python3 -m py_compile infra/backup/apply-backup-privacy-activation-env.py
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('infra/backup/apply-backup-privacy-activation-env.py').read_text()
+          assert 'os.replace(' in text
+          assert 'os.fsync(' in text
+          assert 'activation-env-rollback-pending.json' in text
+          assert 'masters:backup-privacy-activation-env-rollback:v1' in text
+          for forbidden in ('docker compose', 'docker volume', 'subprocess.run(["docker', 'PRIVACY_BACKUP_STATE=ENABLED'):
+              assert forbidden not in text
+          PY
