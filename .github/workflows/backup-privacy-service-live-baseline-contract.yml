@@ -1,0 +1,73 @@
+name: Backup Privacy Service Live Baseline Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-service-live-baseline-contract.yml'
+      - 'infra/backup/backup-privacy-service-live-baseline.py'
+      - 'infra/backup/prepare-club-backup-privacy-service-live-baseline.sh'
+      - 'infra/backup/test-backup-privacy-service-live-baseline.sh'
+      - 'infra/backup/prepare-backup-privacy-service-cutover-plan-v2.py'
+      - 'infra/backup/check-backup-privacy-service-cutover-plan-v2.py'
+      - 'docs/backup-privacy-service-live-baseline.md'
+      - '.env.example'
+      - 'TASKS.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-service-live-baseline-contract.yml'
+      - 'infra/backup/backup-privacy-service-live-baseline.py'
+      - 'infra/backup/prepare-club-backup-privacy-service-live-baseline.sh'
+      - 'infra/backup/test-backup-privacy-service-live-baseline.sh'
+      - 'infra/backup/prepare-backup-privacy-service-cutover-plan-v2.py'
+      - 'infra/backup/check-backup-privacy-service-cutover-plan-v2.py'
+      - 'docs/backup-privacy-service-live-baseline.md'
+      - '.env.example'
+      - 'TASKS.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify syntax and evidence-only boundary
+        run: |
+          bash -n infra/backup/prepare-club-backup-privacy-service-live-baseline.sh
+          bash -n infra/backup/test-backup-privacy-service-live-baseline.sh
+          python3 -m py_compile infra/backup/backup-privacy-service-live-baseline.py
+          python3 - <<'PY'
+          from pathlib import Path
+          core=Path('infra/backup/backup-privacy-service-live-baseline.py').read_text()
+          host=Path('infra/backup/prepare-club-backup-privacy-service-live-baseline.sh').read_text()
+          assert 'masters:backup-privacy-service-live-baseline:v1' in core
+          assert 'SERVICE_LIVE_BASELINE_MUTABLE_NOT_DISABLED' in core
+          assert 'activeDataVolumesBound' in core
+          assert 'liveBaselineRequiredBeforeMutation' not in core or 'cutover' in core
+          assert 'docker inspect' in host and 'ps -a -q' in host
+          for text in (core, host):
+              for forbidden in ('docker volume create', 'docker volume rm', 'os.replace('):
+                  assert forbidden not in text, forbidden
+          for forbidden in (' compose up ', ' compose down ', ' compose stop ', ' compose restart '):
+              assert forbidden not in host, forbidden
+          PY
+
+      - name: Verify authentic v2-plan-bound baseline, drift and tamper gates
+        run: bash infra/backup/test-backup-privacy-service-live-baseline.sh
+
+      - name: Verify release boundary remains open
+        run: |
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
