@@ -1,0 +1,74 @@
+name: Backup Privacy Service Cutover Plan v2 Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-service-cutover-plan-v2-contract.yml'
+      - 'infra/backup/prepare-backup-privacy-service-cutover-plan-v2.py'
+      - 'infra/backup/check-backup-privacy-service-cutover-plan-v2.py'
+      - 'infra/backup/test-backup-privacy-service-cutover-plan-v2.sh'
+      - 'infra/backup/check-backup-privacy-target-handoff.py'
+      - 'infra/backup/prepare-backup-privacy-target-handoff.py'
+      - 'docs/backup-privacy-service-cutover-plan-v2.md'
+      - '.env.example'
+      - 'TASKS.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-service-cutover-plan-v2-contract.yml'
+      - 'infra/backup/prepare-backup-privacy-service-cutover-plan-v2.py'
+      - 'infra/backup/check-backup-privacy-service-cutover-plan-v2.py'
+      - 'infra/backup/test-backup-privacy-service-cutover-plan-v2.sh'
+      - 'infra/backup/check-backup-privacy-target-handoff.py'
+      - 'infra/backup/prepare-backup-privacy-target-handoff.py'
+      - 'docs/backup-privacy-service-cutover-plan-v2.md'
+      - '.env.example'
+      - 'TASKS.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify syntax and read-only v2 boundary
+        run: |
+          bash -n infra/backup/test-backup-privacy-service-cutover-plan-v2.sh
+          python3 -m py_compile \
+            infra/backup/prepare-backup-privacy-service-cutover-plan-v2.py \
+            infra/backup/check-backup-privacy-service-cutover-plan-v2.py
+          python3 - <<'PY'
+          from pathlib import Path
+          files=(
+            'infra/backup/prepare-backup-privacy-service-cutover-plan-v2.py',
+            'infra/backup/check-backup-privacy-service-cutover-plan-v2.py',
+          )
+          text='\n'.join(Path(p).read_text() for p in files)
+          assert 'serviceCutoverPlanVersion' in text
+          assert 'TARGET_HANDOFF_VERIFIED' in text
+          assert 'liveBaselineRequiredBeforeMutation' in text
+          assert 'activationExecuted' in text
+          assert 'masters:backup-privacy-service-cutover-plan:v2' in text
+          for forbidden in ('"up"','"run"','"restart"','"stop"','"down"','docker volume','os.replace('):
+              assert forbidden not in text, forbidden
+          PY
+
+      - name: Verify handoff-bound deterministic plan, drift and tamper gates
+        run: bash infra/backup/test-backup-privacy-service-cutover-plan-v2.sh
+
+      - name: Verify release boundary remains open
+        run: |
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
