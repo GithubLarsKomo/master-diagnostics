@@ -94,7 +94,8 @@ grep -q 'BLOCKED' "${success}/tampered-completion-result.json"
 
 # A compose-file byte change is drift even when it is only a comment and the render stays equivalent.
 cp "${ROOT_DIR}/infra/docker-compose.club.yml" "${success}/compose-copy.yml"; chmod 0600 "${success}/compose-copy.yml"
-# Create a second plan bound to the copy, then alter only a comment byte.
+# The copied compose resolves ../.env to the fixture root.
+cp "${env_file}" "${fixture}/.env"; chmod 0600 "${fixture}/.env"
 second_root="${fixture}/cutover-copy"; mkdir -p "${second_root}"; chmod 0700 "${second_root}"
 python3 "${prepare}" \
   --completion-checker "${completion_checker}" --plan-checker "${plan_checker}" \
