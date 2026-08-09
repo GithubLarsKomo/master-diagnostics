@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare a signed, read-only service cutover plan after env activation completion."""
+"""Prepare a signed read-only service cutover plan from verified target handoff evidence."""
 from __future__ import annotations
 
 import argparse
@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-PLAN_VERSION = 1
-SIGNING_DOMAIN = b"masters:backup-privacy-service-cutover-plan:v1\n"
+PLAN_VERSION = 2
+SIGNING_DOMAIN = b"masters:backup-privacy-service-cutover-plan:v2\n"
 SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 ACTIVATION_ID = re.compile(r"^activation-[0-9a-f]{32}$")
 TARGET = {
@@ -77,22 +77,45 @@ def run_json(command: list[str]) -> tuple[int, dict[str, Any], bytes]:
     return proc.returncode, result, raw
 
 
-def verify_completion(args: argparse.Namespace) -> dict[str, Any]:
-    checker = args.completion_checker
+def verify_handoff(args: argparse.Namespace) -> dict[str, Any]:
+    checker = args.handoff_checker
     if not checker.is_absolute() or checker.is_symlink() or not checker.is_file():
-        fail("ACTIVATION_COMPLETION_CHECKER_UNSAFE", "completion checker is unsafe")
+        fail("TARGET_HANDOFF_CHECKER_UNSAFE", "target handoff checker is unsafe")
     code, result, _ = run_json([
-        sys.executable, str(checker),
-        "--plan-checker", str(args.plan_checker),
-        "--evidence-checker", str(args.evidence_checker),
+        sys.executable,
+        str(checker),
+        "--plan-checker", str(args.activation_plan_checker),
+        "--evidence-checker", str(args.execution_evidence_checker),
+        "--target-config-checker", str(args.target_config_checker),
         "--plan", str(args.activation_plan),
         "--pending", str(args.pending),
-        "--completion", str(args.completion),
+        "--handoff", str(args.handoff),
         "--key-file", str(args.key_file),
         "--env-file", str(args.env_file),
     ])
-    if code != 0 or result.get("status") != "ACTIVATION_COMPLETION_VERIFIED" or result.get("serviceCutoverPlanningAllowed") is not True:
-        fail("ACTIVATION_COMPLETION_NOT_VERIFIED", f"completion verification failed: {result.get('blocker')}")
+    if (
+        code != 0
+        or result.get("status") != "TARGET_HANDOFF_VERIFIED"
+        or result.get("serviceCutoverPlanningAllowed") is not True
+        or result.get("serviceCutoverExecuted") is not False
+        or result.get("liveRuntimeAttested") is not False
+        or result.get("activationExecuted") is not False
+    ):
+        fail("TARGET_HANDOFF_NOT_VERIFIED", f"target handoff verification failed: {result.get('blocker')}")
+    for field in (
+        "planFingerprint",
+        "handoffFingerprint",
+        "handoffFileSha256",
+        "targetConfigAttestationSha256",
+        "targetEnvFingerprint",
+    ):
+        if not isinstance(result.get(field), str) or not SHA256.fullmatch(result[field]):
+            fail("TARGET_HANDOFF_BINDING_INVALID", f"verified handoff {field} is invalid")
+    activation_id = result.get("activationId")
+    if not isinstance(activation_id, str) or not ACTIVATION_ID.fullmatch(activation_id):
+        fail("TARGET_HANDOFF_BINDING_INVALID", "verified activation ID is invalid")
+    if not isinstance(result.get("executionId"), str) or not result["executionId"].startswith("execution-"):
+        fail("TARGET_HANDOFF_BINDING_INVALID", "verified execution ID is invalid")
     return result
 
 
@@ -101,25 +124,25 @@ def render_compose(compose_file: Path, env_file: Path) -> tuple[bytes, dict[str,
     read_file(env_file, "ENV_FILE", private=True)
     proc = subprocess.run(
         ["docker", "compose", "--env-file", str(env_file), "-f", str(compose_file), "config", "--format", "json"],
-        check=False, capture_output=True,
+        check=False,
+        capture_output=True,
     )
     if proc.returncode != 0:
-        fail("SERVICE_CUTOVER_COMPOSE_RENDER_FAILED", proc.stderr.decode("utf-8", errors="replace")[:200])
+        fail("SERVICE_CUTOVER_COMPOSE_RENDER_FAILED", proc.stderr.decode("utf-8", errors="replace")[:300])
     try:
         rendered = json.loads(proc.stdout.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("SERVICE_CUTOVER_COMPOSE_RENDER_INVALID: compose config did not return JSON") from exc
     if not isinstance(rendered, dict):
         fail("SERVICE_CUTOVER_COMPOSE_RENDER_INVALID", "rendered compose must be an object")
-    normalized = (canonical_json(rendered) + "\n").encode("utf-8")
-    return normalized, rendered
+    return (canonical_json(rendered) + "\n").encode("utf-8"), rendered
 
 
 def environment_of(service: dict[str, Any]) -> dict[str, str]:
     raw = service.get("environment")
     if not isinstance(raw, dict):
         fail("SERVICE_CUTOVER_ENVIRONMENT_MISSING", "service environment is not rendered as an object")
-    return {str(k): "" if v is None else str(v) for k, v in raw.items()}
+    return {str(key): "" if value is None else str(value) for key, value in raw.items()}
 
 
 def validate_rendered_compose(rendered: dict[str, Any]) -> None:
@@ -141,13 +164,13 @@ def validate_rendered_compose(rendered: dict[str, Any]) -> None:
     command = privacy.get("command")
     command_text = " ".join(str(part) for part in command) if isinstance(command, list) else str(command or "")
     if "privacy-capabilities:check" not in command_text:
-        fail("SERVICE_CUTOVER_PREFLIGHT_COMMAND_INVALID", "privacy-check service does not run canonical capability checker")
+        fail("SERVICE_CUTOVER_PREFLIGHT_COMMAND_INVALID", "privacy-check does not run canonical capability checker")
     app = services["app"]
     depends = app.get("depends_on")
     if not isinstance(depends, dict) or PREFLIGHT_SERVICE not in depends:
         fail("SERVICE_CUTOVER_APP_DEPENDENCY_INVALID", "app does not depend on privacy-check")
     privacy_dependency = depends[PREFLIGHT_SERVICE]
-    if isinstance(privacy_dependency, dict) and privacy_dependency.get("condition") != "service_completed_successfully":
+    if not isinstance(privacy_dependency, dict) or privacy_dependency.get("condition") != "service_completed_successfully":
         fail("SERVICE_CUTOVER_APP_DEPENDENCY_INVALID", "app privacy-check dependency must require successful completion")
 
 
@@ -158,6 +181,8 @@ def safe_output_root(path: Path) -> None:
     if path.is_symlink() or not path.is_dir():
         fail("SERVICE_CUTOVER_OUTPUT_UNSAFE", "output root must be a non-symlink directory")
     os.chmod(path, 0o700)
+    if stat.S_IMODE(path.stat().st_mode) & 0o077:
+        fail("SERVICE_CUTOVER_OUTPUT_PERMISSIONS_UNSAFE", "output root must be private")
 
 
 def sign(record: dict[str, Any], key: bytes) -> str:
@@ -165,26 +190,21 @@ def sign(record: dict[str, Any], key: bytes) -> str:
     return "hmac-sha256:" + hmac.new(key, SIGNING_DOMAIN + canonical_json(payload).encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def build_record(args: argparse.Namespace, completion: dict[str, Any], rendered_raw: bytes) -> dict[str, Any]:
-    activation_id = completion.get("activationId")
-    if not isinstance(activation_id, str) or not ACTIVATION_ID.fullmatch(activation_id):
-        fail("ACTIVATION_ID_INVALID", "verified completion activation ID is invalid")
-    for field in ("completionFingerprint", "completionFileSha256", "runtimeAttestationSha256", "targetEnvFingerprint", "planFingerprint"):
-        if not isinstance(completion.get(field), str) or not SHA256.fullmatch(completion[field]):
-            fail("SERVICE_CUTOVER_COMPLETION_BINDING_INVALID", f"verified completion {field} is invalid")
+def build_record(args: argparse.Namespace, handoff: dict[str, Any], rendered_raw: bytes) -> dict[str, Any]:
     binding = {
-        "activationId": activation_id,
-        "executionId": completion["executionId"],
+        "activationId": handoff["activationId"],
+        "executionId": handoff["executionId"],
         "activationPlanPath": str(args.activation_plan),
         "activationPlanFileSha256": sha256_bytes(read_file(args.activation_plan, "ACTIVATION_PLAN", private=True)),
         "pendingEvidencePath": str(args.pending),
         "pendingEvidenceFileSha256": sha256_bytes(read_file(args.pending, "ACTIVATION_PENDING", private=True)),
-        "completionPath": str(args.completion),
-        "completionFingerprint": completion["completionFingerprint"],
-        "completionFileSha256": completion["completionFileSha256"],
+        "targetHandoffPath": str(args.handoff),
+        "targetHandoffFingerprint": handoff["handoffFingerprint"],
+        "targetHandoffFileSha256": handoff["handoffFileSha256"],
+        "targetConfigAttestationSha256": handoff["targetConfigAttestationSha256"],
+        "activationPlanFingerprint": handoff["planFingerprint"],
         "envFilePath": str(args.env_file),
-        "targetEnvFingerprint": completion["targetEnvFingerprint"],
-        "configurationRuntimeAttestationSha256": completion["runtimeAttestationSha256"],
+        "targetEnvFingerprint": handoff["targetEnvFingerprint"],
         "composeFilePath": str(args.compose_file),
         "composeFileSha256": sha256_bytes(read_file(args.compose_file, "SERVICE_CUTOVER_COMPOSE")),
         "renderedComposeSha256": sha256_bytes(rendered_raw),
@@ -198,7 +218,9 @@ def build_record(args: argparse.Namespace, completion: dict[str, Any], rendered_
         "recreateServices": list(RECREATE_SERVICES),
         "preserveServices": list(PRESERVE_SERVICES),
         "requiredPrivacyEnvironment": TARGET,
+        "targetHandoffMustRemainVerified": True,
         "preflightMustSucceedBeforeMutation": True,
+        "liveBaselineRequiredBeforeMutation": True,
         "renderedComposeMustRemainBound": True,
         "caddyContainerMustBePreserved": True,
         "libsqlContainerMustBePreserved": True,
@@ -208,6 +230,7 @@ def build_record(args: argparse.Namespace, completion: dict[str, Any], rendered_
         "rollbackOnCutoverFailureRequired": True,
         "serviceCutoverExecuted": False,
         "liveRuntimeAttested": False,
+        "activationExecuted": False,
     }
     record["cutoverPlanFingerprint"] = sha256_bytes(canonical_json(record).encode("utf-8"))
     return record
@@ -227,47 +250,64 @@ def persist(path: Path, envelope: dict[str, Any]) -> bool:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(json.dumps(envelope, ensure_ascii=False, indent=2) + "\n")
-            handle.flush(); os.fsync(handle.fileno())
+            handle.flush()
+            os.fsync(handle.fileno())
     except Exception:
-        path.unlink(missing_ok=True); raise
+        path.unlink(missing_ok=True)
+        raise
     os.chmod(path, 0o600)
+    parent_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(parent_fd)
+    finally:
+        os.close(parent_fd)
     return True
+
+
+def add_chain_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--handoff-checker", required=True, type=Path)
+    parser.add_argument("--activation-plan-checker", required=True, type=Path)
+    parser.add_argument("--execution-evidence-checker", required=True, type=Path)
+    parser.add_argument("--target-config-checker", required=True, type=Path)
+    parser.add_argument("--activation-plan", required=True, type=Path)
+    parser.add_argument("--pending", required=True, type=Path)
+    parser.add_argument("--handoff", required=True, type=Path)
+    parser.add_argument("--key-file", required=True, type=Path)
+    parser.add_argument("--env-file", required=True, type=Path)
+    parser.add_argument("--compose-file", required=True, type=Path)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--completion-checker", required=True, type=Path)
-    parser.add_argument("--plan-checker", required=True, type=Path)
-    parser.add_argument("--evidence-checker", required=True, type=Path)
-    parser.add_argument("--activation-plan", required=True, type=Path)
-    parser.add_argument("--pending", required=True, type=Path)
-    parser.add_argument("--completion", required=True, type=Path)
-    parser.add_argument("--key-file", required=True, type=Path)
-    parser.add_argument("--env-file", required=True, type=Path)
-    parser.add_argument("--compose-file", required=True, type=Path)
+    add_chain_args(parser)
     parser.add_argument("--output-root", required=True, type=Path)
     args = parser.parse_args()
     try:
         key = read_key(args.key_file)
-        completion = verify_completion(args)
+        handoff = verify_handoff(args)
         rendered_raw, rendered = render_compose(args.compose_file, args.env_file)
         validate_rendered_compose(rendered)
         safe_output_root(args.output_root)
-        record = build_record(args, completion, rendered_raw)
+        record = build_record(args, handoff, rendered_raw)
         envelope = {"envelopeVersion": 1, "record": record, "signature": sign(record, key)}
         path = args.output_root / f"{record['cutoverId']}.json"
         created = persist(path, envelope)
         print(json.dumps({
             "mode": "BACKUP_PRIVACY_SERVICE_CUTOVER_PLAN",
             "status": "SERVICE_CUTOVER_PLAN_READY",
+            "serviceCutoverPlanVersion": PLAN_VERSION,
             "cutoverId": record["cutoverId"],
             "activationId": record["activationId"],
             "cutoverPlanFingerprint": record["cutoverPlanFingerprint"],
+            "targetHandoffFingerprint": record["targetHandoffFingerprint"],
             "planPath": str(path),
             "planCreated": created,
             "planReused": not created,
-            "serviceCutoverExecutionAllowed": True,
+            "liveBaselineRequired": True,
+            "serviceCutoverExecutionAllowed": False,
             "serviceCutoverExecuted": False,
+            "liveRuntimeAttested": False,
+            "activationExecuted": False,
         }, separators=(",", ":"), ensure_ascii=False))
         return 0
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -278,6 +318,8 @@ def main() -> int:
             "blocker": blocker,
             "serviceCutoverExecutionAllowed": False,
             "serviceCutoverExecuted": False,
+            "liveRuntimeAttested": False,
+            "activationExecuted": False,
         }, separators=(",", ":"), ensure_ascii=False))
         return 1
 

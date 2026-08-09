@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify a signed backup-privacy service cutover plan without mutating services."""
+"""Verify a signed backup-privacy service cutover plan v2 without mutating services."""
 from __future__ import annotations
 
 import argparse
@@ -14,7 +14,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-SIGNING_DOMAIN = b"masters:backup-privacy-service-cutover-plan:v1\n"
+PLAN_VERSION = 2
+SIGNING_DOMAIN = b"masters:backup-privacy-service-cutover-plan:v2\n"
 SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 HMAC_SHA256 = re.compile(r"^hmac-sha256:[0-9a-f]{64}$")
 CUTOVER_ID = re.compile(r"^cutover-[0-9a-f]{32}$")
@@ -75,19 +76,30 @@ def run_json(command: list[str]) -> tuple[int, dict[str, Any]]:
     return proc.returncode, result
 
 
-def verify_completion(args: argparse.Namespace) -> dict[str, Any]:
+def verify_handoff(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.handoff_checker.is_absolute() or args.handoff_checker.is_symlink() or not args.handoff_checker.is_file():
+        fail("TARGET_HANDOFF_CHECKER_UNSAFE", "target handoff checker is unsafe")
     code, result = run_json([
-        sys.executable, str(args.completion_checker),
-        "--plan-checker", str(args.plan_checker),
-        "--evidence-checker", str(args.evidence_checker),
+        sys.executable,
+        str(args.handoff_checker),
+        "--plan-checker", str(args.activation_plan_checker),
+        "--evidence-checker", str(args.execution_evidence_checker),
+        "--target-config-checker", str(args.target_config_checker),
         "--plan", str(args.activation_plan),
         "--pending", str(args.pending),
-        "--completion", str(args.completion),
+        "--handoff", str(args.handoff),
         "--key-file", str(args.key_file),
         "--env-file", str(args.env_file),
     ])
-    if code != 0 or result.get("status") != "ACTIVATION_COMPLETION_VERIFIED":
-        fail("ACTIVATION_COMPLETION_NOT_VERIFIED", f"completion verification failed: {result.get('blocker')}")
+    if (
+        code != 0
+        or result.get("status") != "TARGET_HANDOFF_VERIFIED"
+        or result.get("serviceCutoverPlanningAllowed") is not True
+        or result.get("serviceCutoverExecuted") is not False
+        or result.get("liveRuntimeAttested") is not False
+        or result.get("activationExecuted") is not False
+    ):
+        fail("TARGET_HANDOFF_NOT_VERIFIED", f"target handoff verification failed: {result.get('blocker')}")
     return result
 
 
@@ -96,10 +108,11 @@ def rendered_compose_sha(compose_file: Path, env_file: Path) -> str:
     read_file(env_file, "ENV_FILE", private=True)
     proc = subprocess.run(
         ["docker", "compose", "--env-file", str(env_file), "-f", str(compose_file), "config", "--format", "json"],
-        check=False, capture_output=True,
+        check=False,
+        capture_output=True,
     )
     if proc.returncode != 0:
-        fail("SERVICE_CUTOVER_COMPOSE_RENDER_FAILED", proc.stderr.decode("utf-8", errors="replace")[:200])
+        fail("SERVICE_CUTOVER_COMPOSE_RENDER_FAILED", proc.stderr.decode("utf-8", errors="replace")[:300])
     try:
         rendered = json.loads(proc.stdout.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -114,16 +127,16 @@ def expected_signature(record: dict[str, Any], key: bytes) -> str:
     return "hmac-sha256:" + hmac.new(key, SIGNING_DOMAIN + canonical_json(payload).encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def validate_record(record: dict[str, Any], args: argparse.Namespace, completion: dict[str, Any]) -> None:
-    if record.get("serviceCutoverPlanVersion") != 1:
-        fail("SERVICE_CUTOVER_PLAN_VERSION_INVALID", "plan version must be 1")
+def validate_record(record: dict[str, Any], args: argparse.Namespace, handoff: dict[str, Any]) -> None:
+    if record.get("serviceCutoverPlanVersion") != PLAN_VERSION:
+        fail("SERVICE_CUTOVER_PLAN_VERSION_INVALID", "plan version must be 2")
     cutover_id = record.get("cutoverId")
     if not isinstance(cutover_id, str) or not CUTOVER_ID.fullmatch(cutover_id):
         fail("SERVICE_CUTOVER_ID_INVALID", "cutover ID is invalid")
     expected_paths = {
         "activationPlanPath": str(args.activation_plan),
         "pendingEvidencePath": str(args.pending),
-        "completionPath": str(args.completion),
+        "targetHandoffPath": str(args.handoff),
         "envFilePath": str(args.env_file),
         "composeFilePath": str(args.compose_file),
     }
@@ -133,30 +146,33 @@ def validate_record(record: dict[str, Any], args: argparse.Namespace, completion
     expected_hashes = {
         "activationPlanFileSha256": sha256_bytes(read_file(args.activation_plan, "ACTIVATION_PLAN", private=True)),
         "pendingEvidenceFileSha256": sha256_bytes(read_file(args.pending, "ACTIVATION_PENDING", private=True)),
-        "completionFileSha256": sha256_bytes(read_file(args.completion, "ACTIVATION_COMPLETION", private=True)),
+        "targetHandoffFileSha256": sha256_bytes(read_file(args.handoff, "TARGET_HANDOFF", private=True)),
         "composeFileSha256": sha256_bytes(read_file(args.compose_file, "SERVICE_CUTOVER_COMPOSE")),
         "renderedComposeSha256": rendered_compose_sha(args.compose_file, args.env_file),
     }
     for field, expected in expected_hashes.items():
         if record.get(field) != expected:
             fail("SERVICE_CUTOVER_ARTIFACT_DRIFT", f"{field} no longer matches signed plan")
-    completion_expected = {
-        "activationId": completion.get("activationId"),
-        "executionId": completion.get("executionId"),
-        "completionFingerprint": completion.get("completionFingerprint"),
-        "completionFileSha256": completion.get("completionFileSha256"),
-        "targetEnvFingerprint": completion.get("targetEnvFingerprint"),
-        "configurationRuntimeAttestationSha256": completion.get("runtimeAttestationSha256"),
+    handoff_expected = {
+        "activationId": handoff.get("activationId"),
+        "executionId": handoff.get("executionId"),
+        "activationPlanFingerprint": handoff.get("planFingerprint"),
+        "targetHandoffFingerprint": handoff.get("handoffFingerprint"),
+        "targetHandoffFileSha256": handoff.get("handoffFileSha256"),
+        "targetConfigAttestationSha256": handoff.get("targetConfigAttestationSha256"),
+        "targetEnvFingerprint": handoff.get("targetEnvFingerprint"),
     }
-    for field, expected in completion_expected.items():
+    for field, expected in handoff_expected.items():
         if record.get(field) != expected:
-            fail("SERVICE_CUTOVER_COMPLETION_BINDING_MISMATCH", f"{field} differs from verified completion")
+            fail("SERVICE_CUTOVER_HANDOFF_BINDING_MISMATCH", f"{field} differs from verified target handoff")
     if record.get("preflightService") != PREFLIGHT_SERVICE or record.get("recreateServices") != RECREATE_SERVICES or record.get("preserveServices") != PRESERVE_SERVICES:
-        fail("SERVICE_CUTOVER_SERVICE_POLICY_INVALID", "service policy differs from v1 contract")
+        fail("SERVICE_CUTOVER_SERVICE_POLICY_INVALID", "service policy differs from v2 contract")
     if record.get("requiredPrivacyEnvironment") != TARGET:
         fail("SERVICE_CUTOVER_PRIVACY_TARGET_INVALID", "required privacy environment differs from policy v1")
     for field in (
+        "targetHandoffMustRemainVerified",
         "preflightMustSucceedBeforeMutation",
+        "liveBaselineRequiredBeforeMutation",
         "renderedComposeMustRemainBound",
         "caddyContainerMustBePreserved",
         "libsqlContainerMustBePreserved",
@@ -167,32 +183,39 @@ def validate_record(record: dict[str, Any], args: argparse.Namespace, completion
     ):
         if record.get(field) is not True:
             fail("SERVICE_CUTOVER_POLICY_INVALID", f"{field} must be true")
-    if record.get("serviceCutoverExecuted") is not False or record.get("liveRuntimeAttested") is not False:
-        fail("SERVICE_CUTOVER_PLAN_BOUNDARY_INVALID", "plan must remain pre-mutation")
+    for field in ("serviceCutoverExecuted", "liveRuntimeAttested", "activationExecuted"):
+        if record.get(field) is not False:
+            fail("SERVICE_CUTOVER_PLAN_BOUNDARY_INVALID", f"{field} must remain false")
     fingerprint = record.get("cutoverPlanFingerprint")
     if not isinstance(fingerprint, str) or not SHA256.fullmatch(fingerprint):
         fail("SERVICE_CUTOVER_PLAN_FINGERPRINT_INVALID", "plan fingerprint is invalid")
-    body = dict(record); body.pop("cutoverPlanFingerprint")
+    body = dict(record)
+    body.pop("cutoverPlanFingerprint")
     if not hmac.compare_digest(fingerprint, sha256_bytes(canonical_json(body).encode("utf-8"))):
         fail("SERVICE_CUTOVER_PLAN_FINGERPRINT_MISMATCH", "plan fingerprint does not match record")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--completion-checker", required=True, type=Path)
-    parser.add_argument("--plan-checker", required=True, type=Path)
-    parser.add_argument("--evidence-checker", required=True, type=Path)
+def add_chain_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--handoff-checker", required=True, type=Path)
+    parser.add_argument("--activation-plan-checker", required=True, type=Path)
+    parser.add_argument("--execution-evidence-checker", required=True, type=Path)
+    parser.add_argument("--target-config-checker", required=True, type=Path)
     parser.add_argument("--activation-plan", required=True, type=Path)
     parser.add_argument("--pending", required=True, type=Path)
-    parser.add_argument("--completion", required=True, type=Path)
+    parser.add_argument("--handoff", required=True, type=Path)
     parser.add_argument("--key-file", required=True, type=Path)
     parser.add_argument("--env-file", required=True, type=Path)
     parser.add_argument("--compose-file", required=True, type=Path)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    add_chain_args(parser)
     parser.add_argument("--cutover-plan", required=True, type=Path)
     args = parser.parse_args()
     try:
         key = read_key(args.key_file)
-        completion = verify_completion(args)
+        handoff = verify_handoff(args)
         raw = read_file(args.cutover_plan, "SERVICE_CUTOVER_PLAN", private=True)
         try:
             envelope = json.loads(raw)
@@ -201,7 +224,7 @@ def main() -> int:
         if not isinstance(envelope, dict) or envelope.get("envelopeVersion") != 1 or not isinstance(envelope.get("record"), dict):
             fail("SERVICE_CUTOVER_PLAN_INVALID", "plan envelope is invalid")
         record = envelope["record"]
-        validate_record(record, args, completion)
+        validate_record(record, args, handoff)
         signature = envelope.get("signature")
         if not isinstance(signature, str) or not HMAC_SHA256.fullmatch(signature):
             fail("SERVICE_CUTOVER_PLAN_SIGNATURE_INVALID", "plan signature is invalid")
@@ -210,12 +233,17 @@ def main() -> int:
         print(json.dumps({
             "mode": "BACKUP_PRIVACY_SERVICE_CUTOVER_PLAN_VERIFICATION",
             "status": "SERVICE_CUTOVER_PLAN_VERIFIED",
+            "serviceCutoverPlanVersion": PLAN_VERSION,
             "cutoverId": record["cutoverId"],
             "activationId": record["activationId"],
             "cutoverPlanFingerprint": record["cutoverPlanFingerprint"],
+            "targetHandoffFingerprint": record["targetHandoffFingerprint"],
             "renderedComposeSha256": record["renderedComposeSha256"],
-            "serviceCutoverExecutionAllowed": True,
+            "liveBaselineRequired": True,
+            "serviceCutoverExecutionAllowed": False,
             "serviceCutoverExecuted": False,
+            "liveRuntimeAttested": False,
+            "activationExecuted": False,
         }, separators=(",", ":"), ensure_ascii=False))
         return 0
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -226,6 +254,8 @@ def main() -> int:
             "blocker": blocker,
             "serviceCutoverExecutionAllowed": False,
             "serviceCutoverExecuted": False,
+            "liveRuntimeAttested": False,
+            "activationExecuted": False,
         }, separators=(",", ":"), ensure_ascii=False))
         return 1
 
