@@ -100,7 +100,13 @@ def active_volume_for_target(container: dict[str, Any], service: str, target: st
     return name
 
 
-def resolve(compose: dict[str, Any], app: dict[str, Any], libsql: dict[str, Any]) -> dict[str, str]:
+def resolve(
+    compose: dict[str, Any],
+    app: dict[str, Any],
+    libsql: dict[str, Any],
+    *,
+    allow_explicit_volume_name_drift: bool = False,
+) -> dict[str, str]:
     containers = {"app": app, "libsql": libsql}
     for service, container in containers.items():
         verify_container_identity(compose, container, service)
@@ -116,16 +122,17 @@ def resolve(compose: dict[str, Any], app: dict[str, Any], libsql: dict[str, Any]
     if len(set(resolved.values())) != len(resolved):
         fail("Active application data volume roles must resolve to distinct Docker volumes")
 
-    declared = compose.get("volumes")
-    if isinstance(declared, dict):
-        for role, logical_name in logical_names.items():
-            definition = declared.get(logical_name)
-            if isinstance(definition, dict):
-                explicit_name = definition.get("name")
-                if isinstance(explicit_name, str) and explicit_name and explicit_name != resolved[role]:
-                    fail(
-                        f"Active Docker volume for {role} does not match rendered explicit Compose name"
-                    )
+    if not allow_explicit_volume_name_drift:
+        declared = compose.get("volumes")
+        if isinstance(declared, dict):
+            for role, logical_name in logical_names.items():
+                definition = declared.get(logical_name)
+                if isinstance(definition, dict):
+                    explicit_name = definition.get("name")
+                    if isinstance(explicit_name, str) and explicit_name and explicit_name != resolved[role]:
+                        fail(
+                            f"Active Docker volume for {role} does not match rendered explicit Compose name"
+                        )
     return resolved
 
 
@@ -134,6 +141,11 @@ def main() -> int:
     parser.add_argument("--compose-json", required=True, type=Path)
     parser.add_argument("--app-inspect-json", required=True, type=Path)
     parser.add_argument("--libsql-inspect-json", required=True, type=Path)
+    parser.add_argument(
+        "--allow-explicit-volume-name-drift",
+        action="store_true",
+        help="Allow actual named-volume mounts to differ from rendered top-level names after an authenticated promotion selector change.",
+    )
     parser.add_argument("--format", choices=("json", "lines"), default="json")
     args = parser.parse_args()
 
@@ -143,7 +155,12 @@ def main() -> int:
             fail("Rendered Compose config must be a JSON object")
         app = inspect_object(read_json(args.app_inspect_json, "app docker inspect"), "app")
         libsql = inspect_object(read_json(args.libsql_inspect_json, "libsql docker inspect"), "libsql")
-        resolved = resolve(compose_raw, app, libsql)
+        resolved = resolve(
+            compose_raw,
+            app,
+            libsql,
+            allow_explicit_volume_name_drift=args.allow_explicit_volume_name_drift,
+        )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
