@@ -1,0 +1,94 @@
+name: Backup Privacy Service Live Baseline Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-service-live-baseline-contract.yml'
+      - 'infra/backup/backup_privacy_service_live_baseline_common.py'
+      - 'infra/backup/write-backup-privacy-service-live-baseline.py'
+      - 'infra/backup/check-backup-privacy-service-live-baseline.py'
+      - 'infra/backup/test-backup-privacy-service-live-baseline.sh'
+      - 'infra/backup/resolve-active-club-volumes.py'
+      - 'infra/backup/check-backup-privacy-service-cutover-plan.py'
+      - 'infra/backup/prepare-backup-privacy-service-cutover-plan.py'
+      - 'infra/backup/check-backup-privacy-target-handoff.py'
+      - 'infra/docker-compose.club.yml'
+      - 'docs/backup-privacy-service-live-baseline.md'
+      - 'docs/backup-privacy-service-cutover-plan.md'
+      - 'TASKS.md'
+      - '.env.example'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-service-live-baseline-contract.yml'
+      - 'infra/backup/backup_privacy_service_live_baseline_common.py'
+      - 'infra/backup/write-backup-privacy-service-live-baseline.py'
+      - 'infra/backup/check-backup-privacy-service-live-baseline.py'
+      - 'infra/backup/test-backup-privacy-service-live-baseline.sh'
+      - 'infra/backup/resolve-active-club-volumes.py'
+      - 'infra/backup/check-backup-privacy-service-cutover-plan.py'
+      - 'infra/backup/prepare-backup-privacy-service-cutover-plan.py'
+      - 'infra/backup/check-backup-privacy-target-handoff.py'
+      - 'infra/docker-compose.club.yml'
+      - 'docs/backup-privacy-service-live-baseline.md'
+      - 'docs/backup-privacy-service-cutover-plan.md'
+      - 'TASKS.md'
+      - '.env.example'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify syntax and product read-only Docker boundary
+        run: |
+          bash -n infra/backup/test-backup-privacy-service-live-baseline.sh
+          python3 -m py_compile \
+            infra/backup/backup_privacy_service_live_baseline_common.py \
+            infra/backup/write-backup-privacy-service-live-baseline.py \
+            infra/backup/check-backup-privacy-service-live-baseline.py
+          python3 - <<'PY'
+          from pathlib import Path
+          files=(
+            'infra/backup/backup_privacy_service_live_baseline_common.py',
+            'infra/backup/write-backup-privacy-service-live-baseline.py',
+            'infra/backup/check-backup-privacy-service-live-baseline.py',
+          )
+          text='\n'.join(Path(p).read_text() for p in files)
+          for required in (
+              '"ps"', '"inspect"', '"config", "--format", "json"',
+              'RestartCount', 'StartedAt', 'PRIVACY_BACKUP_STATE',
+              'serviceCutoverPlanVersion', 'targetHandoffFingerprint',
+          ):
+              assert required in text, required
+          for forbidden in (
+              '"run"', '"create"', '"start"', '"stop"', '"restart"',
+              '"rm"', '"up"', '"down"', 'docker volume', 'os.replace(',
+          ):
+              assert forbidden not in text, forbidden
+          PY
+
+      - name: Verify signed v2 live baseline and current-state drift
+        run: bash infra/backup/test-backup-privacy-service-live-baseline.sh
+
+      - name: Verify real operational gates remain open
+        run: |
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
+          grep -F 'staged target .env:' docs/backup-privacy-service-live-baseline.md
+          grep -F 'currently running app:' docs/backup-privacy-service-live-baseline.md
+          grep -F 'serviceCutoverExecutionAllowed=true' docs/backup-privacy-service-live-baseline.md
+          grep -F 'activationExecuted=false' docs/backup-privacy-service-live-baseline.md
