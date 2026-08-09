@@ -1,0 +1,105 @@
+name: Backup Privacy Target Handoff Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-target-handoff-contract.yml'
+      - 'infra/backup/check-backup-privacy-target-config.py'
+      - 'infra/backup/prepare-backup-privacy-target-handoff.py'
+      - 'infra/backup/check-backup-privacy-target-handoff.py'
+      - 'infra/backup/test-backup-privacy-target-handoff.sh'
+      - 'infra/backup/execute-backup-privacy-activation.py'
+      - 'infra/backup/check-backup-privacy-runtime.sh'
+      - 'infra/backup/backup-privacy-activation-execution.py'
+      - 'docs/backup-privacy-target-handoff.md'
+      - 'TASKS.md'
+      - '.env.example'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-target-handoff-contract.yml'
+      - 'infra/backup/check-backup-privacy-target-config.py'
+      - 'infra/backup/prepare-backup-privacy-target-handoff.py'
+      - 'infra/backup/check-backup-privacy-target-handoff.py'
+      - 'infra/backup/test-backup-privacy-target-handoff.sh'
+      - 'infra/backup/execute-backup-privacy-activation.py'
+      - 'infra/backup/check-backup-privacy-runtime.sh'
+      - 'infra/backup/backup-privacy-activation-execution.py'
+      - 'docs/backup-privacy-target-handoff.md'
+      - 'TASKS.md'
+      - '.env.example'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify syntax and nonterminal boundary
+        run: |
+          bash -n infra/backup/test-backup-privacy-target-handoff.sh
+          python3 -m py_compile \
+            infra/backup/check-backup-privacy-target-config.py \
+            infra/backup/prepare-backup-privacy-target-handoff.py \
+            infra/backup/check-backup-privacy-target-handoff.py
+          python3 - <<'PY'
+          from pathlib import Path
+          files=(
+            'infra/backup/check-backup-privacy-target-config.py',
+            'infra/backup/prepare-backup-privacy-target-handoff.py',
+            'infra/backup/check-backup-privacy-target-handoff.py',
+          )
+          text='\n'.join(Path(p).read_text() for p in files)
+          assert 'TARGET_HANDOFF_READY' in text
+          assert 'TARGET_CONFIGURATION_POLICY_ONLY' in text
+          assert '"activationExecuted": False' in text
+          assert '"liveRuntimeAttested": False' in text
+          for forbidden in ('docker compose','docker inspect','docker ps','docker run','docker restart'):
+              assert forbidden not in text, forbidden
+          PY
+
+      - name: Verify production target-config vs live-runtime distinction
+        env:
+          PRIVACY_BACKUP_STATE: ENABLED
+          PRIVACY_BACKUP_POLICY_VERSION: 1.0.0
+          PRIVACY_BACKUP_ENCRYPTED_AT_REST: 'true'
+          PRIVACY_BACKUP_BOUNDED_RETENTION_CONFIGURED: 'true'
+          PRIVACY_BACKUP_RESTORE_RECONCILIATION: 'true'
+          PRIVACY_NOTIFICATIONS_STATE: DISABLED
+        run: |
+          python3 infra/backup/check-backup-privacy-target-config.py > /tmp/target-config.json
+          python3 - <<'PY'
+          import json
+          r=json.load(open('/tmp/target-config.json'))
+          assert r['readyForIrreversibleProcessing'] is True
+          assert r['backupState']=='ENABLED'
+          assert r['attestationScope']=='TARGET_CONFIGURATION_POLICY_ONLY'
+          assert r['liveRuntimeAttested'] is False
+          assert r['activationExecuted'] is False
+          assert r['blockers']==[]
+          PY
+          set +e
+          bash infra/backup/check-backup-privacy-runtime.sh > /tmp/live-runtime.json
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -F 'LIVE_RUNTIME_ATTESTATION_REQUIRED' /tmp/live-runtime.json
+
+      - name: Verify write, crash-retry, rollback, tamper and legacy-conflict paths
+        run: bash infra/backup/test-backup-privacy-target-handoff.sh
+
+      - name: Verify release gates remain open
+        run: |
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
+          grep -F 'activationExecuted=false' docs/backup-privacy-target-handoff.md
+          grep -F 'TARGET_HANDOFF_VERIFIED' docs/backup-privacy-target-handoff.md
