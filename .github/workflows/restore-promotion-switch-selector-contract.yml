@@ -1,0 +1,180 @@
+name: Restore Promotion Switch Selector Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-promotion-switch-selector-contract.yml'
+      - 'infra/docker-compose.restore-promotion-selector.yml'
+      - 'infra/docker-compose.restore-promotion.yml'
+      - 'infra/backup/prepare-club-restore-promotion-switch-journal.sh'
+      - 'docs/restore-private-promotion-switch-journal.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-promotion-switch-selector-contract.yml'
+      - 'infra/docker-compose.restore-promotion-selector.yml'
+      - 'infra/docker-compose.restore-promotion.yml'
+      - 'infra/backup/prepare-club-restore-promotion-switch-journal.sh'
+      - 'docs/restore-private-promotion-switch-journal.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify journal host boundary remains pre-mutation
+        run: |
+          bash -n infra/backup/prepare-club-restore-promotion-switch-journal.sh
+          python3 - <<'PY'
+          from pathlib import Path
+
+          script = Path('infra/backup/prepare-club-restore-promotion-switch-journal.sh').read_text()
+          active = '\n'.join(line for line in script.splitlines() if not line.lstrip().startswith('#'))
+          assert 'check-club-restore-promotion-candidates.sh' in active
+          assert 'promotion-switch-intent.json' in active
+          assert 'candidate-healthcheck.json' in active
+          assert 'RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_HOST_DIR' in active
+          assert 'restore-promotion-switch-journal' in active
+          assert 'candidate_set_id' in active
+          assert 'chmod 0700 "${journal_root}"' in active
+          assert 'chmod 0700 "${journal_dir}"' in active
+          assert 'backup-restore-promotion-switch-journal' in active
+          assert ':/candidate-healthcheck.json:ro' in active
+          assert ':/promotion-switch-intent.json:ro' in active
+          healthcheck = active.index('bash "${CANDIDATE_HEALTHCHECK}"')
+          normalize = active.index('candidate_set_id="$(python3')
+          journal_run = active.rindex('backup-restore-promotion-switch-journal')
+          assert healthcheck < normalize < journal_run
+          for token in (
+              'docker volume create',
+              'docker volume rm',
+              'docker cp ',
+              'docker compose down',
+              'docker compose stop',
+              'docker compose up',
+              'docker compose restart',
+              'docker-compose.restore-promotion-selector.yml',
+              'RESTORE_PRIVATE_PROMOTION_SELECTED_LIBSQL_VOLUME',
+              'RESTORE_PRIVATE_PROMOTION_SELECTED_REPORTS_VOLUME',
+              'RESTORE_PRIVATE_PROMOTION_SELECTED_TENANT_EXPORTS_VOLUME',
+              'RESTORE_PRIVATE_PROMOTION_SELECTED_DATA_SUBJECT_DELIVERY_VOLUME',
+              '/var/run/docker.sock',
+          ):
+              assert token not in active
+          PY
+
+      - name: Verify isolated durable journal Compose service
+        run: |
+          cp .env.example .env
+          sed -i 's/diagnostics.example.org/localhost/g' .env
+          sed -i 's/replace-with-at-least-32-random-bytes/ci-only-secret-with-at-least-32-characters/' .env
+          RESTORE_STAGING_NAME=restore-unset \
+          RESTORE_PRIVATE_PROMOTION_CANDIDATE_SET_ID=restore-0123456789abcdefabcd \
+          RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_HOST_DIR=/tmp/restore-switch-journal-contract \
+            docker compose --profile backup \
+              --env-file .env \
+              -f infra/docker-compose.club.yml \
+              -f infra/docker-compose.restore-promotion.yml \
+              config --format json >/tmp/restore-switch-journal-compose.json
+          python3 - <<'PY'
+          import json
+
+          with open('/tmp/restore-switch-journal-compose.json', encoding='utf-8') as handle:
+              config = json.load(handle)
+          service = config['services']['backup-restore-promotion-switch-journal']
+          assert service['command'][-1] == 'backup:restore-promotion-switch-journal'
+          assert '--silent' in service['command']
+          assert service.get('network_mode') == 'none'
+          assert not service.get('depends_on')
+          assert service['environment'] == {
+              'RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE': '/candidate-healthcheck.json',
+              'RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE': '/promotion-switch-intent.json',
+              'RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE': '/run/secrets/restore-private-promotion.key',
+              'RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_DIR': '/restore-promotion-switch-journal',
+          }
+          mounts = {item['target']: item for item in service.get('volumes', [])}
+          assert set(mounts) == {
+              '/run/secrets/restore-private-promotion.key',
+              '/restore-promotion-switch-journal',
+          }
+          assert mounts['/run/secrets/restore-private-promotion.key']['type'] == 'bind'
+          assert mounts['/run/secrets/restore-private-promotion.key']['read_only'] is True
+          assert mounts['/restore-promotion-switch-journal']['type'] == 'bind'
+          assert mounts['/restore-promotion-switch-journal'].get('read_only') is not True
+          assert mounts['/restore-promotion-switch-journal']['source'] == (
+              '/tmp/restore-switch-journal-contract/restore-0123456789abcdefabcd'
+          )
+          forbidden = {
+              '/candidate',
+              '/restore-replay',
+              '/var/run/docker.sock',
+              '/var/lib/sqld',
+              '/var/lib/masters/reports',
+              '/var/lib/masters/exports',
+              '/var/lib/masters/data-subject-delivery-packages',
+              '/data',
+              '/config',
+          }
+          assert forbidden.isdisjoint(mounts)
+          PY
+
+      - name: Verify candidate selector renders only four external data volumes
+        run: |
+          RESTORE_PRIVATE_PROMOTION_SELECTED_LIBSQL_VOLUME=master-diagnostics-restore-0123456789abcdefabcd-libsql \
+          RESTORE_PRIVATE_PROMOTION_SELECTED_REPORTS_VOLUME=master-diagnostics-restore-0123456789abcdefabcd-reports \
+          RESTORE_PRIVATE_PROMOTION_SELECTED_TENANT_EXPORTS_VOLUME=master-diagnostics-restore-0123456789abcdefabcd-tenant-exports \
+          RESTORE_PRIVATE_PROMOTION_SELECTED_DATA_SUBJECT_DELIVERY_VOLUME=master-diagnostics-restore-0123456789abcdefabcd-data-subject-delivery \
+            docker compose --env-file .env \
+              -f infra/docker-compose.club.yml \
+              -f infra/docker-compose.restore-promotion-selector.yml \
+              config --format json >/tmp/selector-candidate.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          config = json.loads(Path('/tmp/selector-candidate.json').read_text())
+          expected = {
+              'libsql-data': 'master-diagnostics-restore-0123456789abcdefabcd-libsql',
+              'report-data': 'master-diagnostics-restore-0123456789abcdefabcd-reports',
+              'export-data': 'master-diagnostics-restore-0123456789abcdefabcd-tenant-exports',
+              'data-subject-delivery-data': 'master-diagnostics-restore-0123456789abcdefabcd-data-subject-delivery',
+          }
+          for key, name in expected.items():
+              volume = config['volumes'][key]
+              assert volume['external'] is True
+              assert volume['name'] == name
+          for key in ('caddy-data', 'caddy-config'):
+              assert config['volumes'][key].get('external') is not True
+          selector = Path('infra/docker-compose.restore-promotion-selector.yml').read_text()
+          assert 'caddy-data' not in selector
+          assert 'caddy-config' not in selector
+          assert 'services:' not in selector
+          PY
+
+      - name: Verify rollback selector renders exact previous active volumes
+        run: |
+          RESTORE_PRIVATE_PROMOTION_SELECTED_LIBSQL_VOLUME=infra_libsql-data \
+          RESTORE_PRIVATE_PROMOTION_SELECTED_REPORTS_VOLUME=infra_report-data \
+          RESTORE_PRIVATE_PROMOTION_SELECTED_TENANT_EXPORTS_VOLUME=infra_export-data \
+          RESTORE_PRIVATE_PROMOTION_SELECTED_DATA_SUBJECT_DELIVERY_VOLUME=infra_data-subject-delivery-data \
+            docker compose --env-file .env \
+              -f infra/docker-compose.club.yml \
+              -f infra/docker-compose.restore-promotion-selector.yml \
+              config --format json >/tmp/selector-rollback.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          config = json.loads(Path('/tmp/selector-rollback.json').read_text())
+          expected = {
+              'libsql-data': 'infra_libsql-data',
+              'report-data': 'infra_report-data',
+              'export-data': 'infra_export-data',
+              'data-subject-delivery-data': 'infra_data-subject-delivery-data',
+          }
+          for key, name in expected.items():
+              volume = config['volumes'][key]
+              assert volume['external'] is True
+              assert volume['name'] == name
+          PY
