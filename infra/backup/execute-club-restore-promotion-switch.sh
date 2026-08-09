@@ -204,6 +204,7 @@ resolve_current_volumes() {
     --compose-json "${tmp_dir}/compose.json" \
     --app-inspect-json "${tmp_dir}/app-inspect.json" \
     --libsql-inspect-json "${tmp_dir}/libsql-inspect.json" \
+    --allow-explicit-volume-name-drift \
     --format lines >"${tmp_dir}/current-volumes.txt"
 }
 
