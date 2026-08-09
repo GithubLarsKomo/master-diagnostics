@@ -1,0 +1,203 @@
+name: Restore Promotion Switch Intent Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-promotion-switch-intent-contract.yml'
+      - 'packages/db/**'
+      - 'docs/restore-private-promotion-switch-intent.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-promotion-switch-intent-contract.yml'
+      - 'packages/db/**'
+      - 'docs/restore-private-promotion-switch-intent.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Prepare canonical healthy candidate-set evidence
+        run: |
+          rm -rf /tmp/restore-promotion-switch-contract
+          mkdir -p /tmp/restore-promotion-switch-contract/switch
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path('/tmp/restore-promotion-switch-contract')
+          root.joinpath('promotion.key').write_text(base64.b64encode(bytes([29]) * 32).decode() + '\n')
+          candidates = [
+              {
+                  'role': 'LIBSQL',
+                  'sourceSubpath': 'libsql',
+                  'candidateVolumeName': 'master-diagnostics-restore-0123456789abcdefabcd-libsql',
+                  'rollbackVolumeName': 'infra_libsql-data',
+                  'sourceFingerprint': 'sha256:' + '1' * 64,
+                  'candidateFingerprint': 'sha256:' + '1' * 64,
+                  'fileCount': 3,
+                  'directoryCount': 2,
+                  'byteCount': 4096,
+              },
+              {
+                  'role': 'REPORTS',
+                  'sourceSubpath': 'reports',
+                  'candidateVolumeName': 'master-diagnostics-restore-0123456789abcdefabcd-reports',
+                  'rollbackVolumeName': 'infra_report-data',
+                  'sourceFingerprint': 'sha256:' + '2' * 64,
+                  'candidateFingerprint': 'sha256:' + '2' * 64,
+                  'fileCount': 4,
+                  'directoryCount': 3,
+                  'byteCount': 8192,
+              },
+              {
+                  'role': 'TENANT_EXPORTS',
+                  'sourceSubpath': 'tenant-exports',
+                  'candidateVolumeName': 'master-diagnostics-restore-0123456789abcdefabcd-tenant-exports',
+                  'rollbackVolumeName': 'infra_export-data',
+                  'sourceFingerprint': 'sha256:' + '3' * 64,
+                  'candidateFingerprint': 'sha256:' + '3' * 64,
+                  'fileCount': 0,
+                  'directoryCount': 1,
+                  'byteCount': 0,
+              },
+              {
+                  'role': 'DATA_SUBJECT_DELIVERY',
+                  'sourceSubpath': 'data-subject-delivery',
+                  'candidateVolumeName': 'master-diagnostics-restore-0123456789abcdefabcd-data-subject-delivery',
+                  'rollbackVolumeName': 'infra_data-subject-delivery-data',
+                  'sourceFingerprint': 'sha256:' + '4' * 64,
+                  'candidateFingerprint': 'sha256:' + '4' * 64,
+                  'fileCount': 1,
+                  'directoryCount': 1,
+                  'byteCount': 128,
+              },
+          ]
+          body = {
+              'healthcheckVersion': 1,
+              'planFingerprint': 'sha256:' + 'a' * 64,
+              'activeVolumeSetFingerprint': 'sha256:' + 'b' * 64,
+              'candidateSetId': 'restore-0123456789abcdefabcd',
+              'candidates': candidates,
+          }
+          fingerprint = 'sha256:' + hashlib.sha256(
+              json.dumps(body, sort_keys=True, separators=(',', ':')).encode()
+          ).hexdigest()
+          report = {
+              'mode': 'ISOLATED_RESTORE_PROMOTION_CANDIDATE_SET_HEALTHCHECK',
+              'status': 'CANDIDATE_SET_HEALTHY',
+              'healthcheckVersion': 1,
+              'evidenceRecomputed': True,
+              'candidateMutationAllowed': False,
+              'productionMutationAllowed': False,
+              'promotionExecuted': False,
+              'planFingerprint': body['planFingerprint'],
+              'activeVolumeSetFingerprint': body['activeVolumeSetFingerprint'],
+              'candidateSetId': body['candidateSetId'],
+              'candidateSetFingerprint': fingerprint,
+              'candidates': candidates,
+          }
+          root.joinpath('candidate-healthcheck.json').write_text(
+              json.dumps(report, sort_keys=True, separators=(',', ':')) + '\n'
+          )
+          PY
+          chmod 600 \
+            /tmp/restore-promotion-switch-contract/promotion.key \
+            /tmp/restore-promotion-switch-contract/candidate-healthcheck.json
+
+      - name: Verify switch intent creation and retry reuse
+        run: |
+          for attempt in first second; do
+            env \
+              RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE=/tmp/restore-promotion-switch-contract/candidate-healthcheck.json \
+              RESTORE_PRIVATE_PROMOTION_INTENT_DIR=/tmp/restore-promotion-switch-contract/switch \
+              RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-promotion-switch-contract/promotion.key \
+              pnpm --silent --filter @masters/db backup:restore-promotion-switch-intent \
+              >"/tmp/switch-intent-${attempt}.json"
+          done
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          first = json.loads(Path('/tmp/switch-intent-first.json').read_text())
+          second = json.loads(Path('/tmp/switch-intent-second.json').read_text())
+          intent_path = Path('/tmp/restore-promotion-switch-contract/switch/promotion-switch-intent.json')
+          intent = json.loads(intent_path.read_text())
+
+          assert first['mode'] == 'ISOLATED_RESTORE_PROMOTION_SWITCH_INTENT'
+          assert first['status'] == 'SWITCH_AUTHORIZED'
+          assert first['productionSwitchAuthorized'] is True
+          assert first['productionMutationApplied'] is False
+          assert first['promotionExecuted'] is False
+          assert first['intentCreated'] is True
+          assert first['intentReused'] is False
+          assert second['intentCreated'] is False
+          assert second['intentReused'] is True
+          assert second['authorizedAt'] == first['authorizedAt']
+          assert second['switchIntentSignature'] == first['switchIntentSignature']
+          assert second['candidateSetFingerprint'] == first['candidateSetFingerprint']
+          assert first['selectorStrategy'] == 'COMPOSE_EXTERNAL_NAMED_VOLUMES_V1'
+          assert first['crashRecoveryPolicy'] == 'DURABLE_SWITCH_JOURNAL_BEFORE_PRODUCTION_MUTATION'
+          assert first['rollbackPolicy'] == 'RESELECT_BOUND_ROLLBACK_VOLUMES_ON_FAILED_CUTOVER'
+          assert first['completionPolicy'] == 'SIGNED_SWITCH_RECEIPT_AFTER_POST_SWITCH_HEALTHCHECK'
+          assert intent['record']['phase'] == 'PENDING'
+          assert intent['record']['productionSwitchAuthorized'] is True
+          assert intent['record']['promotionExecuted'] is False
+          assert len(intent['record']['volumes']) == 4
+          assert (intent_path.parent.stat().st_mode & 0o777) == 0o700
+          assert (intent_path.stat().st_mode & 0o777) == 0o600
+          PY
+
+      - name: Verify changed candidate set cannot reuse switch authorization
+        run: |
+          intent=/tmp/restore-promotion-switch-contract/switch/promotion-switch-intent.json
+          before="$(sha256sum "$intent" | cut -d' ' -f1)"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          path = Path('/tmp/restore-promotion-switch-contract/candidate-healthcheck.json')
+          report = json.loads(path.read_text())
+          report['candidates'][1]['candidateVolumeName'] = 'master-diagnostics-restore-fedcba9876543210abcd-reports'
+          body = {
+              'healthcheckVersion': report['healthcheckVersion'],
+              'planFingerprint': report['planFingerprint'],
+              'activeVolumeSetFingerprint': report['activeVolumeSetFingerprint'],
+              'candidateSetId': report['candidateSetId'],
+              'candidates': report['candidates'],
+          }
+          report['candidateSetFingerprint'] = 'sha256:' + hashlib.sha256(
+              json.dumps(body, sort_keys=True, separators=(',', ':')).encode()
+          ).hexdigest()
+          path.write_text(json.dumps(report, sort_keys=True, separators=(',', ':')) + '\n')
+          PY
+
+          set +e
+          env \
+            RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE=/tmp/restore-promotion-switch-contract/candidate-healthcheck.json \
+            RESTORE_PRIVATE_PROMOTION_INTENT_DIR=/tmp/restore-promotion-switch-contract/switch \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-promotion-switch-contract/promotion.key \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-intent \
+            >/tmp/switch-intent-changed.out 2>/tmp/switch-intent-changed.err
+          code=$?
+          set -e
+          test "$code" -eq 1
+          after="$(sha256sum "$intent" | cut -d' ' -f1)"
+          test "$before" = "$after"
+          grep -q 'does not match candidate-set healthcheck evidence' /tmp/switch-intent-changed.err
