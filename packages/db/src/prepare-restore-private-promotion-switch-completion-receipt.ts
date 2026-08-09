@@ -27,7 +27,6 @@ async function main(): Promise<void> {
   const intentFile = requireAbsolutePath('RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE');
   const journalFile = requireAbsolutePath('RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE');
   const executionDir = requireAbsolutePath('RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR');
-  const receiptDir = requireAbsolutePath('RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_DIR');
   const healthcheckFile = requireAbsolutePath('RESTORE_PRIVATE_PROMOTION_POST_SWITCH_HEALTHCHECK_FILE');
   const keyFile = requireAbsolutePath('RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE');
 
@@ -36,7 +35,7 @@ async function main(): Promise<void> {
   const events = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(executionDir, keyFile, journal);
   const healthcheck = await readHealthcheck(healthcheckFile);
   const result = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(
-    receiptDir,
+    executionDir,
     keyFile,
     journal,
     events,
