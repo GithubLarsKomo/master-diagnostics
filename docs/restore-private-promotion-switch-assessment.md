@@ -2,103 +2,57 @@
 
 ## Purpose
 
-This slice makes the #215 crash/retry state machine operational **read-only** without weakening the pre-cutover safety gate.
+The post-cutover assessment layer authenticates immutable switch evidence and classifies actual Docker mount identity without re-running the pre-cutover candidate healthcheck.
 
-It introduces two separate capabilities:
-
-1. authenticated post-cutover assessment of switch state from immutable evidence plus actual Docker mount identity,
-2. a signed execution-event writer that modifies only the durable switch evidence directory and never production state.
-
-No host command in this slice changes Docker volume selection, stops or starts production services, or marks a promotion complete.
+It remains operationally read-only. A separate event writer may append signed execution evidence, but neither component changes Docker selection or production services.
 
 `PRIVACY_BACKUP_STATE=DISABLED` remains unchanged.
 
-## Two different trust questions
+## Trust split
 
-Before the first cutover mutation, the system must still prove:
+Before the first cutover mutation, the system must still prove the complete #212/#213/#214 chain with the original rollback set active.
 
-- the private restore is healthy,
-- the candidate set is healthy,
-- the original rollback volume set is still the active set,
-- the signed execution plan, switch intent, and durable PENDING journal all match that fresh state.
-
-That remains the job of the existing pre-cutover chain, including #212.
-
-After a selector change, the statement “the original rollback set is still active” is intentionally no longer true. Recovery therefore must not rerun the pre-cutover healthcheck and interpret that expected difference as evidence corruption.
-
-Post-cutover recovery instead proves:
+After `CUTOVER_STARTED`, recovery proves instead:
 
 ```text
 HMAC-authenticated switch intent
   -> HMAC-verified durable PENDING journal
   -> HMAC-verified append-only execution events
-  -> actual current app/libSQL Docker mounts
-  -> deterministic #215 assessment
+  -> actual app/libSQL Docker mounts
+  -> deterministic execution assessment
 ```
 
-## Post-cutover switch intent authentication
+The existing strict switch-intent reader remains unchanged for pre-cutover use. The post-cutover authenticator proves HMAC authenticity and internal invariants without asserting that rollback volumes are still active.
 
-`readAuthenticatedRestorePrivatePromotionSwitchIntent(...)` verifies:
-
-- expected file name and non-symlink regular-file semantics,
-- envelope and record version,
-- canonical authorization timestamp,
-- all required safety-policy constants,
-- candidate-set / plan / rollback-set fingerprint formats,
-- candidate-set identity,
-- exact ordered four-role candidate/rollback mapping,
-- candidate and rollback volume set uniqueness/disjointness,
-- HMAC-SHA256 under the existing switch-intent signing domain.
-
-This function intentionally does **not** assert that rollback volumes are currently active. It authenticates immutable authorization evidence after a cutover.
-
-The existing `readVerifiedRestorePrivatePromotionSwitchIntent(..., healthcheck)` remains unchanged and stronger. It is still required where a fresh pre-cutover candidate healthcheck must be bound to the intent.
-
-## Durable journal and event authentication
-
-The authenticated intent is passed to the existing signed journal reader, which verifies the #214 journal HMAC and its exact binding to the intent.
-
-The verified journal is then passed to the #215 event reader, which verifies:
-
-- event HMACs,
-- event-to-journal binding,
-- previous-event signature chain,
-- legal phase transitions,
-- terminal-state consistency.
-
-## Read-only assessment CLI
+## Assessment CLI
 
 ```bash
 pnpm --filter @masters/db backup:restore-promotion-switch-assess
 ```
 
-Inputs:
+Inputs are switch intent, durable journal, execution-event directory, promotion key, and the four actual volume names.
 
-- switch-intent file,
-- durable switch-journal file,
-- durable execution-event directory,
-- promotion HMAC key,
-- four currently active Docker volume names.
-
-Output mode:
-
-```text
-ISOLATED_RESTORE_PROMOTION_SWITCH_EXECUTION_ASSESSMENT
-```
-
-The output exposes the #215 state such as:
+The CLI writes nothing and may return:
 
 - `READY_TO_START`
 - `READY_TO_SELECT_CANDIDATE`
 - `RECOVER_CANDIDATE_SELECTION`
 - `VERIFY_CANDIDATE`
+- `READY_TO_SELECT_ROLLBACK`
 - `RECOVER_ROLLBACK_SELECTION`
 - `VERIFY_ROLLBACK`
 - `COMPLETED`
 - `ROLLED_BACK`
 - `BLOCKED`
 
-The CLI writes nothing.
+Current volumes are separately classified as:
+
+- `ROLLBACK`
+- `CANDIDATE`
+- `MIXED_KNOWN`
+- `UNKNOWN`
+
+`MIXED_KNOWN` means every role uses one of the two journal-authorized names, but the selector transition is incomplete. It is recoverable only when signed execution evidence already establishes the intended direction. `UNKNOWN` is always blocked.
 
 ## Host assessment
 
@@ -106,39 +60,9 @@ The CLI writes nothing.
 bash infra/backup/assess-club-restore-promotion-switch.sh restore-<timestamp>-<uuid>
 ```
 
-The wrapper:
+The wrapper uses `docker compose ps -a` so stopped containers remain valid mount evidence during crash recovery. It renders only the base Club Compose stack, inspects one `app` and one `libsql` container, and resolves their actual mounted volume names through the existing role-aware resolver.
 
-1. validates the private restore workspace, switch intent, promotion key, and durable journal location,
-2. uses the candidate-set ID from the intent only to locate the evidence directory, with strict format validation,
-3. renders the base Club Compose file read-only,
-4. resolves one existing `app` container and one existing `libsql` container with `docker compose ps -a`, including stopped containers,
-5. reads their mounts with `docker inspect`,
-6. resolves the four actual active/bound data volume names with the existing role-aware resolver,
-7. runs the isolated assessment container with those names.
-
-Using `ps -a` is intentional. If a future cutover stops the rollback-bound containers and the host crashes before candidate-bound replacements are created, the stopped containers still provide exact mount evidence. If there is no unique container identity, assessment fails closed.
-
-The wrapper does not invoke:
-
-- #212 candidate healthcheck,
-- selector Compose override,
-- `docker volume create/rm`,
-- `docker cp`,
-- production `compose stop/down/up/restart`,
-- execution-event writer.
-
-## Isolated assessment service
-
-`backup-restore-promotion-switch-assess` has only:
-
-- promotion key read-only,
-- switch intent read-only,
-- switch evidence directory read-only,
-- `network_mode: none`,
-- no Docker socket,
-- no database,
-- no candidate or production data-volume mount,
-- no service dependency.
+It does not call the pre-cutover candidate healthcheck, selector override, event writer, volume mutation, or production service stop/start.
 
 ## Signed event writer
 
@@ -146,34 +70,46 @@ The wrapper does not invoke:
 pnpm --filter @masters/db backup:restore-promotion-switch-event
 ```
 
-with one explicit phase in:
+Allowed phases now include:
 
 ```text
-RESTORE_PRIVATE_PROMOTION_SWITCH_EVENT_PHASE
+CUTOVER_STARTED
+CANDIDATE_SELECTED
+COMPLETED
+ROLLBACK_STARTED
+ROLLBACK_SELECTED
+ROLLBACK_VERIFIED
 ```
 
-The event writer:
+`ROLLBACK_STARTED` is required before any future rollback mutation. This is the durable directional marker that makes a crash during partial rollback unambiguous.
 
-- authenticates switch intent,
-- verifies durable journal,
-- verifies existing execution-event chain,
-- persists only the next legal signed event,
-- modifies only the durable switch evidence directory,
-- reports `productionMutationApplied=false`.
-
-The isolated `backup-restore-promotion-switch-event` service has the same minimal inputs as assessment, except that the evidence directory is writable. It still has no Docker socket, production volume, database, or network.
-
-The read-only host assessment never calls this service.
+The writer modifies only the durable evidence directory and reports `productionMutationApplied=false`.
 
 ## Crash-recovery examples
 
-### Candidate selector applied, evidence write lost
+### Partial candidate activation
 
 Evidence:
 
 - `CUTOVER_STARTED` exists,
-- current live/stopped mounts are exactly the candidate set,
-- `CANDIDATE_SELECTED` does not yet exist.
+- some roles already use candidate volumes,
+- the remaining roles still use their bound rollback volumes.
+
+Assessment:
+
+```text
+READY_TO_SELECT_CANDIDATE / MIXED_KNOWN
+```
+
+A future executor may converge the remaining services to the candidate set. No unknown volume is accepted.
+
+### Candidate activation complete, evidence write lost
+
+Evidence:
+
+- `CUTOVER_STARTED` exists,
+- all four roles use candidate volumes,
+- `CANDIDATE_SELECTED` is missing.
 
 Assessment:
 
@@ -181,15 +117,30 @@ Assessment:
 RECOVER_CANDIDATE_SELECTION
 ```
 
-A future executor may persist the missing `CANDIDATE_SELECTED` event without changing the selector again.
+The missing event may be persisted without selecting candidate volumes again.
 
-### Rollback applied, rollback evidence write lost
+### Partial rollback
 
 Evidence:
 
-- `CANDIDATE_SELECTED` exists,
-- current mounts are exactly the rollback set,
-- `ROLLBACK_SELECTED` does not yet exist.
+- `ROLLBACK_STARTED` exists,
+- some roles use rollback volumes and others still use candidate volumes.
+
+Assessment:
+
+```text
+READY_TO_SELECT_ROLLBACK / MIXED_KNOWN
+```
+
+The future executor may converge only toward the journal-bound rollback set.
+
+### Rollback complete, evidence write lost
+
+Evidence:
+
+- `ROLLBACK_STARTED` exists,
+- all four roles use rollback volumes,
+- `ROLLBACK_SELECTED` is missing.
 
 Assessment:
 
@@ -197,29 +148,30 @@ Assessment:
 RECOVER_ROLLBACK_SELECTION
 ```
 
-A future executor may persist the missing rollback event without applying rollback a second time.
+The missing rollback event may be persisted without applying rollback a second time.
 
-### Mixed volume identity
+### Unsafe rollback without directional evidence
 
-If the four mounts do not exactly match either the journal-bound candidate set or rollback set:
+If `CANDIDATE_SELECTED` is the last event but rollback volumes appear without prior `ROLLBACK_STARTED`, assessment is `BLOCKED`. The system will not assume whether an external actor changed volumes or an authorized rollback was attempted.
 
-```text
-BLOCKED / ACTIVE_VOLUME_SET_MIXED_OR_UNKNOWN
-```
+## Isolated services
 
-No automatic repair is inferred.
+`backup-restore-promotion-switch-assess` mounts key, intent, and evidence read-only with `network_mode: none`.
+
+`backup-restore-promotion-switch-event` uses the same isolation but mounts only the evidence directory read-write.
+
+Neither has a Docker socket, database, candidate volume, production data volume, or service dependency.
 
 ## Scope boundary
 
-Still not implemented:
+Still outside this layer:
 
 - production stop/start,
 - selector activation,
 - rollback activation,
-- candidate application healthcheck,
-- rollback application healthcheck,
+- candidate/rollback application healthchecks,
 - signed final promotion receipt,
-- rollback-volume cleanup,
-- `PRIVACY_BACKUP_STATE` transition.
+- volume cleanup,
+- transition of `PRIVACY_BACKUP_STATE`.
 
-The next safe slice can implement a bounded mutating executor because all pre-mutation authorization and post-crash state reconstruction primitives are now explicit. That executor must consume these APIs and may never infer switch state from naming conventions alone.
+A mutating executor must consume these states exactly and may never infer switch direction from naming conventions or an incomplete event trail.
