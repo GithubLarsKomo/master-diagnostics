@@ -2,112 +2,121 @@
 
 ## Purpose
 
-This slice defines the crash/retry evidence protocol for a later production restore cutover. It deliberately does **not** implement a host executor, Docker service stop/start, selector activation, rollback execution, or a post-switch completion command.
+The switch execution protocol is the crash/retry evidence layer between the durable PENDING switch journal and a future mutating Docker cutover.
 
-The goal is narrower: once the durable PENDING switch journal exists, every future mutating cutover must leave an append-only signed trail that lets a retry distinguish what actually happened from what was merely intended.
+It remains independent from Docker: the core service does not stop/start services, render selectors, or write product volumes. It records and assesses what a later executor is allowed to do.
 
 `PRIVACY_BACKUP_STATE=DISABLED` remains unchanged.
 
-## Why the PENDING journal is not enough
-
-The #214 journal proves what candidate and rollback volume sets were authorized before mutation. It cannot by itself prove whether a host crashed:
-
-- before any cutover mutation,
-- after the candidate set became active but before evidence was persisted,
-- after candidate verification failed and rollback already became active,
-- after a successful cutover but before terminal evidence was written.
-
-Recomputing intent after those points would be unsafe. Recovery must combine immutable pre-cutover evidence with the **actual current mounted volume set** and an append-only execution trail.
-
 ## Signed execution events
 
-Execution events use the promotion HMAC key with a separate signing domain:
+Events use the promotion HMAC key with the dedicated domain:
 
 ```text
 masters:restore-private-promotion-switch-execution-event:v1
 ```
 
-The allowed phases are:
+Allowed transitions are:
 
-1. `CUTOVER_STARTED`
-2. `CANDIDATE_SELECTED`
-3. either `COMPLETED` or `ROLLBACK_SELECTED`
-4. after rollback only: `ROLLBACK_VERIFIED`
+```text
+CUTOVER_STARTED
+  -> CANDIDATE_SELECTED
+       -> COMPLETED
+       -> ROLLBACK_STARTED -> ROLLBACK_SELECTED -> ROLLBACK_VERIFIED
+  -> ROLLBACK_STARTED -> ROLLBACK_SELECTED -> ROLLBACK_VERIFIED
+```
 
-No other transition is legal.
+`ROLLBACK_STARTED` is deliberately persisted **before** any rollback selector mutation. It removes the ambiguity between:
+
+- a cutover that never started rollback, and
+- a rollback that already changed Docker state but crashed before `ROLLBACK_SELECTED` evidence was written.
+
+A rollback can therefore be triggered even when candidate activation failed before the complete candidate set became healthy.
 
 Each event binds:
 
-- event version and fixed sequence,
+- contiguous sequence number,
 - phase and canonical timestamp,
-- journal fingerprint and journal signature,
+- journal fingerprint and signature,
 - candidate-set ID,
 - previous event signature,
-- selected volume set (`CANDIDATE` or `ROLLBACK`),
+- target volume set (`CANDIDATE` or `ROLLBACK`),
 - `productionMutationStarted=true`,
-- terminal state,
+- terminal flag,
 - `promotionExecuted=true` only for `COMPLETED`.
 
-The fixed event filenames are:
+Files are exclusive-create `0600`; the evidence directory is `0700`.
+
+Fixed filenames:
 
 ```text
 promotion-switch-cutover-started.json
 promotion-switch-candidate-selected.json
 promotion-switch-completed.json
+promotion-switch-rollback-started.json
 promotion-switch-rollback-selected.json
 promotion-switch-rollback-verified.json
 ```
 
-Events are exclusive-create, `0600`, and chained through `previousEventSignature`. The execution directory is `0700`.
+## Current-volume classification
+
+The four actual Docker volume identities are classified against the journal-bound candidate and rollback sets as:
+
+- `CANDIDATE`: all four exactly match candidate volumes,
+- `ROLLBACK`: all four exactly match rollback volumes,
+- `MIXED_KNOWN`: every role is one of its two authorized names, but the set is partially switched,
+- `UNKNOWN`: at least one role uses a volume not authorized by the journal.
+
+`UNKNOWN` is always blocked.
+
+`MIXED_KNOWN` is accepted only when signed execution evidence already establishes the intended direction. This is required for crashes between individual service recreations; for example candidate libSQL may already be active while the stopped app container still references rollback report/export volumes.
 
 ## Deterministic recovery assessment
 
-`assessRestorePrivatePromotionSwitchExecution(...)` compares:
+`assessRestorePrivatePromotionSwitchExecution(...)` combines the verified journal, signed event chain, and actual four-volume state.
 
-- the verified durable journal,
-- the verified signed event chain,
-- the four currently active Docker volume names.
-
-Only an exact four-volume match is accepted. A mixed or unknown active set is always `BLOCKED`.
-
-Key states:
-
-| Evidence | Active set | Assessment |
+| Last evidence | Current set | Assessment |
 | --- | --- | --- |
-| no execution events | rollback | `READY_TO_START` |
+| none | rollback | `READY_TO_START` |
+| none | candidate/mixed/unknown | `BLOCKED` |
 | `CUTOVER_STARTED` | rollback | `READY_TO_SELECT_CANDIDATE` |
+| `CUTOVER_STARTED` | mixed known | `READY_TO_SELECT_CANDIDATE` |
 | `CUTOVER_STARTED` | candidate | `RECOVER_CANDIDATE_SELECTION` |
 | `CANDIDATE_SELECTED` | candidate | `VERIFY_CANDIDATE` |
-| `CANDIDATE_SELECTED` | rollback | `RECOVER_ROLLBACK_SELECTION` |
+| `CANDIDATE_SELECTED` | anything else | `BLOCKED` |
+| `ROLLBACK_STARTED` | candidate | `READY_TO_SELECT_ROLLBACK` |
+| `ROLLBACK_STARTED` | mixed known | `READY_TO_SELECT_ROLLBACK` |
+| `ROLLBACK_STARTED` | rollback | `RECOVER_ROLLBACK_SELECTION` |
 | `ROLLBACK_SELECTED` | rollback | `VERIFY_ROLLBACK` |
 | `ROLLBACK_VERIFIED` | rollback | `ROLLED_BACK` |
 | `COMPLETED` | candidate | `COMPLETED` |
 
-The two `RECOVER_*` states explicitly cover crashes in the narrow interval between a real selector change and persistence of the corresponding evidence event. Recovery must persist the missing evidence step only after the live mount identity proves that the selector change already happened.
+The `RECOVER_*` states mean the real selector transition already completed but its corresponding evidence write did not. Recovery may persist the missing event only after current mount identity proves the transition.
 
-Terminal evidence conflicting with the current active volume set is `BLOCKED`, never silently repaired.
+The `READY_TO_SELECT_*` states permit a future executor to converge an authorized partial or unchanged set toward the direction already established by signed evidence.
 
-## Critical trust-boundary limitation
+Terminal evidence conflicting with live mounts is always blocked.
 
-This slice intentionally exposes only a library API and tests. It does **not** add a host assessment CLI.
+## Pre-cutover and post-cutover trust boundaries
 
-Reason: the existing #212 candidate-set healthcheck is a pre-cutover control. Its execution-plan binding requires the original rollback set to still be the current active set. After a successful candidate selector change that condition is intentionally false.
+Before `CUTOVER_STARTED`, the strict #212 candidate healthcheck and signed #213/#214 authorization chain remain mandatory.
 
-Therefore post-cutover recovery must not rerun #212 as though nothing changed.
+After `CUTOVER_STARTED`, retries use authenticated switch intent, durable journal, execution events, and actual mount identities. They must not pretend that the pre-cutover rollback-set condition is still true after candidate selection.
 
-Before an operational recovery CLI is added, the switch intent and PENDING journal need an authentication path that verifies their HMAC and internal invariants **without requiring the pre-cutover current-active-volume assertion**. The stronger #212 binding must still be required immediately before the first cutover mutation.
+## Scope boundary
 
-## Out of scope
+The execution core itself still contains no Docker invocation. Operational read-only assessment and event persistence are provided separately by #216.
 
-No code in this slice:
+A future mutating executor must:
 
-- invokes Docker or Docker Compose,
-- stops or starts a production service,
-- renders or activates the selector,
-- writes a production volume,
-- performs rollback,
-- performs a post-switch application healthcheck,
-- creates a completed promotion receipt,
-- changes `PRIVACY_BACKUP_STATE`.
+1. create/reuse the durable journal,
+2. obtain `READY_TO_START`,
+3. persist `CUTOVER_STARTED` before mutation,
+4. converge only to journal-bound candidate volumes,
+5. persist `CANDIDATE_SELECTED` only after exact candidate mount identity is proven,
+6. persist `ROLLBACK_STARTED` before any rollback mutation,
+7. converge rollback only to journal-bound rollback volumes,
+8. never delete either volume set during cutover,
+9. use health verification before terminal evidence.
 
-The next safe slice is authenticated post-cutover assessment: separate cryptographic authentication of switch intent/journal from the pre-cutover healthcheck binding, then expose the read-only event/current-volume assessment operationally. Only after that should a mutating switch executor be implemented.
+No code in this document changes `PRIVACY_BACKUP_STATE`.
