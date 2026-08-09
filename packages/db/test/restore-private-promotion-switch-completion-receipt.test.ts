@@ -87,12 +87,7 @@ async function fixture() {
 describe('restore private promotion switch completion receipt', () => {
   it('binds a healthy candidate post-switch report to journal and candidate-selection evidence', async () => {
     const { events } = await fixture();
-    const record = createRestorePrivatePromotionSwitchCompletionReceiptRecord(
-      journal(),
-      events,
-      healthcheck(),
-      '2026-08-09T11:06:00.000Z',
-    );
+    const record = createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck(), '2026-08-09T11:06:00.000Z');
     expect(record).toMatchObject({
       receiptVersion: 1,
       status: 'PROMOTED',
@@ -113,75 +108,52 @@ describe('restore private promotion switch completion receipt', () => {
 
   it('persists signed immutable receipt and reuses it idempotently', async () => {
     const { keyFile, evidenceDir, events } = await fixture();
-    const first = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(
-      evidenceDir,
-      keyFile,
-      journal(),
-      events,
-      healthcheck(),
-      '2026-08-09T11:06:00.000Z',
-    );
+    const first = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(evidenceDir, keyFile, journal(), events, healthcheck(), '2026-08-09T11:06:00.000Z');
     expect(first.created).toBe(true);
     expect(first.envelope.signature).toMatch(/^hmac-sha256:[0-9a-f]{64}$/);
-    const second = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(
-      evidenceDir,
-      keyFile,
-      journal(),
-      events,
-      healthcheck(),
-      '2026-08-09T11:10:00.000Z',
-    );
+    const second = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(evidenceDir, keyFile, journal(), events, healthcheck(), '2026-08-09T11:10:00.000Z');
     expect(second.created).toBe(false);
     expect(second.envelope).toEqual(first.envelope);
     expect(await readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(first.path, keyFile, journal(), events)).toEqual(first.envelope);
   });
 
-  it('rejects unhealthy or mismatched post-switch evidence', async () => {
-    const { events } = await fixture();
-    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(
-      journal(),
-      events,
-      healthcheck({ appHealth: 'BROKEN' as 'HEALTHY' }),
-      '2026-08-09T11:06:00.000Z',
-    )).toThrow('requires a healthy post-switch report');
-    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(
-      journal(),
-      events,
-      healthcheck({ candidateSetId: 'restore-fedcba9876543210abcd' }),
-      '2026-08-09T11:06:00.000Z',
-    )).toThrow('candidate-set ID does not match');
-    const badVolumes = healthcheck().candidateVolumes.map((item, index) => index === 1 ? { ...item, volumeName: 'wrong_reports' } : item);
-    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(
-      journal(),
-      events,
-      healthcheck({ candidateVolumes: badVolumes }),
-      '2026-08-09T11:06:00.000Z',
-    )).toThrow('does not match durable journal candidate');
+  it('remains verifiable after COMPLETED but cannot be newly created after completion', async () => {
+    const { keyFile, evidenceDir, events } = await fixture();
+    const receipt = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(evidenceDir, keyFile, journal(), events, healthcheck(), '2026-08-09T11:06:00.000Z');
+    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(evidenceDir, keyFile, journal(), 'COMPLETED', '2026-08-09T11:07:00.000Z');
+    const completedEvents = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(evidenceDir, keyFile, journal());
+    expect(await readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(receipt.path, keyFile, journal(), completedEvents)).toEqual(receipt.envelope);
+
+    const freshRoot = await mkdtemp(join(tmpdir(), 'restore-switch-completion-late-'));
+    const freshKey = join(freshRoot, 'promotion.key');
+    const freshEvidence = join(freshRoot, 'evidence');
+    await writeFile(freshKey, `${Buffer.alloc(32, 121).toString('base64')}\n`, { mode: 0o600 });
+    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(freshEvidence, freshKey, journal(), 'CUTOVER_STARTED', '2026-08-09T11:01:00.000Z');
+    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(freshEvidence, freshKey, journal(), 'CANDIDATE_SELECTED', '2026-08-09T11:02:00.000Z');
+    await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(freshEvidence, freshKey, journal(), 'COMPLETED', '2026-08-09T11:07:00.000Z');
+    const lateEvents = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(freshEvidence, freshKey, journal());
+    await expect(ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(freshEvidence, freshKey, journal(), lateEvents, healthcheck(), '2026-08-09T11:08:00.000Z')).rejects.toThrow('incompatible with rollback or non-completion execution evidence');
   });
 
-  it('requires CANDIDATE_SELECTED to be the latest execution evidence', async () => {
+  it('rejects unhealthy or mismatched post-switch evidence', async () => {
+    const { events } = await fixture();
+    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck({ appHealth: 'BROKEN' as 'HEALTHY' }), '2026-08-09T11:06:00.000Z')).toThrow('requires a healthy post-switch report');
+    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck({ candidateSetId: 'restore-fedcba9876543210abcd' }), '2026-08-09T11:06:00.000Z')).toThrow('candidate-set ID does not match');
+    const badVolumes = healthcheck().candidateVolumes.map((item, index) => index === 1 ? { ...item, volumeName: 'wrong_reports' } : item);
+    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck({ candidateVolumes: badVolumes }), '2026-08-09T11:06:00.000Z')).toThrow('does not match durable journal candidate');
+  });
+
+  it('rejects rollback evidence as a completion source', async () => {
     const { root, keyFile, evidenceDir } = await fixture();
     await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(evidenceDir, keyFile, journal(), 'ROLLBACK_STARTED', '2026-08-09T11:03:00.000Z');
     const events = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(evidenceDir, keyFile, journal());
-    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(
-      journal(),
-      events,
-      healthcheck(),
-      '2026-08-09T11:06:00.000Z',
-    )).toThrow('requires CANDIDATE_SELECTED as latest execution evidence');
+    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck(), '2026-08-09T11:06:00.000Z')).toThrow('incompatible with rollback or non-completion execution evidence');
     expect(root).toBeTruthy();
   });
 
   it('detects persisted receipt tampering', async () => {
     const { keyFile, evidenceDir, events } = await fixture();
-    const created = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(
-      evidenceDir,
-      keyFile,
-      journal(),
-      events,
-      healthcheck(),
-      '2026-08-09T11:06:00.000Z',
-    );
+    const created = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(evidenceDir, keyFile, journal(), events, healthcheck(), '2026-08-09T11:06:00.000Z');
     const parsed = JSON.parse(await readFile(created.path, 'utf8')) as { record: { appHealth: string }; signature: string };
     parsed.record.appHealth = 'BROKEN';
     await writeFile(created.path, `${JSON.stringify(parsed, null, 2)}\n`);
