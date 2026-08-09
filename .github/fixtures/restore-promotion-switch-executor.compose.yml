@@ -1,0 +1,50 @@
+services:
+  libsql:
+    image: caddy:2.11.3-alpine
+    entrypoint: ["sh", "-c"]
+    command: ["touch /tmp/healthy; exec sleep 3600"]
+    volumes:
+      - libsql-data:/var/lib/sqld
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/healthy"]
+      interval: 1s
+      timeout: 1s
+      retries: 10
+
+  app:
+    image: caddy:2.11.3-alpine
+    entrypoint: ["sh", "-c"]
+    command: ["touch /tmp/healthy; exec sleep 3600"]
+    volumes:
+      - report-data:/var/lib/masters/reports
+      - export-data:/var/lib/masters/exports
+      - data-subject-delivery-data:/var/lib/masters/data-subject-delivery-packages
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/healthy && test \"$$(cat /var/lib/masters/reports/health 2>/dev/null)\" = healthy"]
+      interval: 1s
+      timeout: 1s
+      retries: 5
+
+  export-cleanup:
+    image: caddy:2.11.3-alpine
+    entrypoint: ["sh", "-c"]
+    command: ["exec sleep 3600"]
+    volumes:
+      - export-data:/var/lib/masters/exports
+      - data-subject-delivery-data:/var/lib/masters/data-subject-delivery-packages
+
+  retention-scan:
+    image: caddy:2.11.3-alpine
+    entrypoint: ["sh", "-c"]
+    command: ["exec sleep 3600"]
+
+  caddy:
+    image: caddy:2.11.3-alpine
+    entrypoint: ["sh", "-c"]
+    command: ["exec sleep 3600"]
+
+volumes:
+  libsql-data:
+  report-data:
+  export-data:
+  data-subject-delivery-data:
