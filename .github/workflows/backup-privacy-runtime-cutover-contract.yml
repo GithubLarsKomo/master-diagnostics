@@ -1,0 +1,290 @@
+name: Backup Privacy Runtime Cutover Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-runtime-cutover-contract.yml'
+      - 'infra/backup/check-backup-privacy-activation-completion.py'
+      - 'infra/backup/backup-privacy-runtime-cutover.py'
+      - 'infra/backup/prepare-club-backup-privacy-runtime-cutover.sh'
+      - 'infra/backup/execute-backup-privacy-activation.py'
+      - 'infra/backup/backup-privacy-activation-execution.py'
+      - 'docs/backup-privacy-runtime-cutover.md'
+      - '.env.example'
+      - 'TASKS.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-runtime-cutover-contract.yml'
+      - 'infra/backup/check-backup-privacy-activation-completion.py'
+      - 'infra/backup/backup-privacy-runtime-cutover.py'
+      - 'infra/backup/prepare-club-backup-privacy-runtime-cutover.sh'
+      - 'infra/backup/execute-backup-privacy-activation.py'
+      - 'infra/backup/backup-privacy-activation-execution.py'
+      - 'docs/backup-privacy-runtime-cutover.md'
+      - '.env.example'
+      - 'TASKS.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    env:
+      PRIVACY_BACKUP_STATE: DISABLED
+      FIXTURE: /tmp/backup-privacy-activation-executor/success
+      CUTOVER: /tmp/backup-privacy-runtime-cutover
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify syntax and read-only host boundary
+        run: |
+          bash -n infra/backup/prepare-club-backup-privacy-runtime-cutover.sh
+          python3 -m py_compile \
+            infra/backup/check-backup-privacy-activation-completion.py \
+            infra/backup/backup-privacy-runtime-cutover.py
+          python3 - <<'PY'
+          from pathlib import Path
+          host=Path('infra/backup/prepare-club-backup-privacy-runtime-cutover.sh').read_text()
+          core=Path('infra/backup/backup-privacy-runtime-cutover.py').read_text()
+          assert 'docker inspect' in host
+          assert 'ps -a -q' in host
+          assert 'config --format json' in host
+          for token in (' compose up ', ' compose down ', ' compose stop ', ' compose restart ', 'docker volume', 'os.replace('):
+              assert token not in host, token
+          for token in ('subprocess.run(["docker"', "subprocess.run(['docker'", 'os.replace('):
+              assert token not in core, token
+          assert 'cutoverJournalRequiredBeforeMutation' in core
+          assert 'PRESERVE_CONTAINER_ID' in core
+          assert 'RECOVER_TARGET_RECREATE' in core
+          PY
+
+      - name: Build an authentic completed file-activation fixture
+        run: |
+          bash infra/backup/test-backup-privacy-activation-executor.sh
+          test -f "$FIXTURE/club.env"
+          grep -Fx 'PRIVACY_BACKUP_STATE=ENABLED' "$FIXTURE/club.env"
+          pending=$(cat "$FIXTURE/pending-path")
+          test -f "$(dirname "$pending")/activation-execution-completed.json"
+          mkdir -p "$CUTOVER/inspect/pre" "$CUTOVER/inspect/target" "$CUTOVER/inspect/partial" "$CUTOVER/inspect/pre-drift" "$CUTOVER/inspect/preserved-drift" "$CUTOVER/journals"
+          chmod 700 "$CUTOVER" "$CUTOVER/inspect" "$CUTOVER/inspect/pre" "$CUTOVER/inspect/target" "$CUTOVER/inspect/partial" "$CUTOVER/inspect/pre-drift" "$CUTOVER/inspect/preserved-drift" "$CUTOVER/journals"
+
+      - name: Prepare deterministic Docker inspect evidence
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['CUTOVER'])/'inspect'
+          project='ci-runtime'
+          ids={
+              'app':'1'*64,'export-cleanup':'2'*64,'retention-scan':'3'*64,'libsql':'4'*64,'caddy':'5'*64,
+              'app-target':'6'*64,'export-cleanup-target':'7'*64,'retention-scan-target':'8'*64,
+              'app-drift':'9'*64,'caddy-drift':'a'*64,
+          }
+          target_env=[
+              'PRIVACY_BACKUP_STATE=ENABLED',
+              'PRIVACY_BACKUP_POLICY_VERSION=1.0.0',
+              'PRIVACY_BACKUP_ENCRYPTED_AT_REST=true',
+              'PRIVACY_BACKUP_BOUNDED_RETENTION_CONFIGURED=true',
+              'PRIVACY_BACKUP_RESTORE_RECONCILIATION=true',
+          ]
+          disabled_env=['PRIVACY_BACKUP_STATE=DISABLED']
+          def obj(service,cid,env=None,healthy=False):
+              state={'Status':'running'}
+              if healthy: state['Health']={'Status':'healthy'}
+              return [{'Id':cid,'Config':{'Labels':{'com.docker.compose.project':project,'com.docker.compose.service':service},'Env':env or []},'State':state}]
+          def write(folder,service,cid,env=None,healthy=False):
+              (root/folder/f'{service}.json').write_text(json.dumps(obj(service,cid,env,healthy))+'\n')
+          for folder in ('pre','pre-drift','preserved-drift'):
+              write(folder,'app',ids['app'],disabled_env,True)
+              write(folder,'export-cleanup',ids['export-cleanup'],disabled_env)
+              write(folder,'retention-scan',ids['retention-scan'],disabled_env)
+              write(folder,'libsql',ids['libsql'],[],True)
+              write(folder,'caddy',ids['caddy'],[])
+          write('pre-drift','app',ids['app-drift'],disabled_env,True)
+          write('preserved-drift','caddy',ids['caddy-drift'],[])
+          write('target','app',ids['app-target'],target_env,True)
+          write('target','export-cleanup',ids['export-cleanup-target'],target_env)
+          write('target','retention-scan',ids['retention-scan-target'],target_env)
+          write('target','libsql',ids['libsql'],[],True)
+          write('target','caddy',ids['caddy'],[])
+          write('partial','app',ids['app-target'],target_env,True)
+          write('partial','export-cleanup',ids['export-cleanup'],disabled_env)
+          write('partial','retention-scan',ids['retention-scan'],disabled_env)
+          write('partial','libsql',ids['libsql'],[],True)
+          write('partial','caddy',ids['caddy'],[])
+          PY
+
+      - name: Authenticate #226 COMPLETED independently of later live cutover
+        run: |
+          plan=$(cat "$FIXTURE/plan-path"); pending=$(cat "$FIXTURE/pending-path")
+          python3 infra/backup/check-backup-privacy-activation-completion.py \
+            --plan "$plan" --pending "$pending" --key-file /tmp/backup-privacy-activation-executor/key \
+            --env-file "$FIXTURE/club.env" >"$CUTOVER/completion.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads(Path(os.environ['CUTOVER']+'/completion.json').read_text())
+          assert r['status']=='ACTIVATION_COMPLETION_AUTHENTICATED'
+          assert r['envState']=='TARGET' and r['runtimeCutoverAllowed'] is True
+          assert r['fileActivationExecuted'] is True and r['liveRuntimeActivationVerified'] is False
+          PY
+
+      - name: Persist signed PENDING runtime journal and verify idempotent READY_TO_CUTOVER
+        run: |
+          set -Eeuo pipefail
+          plan=$(cat "$FIXTURE/plan-path"); pending=$(cat "$FIXTURE/pending-path"); inspect="$CUTOVER/inspect/pre"
+          python3 infra/backup/backup-privacy-runtime-cutover.py prepare \
+            --plan "$plan" --pending "$pending" --key-file /tmp/backup-privacy-activation-executor/key --env-file "$FIXTURE/club.env" \
+            --app-inspect "$inspect/app.json" --export-inspect "$inspect/export-cleanup.json" --retention-inspect "$inspect/retention-scan.json" \
+            --libsql-inspect "$inspect/libsql.json" --caddy-inspect "$inspect/caddy.json" \
+            --output-root "$CUTOVER/journals" --started-at 2026-08-10T00:20:00.000Z >"$CUTOVER/prepared.json"
+          journal=$(python3 -c "import json,os;print(json.load(open(os.environ['CUTOVER']+'/prepared.json'))['journalPath'])")
+          echo "$journal" >"$CUTOVER/journal-path"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['CUTOVER']); r=json.loads(root.joinpath('prepared.json').read_text())
+          assert r['status']=='READY_TO_CUTOVER' and r['journalCreated'] is True
+          assert r['runtimeMutationAllowed'] is True and r['operationalActivationCompleted'] is False
+          p=Path(r['journalPath']); assert oct(p.stat().st_mode & 0o777)=='0o600'; assert oct(p.parent.stat().st_mode & 0o777)=='0o700'
+          PY
+          python3 infra/backup/backup-privacy-runtime-cutover.py prepare \
+            --plan "$plan" --pending "$pending" --key-file /tmp/backup-privacy-activation-executor/key --env-file "$FIXTURE/club.env" \
+            --app-inspect "$inspect/app.json" --export-inspect "$inspect/export-cleanup.json" --retention-inspect "$inspect/retention-scan.json" \
+            --libsql-inspect "$inspect/libsql.json" --caddy-inspect "$inspect/caddy.json" \
+            --output-root "$CUTOVER/journals" >"$CUTOVER/retry.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads(Path(os.environ['CUTOVER']+'/retry.json').read_text())
+          assert r['status']=='READY_TO_CUTOVER' and r['journalCreated'] is False and r['journalReused'] is True
+          PY
+
+      - name: Assess full target and partial known live states without mutation
+        run: |
+          set -Eeuo pipefail
+          plan=$(cat "$FIXTURE/plan-path"); pending=$(cat "$FIXTURE/pending-path"); journal=$(cat "$CUTOVER/journal-path")
+          check_state() {
+            local folder="$1" out="$2"
+            python3 infra/backup/backup-privacy-runtime-cutover.py check \
+              --plan "$plan" --pending "$pending" --key-file /tmp/backup-privacy-activation-executor/key --env-file "$FIXTURE/club.env" \
+              --journal "$journal" --app-inspect "$folder/app.json" --export-inspect "$folder/export-cleanup.json" \
+              --retention-inspect "$folder/retention-scan.json" --libsql-inspect "$folder/libsql.json" --caddy-inspect "$folder/caddy.json" >"$out"
+          }
+          check_state "$CUTOVER/inspect/target" "$CUTOVER/target.json"
+          check_state "$CUTOVER/inspect/partial" "$CUTOVER/partial.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['CUTOVER'])
+          target=json.loads(root.joinpath('target.json').read_text()); partial=json.loads(root.joinpath('partial.json').read_text())
+          assert target['status']=='READY_TO_VALIDATE' and target['liveRuntimeChanged'] is True and target['runtimeMutationAllowed'] is False
+          assert partial['status']=='RECOVER_TARGET_RECREATE' and partial['liveRuntimeChanged'] is True and partial['runtimeMutationAllowed'] is True
+          PY
+
+      - name: Fail closed on pre-live and preserved-container drift
+        run: |
+          set -Eeuo pipefail
+          plan=$(cat "$FIXTURE/plan-path"); pending=$(cat "$FIXTURE/pending-path"); journal=$(cat "$CUTOVER/journal-path")
+          for case in pre-drift preserved-drift; do
+            inspect="$CUTOVER/inspect/$case"
+            set +e
+            python3 infra/backup/backup-privacy-runtime-cutover.py check \
+              --plan "$plan" --pending "$pending" --key-file /tmp/backup-privacy-activation-executor/key --env-file "$FIXTURE/club.env" \
+              --journal "$journal" --app-inspect "$inspect/app.json" --export-inspect "$inspect/export-cleanup.json" \
+              --retention-inspect "$inspect/retention-scan.json" --libsql-inspect "$inspect/libsql.json" --caddy-inspect "$inspect/caddy.json" >"$CUTOVER/$case.json"
+            code=$?; set -e; test "$code" -ne 0
+            grep -q '"status":"BLOCKED"' "$CUTOVER/$case.json"
+          done
+          grep -q 'PRE_LIVE_CONTAINER_ID_DRIFT' "$CUTOVER/pre-drift.json"
+          grep -q 'PRESERVED_CONTAINER_ID_DRIFT' "$CUTOVER/preserved-drift.json"
+
+      - name: Block journal creation if mutable live runtime is already ENABLED
+        run: |
+          set -Eeuo pipefail
+          plan=$(cat "$FIXTURE/plan-path"); pending=$(cat "$FIXTURE/pending-path"); inspect="$CUTOVER/inspect/target"
+          mkdir -p "$CUTOVER/no-evidence"; chmod 700 "$CUTOVER/no-evidence"
+          set +e
+          python3 infra/backup/backup-privacy-runtime-cutover.py prepare \
+            --plan "$plan" --pending "$pending" --key-file /tmp/backup-privacy-activation-executor/key --env-file "$FIXTURE/club.env" \
+            --app-inspect "$inspect/app.json" --export-inspect "$inspect/export-cleanup.json" --retention-inspect "$inspect/retention-scan.json" \
+            --libsql-inspect "$inspect/libsql.json" --caddy-inspect "$inspect/caddy.json" --output-root "$CUTOVER/no-evidence" >"$CUTOVER/target-without-journal.json"
+          code=$?; set -e; test "$code" -ne 0
+          grep -q 'RUNTIME_CUTOVER_PRESTATE_INVALID' "$CUTOVER/target-without-journal.json"
+
+      - name: HMAC tampering of runtime journal blocks
+        run: |
+          set -Eeuo pipefail
+          journal=$(cat "$CUTOVER/journal-path"); activation=$(basename "$(dirname "$journal")")
+          mkdir -p "$CUTOVER/tampered/$activation"; chmod 700 "$CUTOVER/tampered" "$CUTOVER/tampered/$activation"
+          cp "$journal" "$CUTOVER/tampered/$activation/runtime-cutover-pending.json"; chmod 600 "$CUTOVER/tampered/$activation/runtime-cutover-pending.json"
+          python3 - "$CUTOVER/tampered/$activation/runtime-cutover-pending.json" <<'PY'
+          import json,sys
+          from pathlib import Path
+          p=Path(sys.argv[1]); d=json.loads(p.read_text()); d['record']['caddyPolicy']='TAMPERED'; p.write_text(json.dumps(d)+'\n'); p.chmod(0o600)
+          PY
+          plan=$(cat "$FIXTURE/plan-path"); pending=$(cat "$FIXTURE/pending-path"); inspect="$CUTOVER/inspect/pre"
+          set +e
+          python3 infra/backup/backup-privacy-runtime-cutover.py check \
+            --plan "$plan" --pending "$pending" --key-file /tmp/backup-privacy-activation-executor/key --env-file "$FIXTURE/club.env" \
+            --journal "$CUTOVER/tampered/$activation/runtime-cutover-pending.json" \
+            --app-inspect "$inspect/app.json" --export-inspect "$inspect/export-cleanup.json" --retention-inspect "$inspect/retention-scan.json" \
+            --libsql-inspect "$inspect/libsql.json" --caddy-inspect "$inspect/caddy.json" >"$CUTOVER/tamper.json"
+          code=$?; set -e; test "$code" -ne 0
+          grep -q 'RUNTIME_CUTOVER_POLICY_INVALID\|RUNTIME_CUTOVER_JOURNAL_SIGNATURE_MISMATCH' "$CUTOVER/tamper.json"
+
+      - name: Verify host wrapper with stable mocked Docker identity remains read-only
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$CUTOVER/mockbin" "$CUTOVER/host-journals"; chmod 700 "$CUTOVER/mockbin" "$CUTOVER/host-journals"
+          cat >"$CUTOVER/mockbin/docker" <<'SH'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          if [[ "$1" == compose ]]; then
+            shift
+            if [[ " $* " == *" config --format json "* ]]; then echo '{"name":"ci-runtime"}'; exit 0; fi
+            if [[ " $* " == *" ps -a -q "* ]]; then
+              service="${@: -1}"
+              case "$service" in
+                app) echo "$(printf '1%.0s' {1..64})" ;;
+                export-cleanup) echo "$(printf '2%.0s' {1..64})" ;;
+                retention-scan) echo "$(printf '3%.0s' {1..64})" ;;
+                libsql) echo "$(printf '4%.0s' {1..64})" ;;
+                caddy) echo "$(printf '5%.0s' {1..64})" ;;
+                *) exit 1 ;;
+              esac
+              exit 0
+            fi
+          fi
+          if [[ "$1" == inspect ]]; then
+            id="$2"
+            case "${id:0:1}" in
+              1) cat "$MOCK_INSPECT_ROOT/app.json" ;;
+              2) cat "$MOCK_INSPECT_ROOT/export-cleanup.json" ;;
+              3) cat "$MOCK_INSPECT_ROOT/retention-scan.json" ;;
+              4) cat "$MOCK_INSPECT_ROOT/libsql.json" ;;
+              5) cat "$MOCK_INSPECT_ROOT/caddy.json" ;;
+              *) exit 1 ;;
+            esac
+            exit 0
+          fi
+          echo "unexpected docker command: $*" >&2; exit 2
+          SH
+          chmod 700 "$CUTOVER/mockbin/docker"
+          plan=$(cat "$FIXTURE/plan-path"); pending=$(cat "$FIXTURE/pending-path")
+          PATH="$CUTOVER/mockbin:$PATH" MOCK_INSPECT_ROOT="$CUTOVER/inspect/pre" \
+          BACKUP_PRIVACY_RUNTIME_ENV_FILE="$FIXTURE/club.env" BACKUP_PRIVACY_RUNTIME_CUTOVER_HOST_DIR="$CUTOVER/host-journals" \
+            bash infra/backup/prepare-club-backup-privacy-runtime-cutover.sh "$plan" "$pending" /tmp/backup-privacy-activation-executor/key >"$CUTOVER/host.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads(Path(os.environ['CUTOVER']+'/host.json').read_text())
+          assert r['status']=='READY_TO_CUTOVER' and r['runtimeMutationAllowed'] is True
+          PY
+
+      - name: Verify evidence privacy and release boundary
+        run: |
+          journal=$(cat "$CUTOVER/journal-path")
+          if grep -F 'ci-secret-success' "$journal"; then exit 1; fi
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
