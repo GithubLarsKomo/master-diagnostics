@@ -5,14 +5,17 @@ on:
     paths:
       - '.github/workflows/backup-privacy-service-cutover-plan-contract.yml'
       - 'infra/backup/check-backup-privacy-activation-completion.py'
-      - 'infra/backup/prepare-backup-privacy-service-cutover-plan.py'
-      - 'infra/backup/check-backup-privacy-service-cutover-plan.py'
-      - 'infra/backup/test-backup-privacy-service-cutover-plan.sh'
+      - 'infra/backup/prepare-backup-privacy-service-cutover-plan-v2.py'
+      - 'infra/backup/check-backup-privacy-service-cutover-plan-v2.py'
+      - 'infra/backup/test-backup-privacy-service-cutover-plan-v2.sh'
+      - 'infra/backup/prepare-backup-privacy-target-handoff.py'
+      - 'infra/backup/check-backup-privacy-target-handoff.py'
+      - 'infra/backup/check-backup-privacy-target-config.py'
       - 'infra/backup/execute-backup-privacy-activation.py'
       - 'infra/backup/backup-privacy-activation-execution.py'
       - 'infra/docker-compose.club.yml'
       - 'docs/backup-privacy-service-cutover-plan.md'
-      - 'docs/backup-privacy-activation-execution.md'
+      - 'docs/backup-privacy-target-handoff.md'
       - 'TASKS.md'
       - '.env.example'
   push:
@@ -20,14 +23,17 @@ on:
     paths:
       - '.github/workflows/backup-privacy-service-cutover-plan-contract.yml'
       - 'infra/backup/check-backup-privacy-activation-completion.py'
-      - 'infra/backup/prepare-backup-privacy-service-cutover-plan.py'
-      - 'infra/backup/check-backup-privacy-service-cutover-plan.py'
-      - 'infra/backup/test-backup-privacy-service-cutover-plan.sh'
+      - 'infra/backup/prepare-backup-privacy-service-cutover-plan-v2.py'
+      - 'infra/backup/check-backup-privacy-service-cutover-plan-v2.py'
+      - 'infra/backup/test-backup-privacy-service-cutover-plan-v2.sh'
+      - 'infra/backup/prepare-backup-privacy-target-handoff.py'
+      - 'infra/backup/check-backup-privacy-target-handoff.py'
+      - 'infra/backup/check-backup-privacy-target-config.py'
       - 'infra/backup/execute-backup-privacy-activation.py'
       - 'infra/backup/backup-privacy-activation-execution.py'
       - 'infra/docker-compose.club.yml'
       - 'docs/backup-privacy-service-cutover-plan.md'
-      - 'docs/backup-privacy-activation-execution.md'
+      - 'docs/backup-privacy-target-handoff.md'
       - 'TASKS.md'
       - '.env.example'
 
@@ -48,44 +54,37 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Verify syntax and read-only planning boundary
+      - name: Verify syntax and corrected trust-chain boundary
         run: |
           python3 -m py_compile \
             infra/backup/check-backup-privacy-activation-completion.py \
-            infra/backup/prepare-backup-privacy-service-cutover-plan.py \
-            infra/backup/check-backup-privacy-service-cutover-plan.py
-          bash -n infra/backup/test-backup-privacy-service-cutover-plan.sh
+            infra/backup/prepare-backup-privacy-service-cutover-plan-v2.py \
+            infra/backup/check-backup-privacy-service-cutover-plan-v2.py
+          bash -n infra/backup/test-backup-privacy-service-cutover-plan-v2.sh
           python3 - <<'PY'
           from pathlib import Path
-          text='\n'.join(Path(p).read_text() for p in (
-              'infra/backup/prepare-backup-privacy-service-cutover-plan.py',
-              'infra/backup/check-backup-privacy-service-cutover-plan.py',
-          ))
-          assert '"config", "--format", "json"' in text
-          for forbidden in (
-              '"up"', '"run"', '"restart"', '"stop"', '"down"',
-              'docker volume', 'os.replace(', 'subprocess.run(["docker", "inspect"',
-          ):
-              assert forbidden not in text, forbidden
-          for required in (
-              'preflightMustSucceedBeforeMutation',
-              'caddyContainerMustBePreserved',
-              'libsqlContainerMustBePreserved',
-              'liveRuntimeEnvironmentAttestationRequired',
-              'rollbackOnCutoverFailureRequired',
-              'serviceCutoverExecuted',
-          ):
-              assert required in text, required
+          legacy=Path('infra/backup/check-backup-privacy-activation-completion.py').read_text()
+          planner=Path('infra/backup/prepare-backup-privacy-service-cutover-plan-v2.py').read_text()
+          verifier=Path('infra/backup/check-backup-privacy-service-cutover-plan-v2.py').read_text()
+          assert 'LIVE_RUNTIME_COMPLETION_REQUIRED' in legacy
+          assert 'TARGET_HANDOFF_VERIFIED' in planner
+          assert 'targetHandoffRequiredBeforePlanning' in planner
+          assert 'targetHandoffIsNonterminal' in planner
+          assert 'liveBaselineRequiredBeforeMutation' in planner
+          assert 'liveRuntimeCompletionRequiredAfterCutover' in planner
+          assert 'serviceCutoverPlanVersion' in verifier
+          for text in (planner, verifier):
+              for forbidden in ('docker inspect','docker ps','docker run','docker restart','docker volume','os.replace('):
+                  assert forbidden not in text, forbidden
           PY
 
-      - name: Verify signed deterministic cutover-plan chain
-        run: bash infra/backup/test-backup-privacy-service-cutover-plan.sh
+      - name: Verify signed target-handoff cutover-plan v2 chain
+        run: bash infra/backup/test-backup-privacy-service-cutover-plan-v2.sh
 
       - name: Verify release and live-cutover gates remain open
         run: |
           grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
           grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
           grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
-          test -f docs/backup-privacy-service-cutover-plan.md
-          grep -F 'Live-Baseline' docs/backup-privacy-service-cutover-plan.md
-          grep -F 'keine Service-Mutation' docs/backup-privacy-service-cutover-plan.md
+          grep -F 'TARGET_HANDOFF_VERIFIED' docs/backup-privacy-service-cutover-plan.md
+          grep -F 'Service-Cutover-Plan v2' docs/backup-privacy-service-cutover-plan.md
