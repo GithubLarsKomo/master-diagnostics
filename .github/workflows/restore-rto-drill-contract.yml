@@ -1,0 +1,174 @@
+name: Restore RTO Drill Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-rto-drill-contract.yml'
+      - 'infra/backup/run-club-restore-rto-drill.sh'
+      - 'infra/backup/write-restore-rto-drill-report.py'
+      - '.env.example'
+      - 'docs/restore-rto-drill.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-rto-drill-contract.yml'
+      - 'infra/backup/run-club-restore-rto-drill.sh'
+      - 'infra/backup/write-restore-rto-drill-report.py'
+      - '.env.example'
+      - 'docs/restore-rto-drill.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify drill syntax and operational ordering
+        run: |
+          bash -n infra/backup/run-club-restore-rto-drill.sh
+          python3 -m py_compile infra/backup/write-restore-rto-drill-report.py
+          python3 - <<'PY'
+          from pathlib import Path
+          script=Path('infra/backup/run-club-restore-rto-drill.sh').read_text()
+          report=Path('infra/backup/write-restore-rto-drill-report.py').read_text()
+          order=[
+              'verify-club-backup.sh',
+              'stage-club-restore.sh',
+              'replay-club-restore-privacy-db.sh',
+              'authorize-club-restore-promotion.sh',
+              'prepare-club-restore-promotion-plan.sh',
+              'prepare-club-restore-promotion-candidates.sh',
+              'authorize-club-restore-promotion-switch.sh',
+              'execute-club-restore-promotion-switch.sh',
+          ]
+          positions=[script.index(item) for item in order]
+          assert positions == sorted(positions)
+          assert 'flock -n 9' in script
+          assert 'rtoTargetSeconds": 14400' in report
+          assert '"privacyBackupActivationAllowed": False' in report
+          assert 'PRIVACY_BACKUP_STATE=ENABLED' not in script
+          assert 'PRIVACY_BACKUP_STATE=ENABLED' not in report
+          assert 'docker volume rm' not in script
+          assert 'docker volume create' not in script
+          assert 'docker cp ' not in script
+          PY
+
+      - name: Exercise completed and rolled-back drill reports with mocked host chain
+        run: |
+          set -Eeuo pipefail
+          root=/tmp/md-rto-drill-contract
+          repo="$root/repo"
+          backup="$root/backups"
+          replay="$root/replay"
+          reports="$root/reports"
+          key="$root/drill.key"
+          rm -rf "$root"
+          mkdir -p "$repo/infra/backup" "$backup" "$replay" "$reports"
+          cp infra/backup/run-club-restore-rto-drill.sh "$repo/infra/backup/"
+          cp infra/backup/write-restore-rto-drill-report.py "$repo/infra/backup/"
+
+          bundle=masters-backup-20260809T120000Z-11111111-2222-3333-4444-555555555555.mdbak
+          printf 'encrypted-test-bundle\n' >"$backup/$bundle"
+          sha256sum "$backup/$bundle" | awk -v name="$bundle" '{print $1"  "name}' >"$backup/$bundle.sha256"
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          Path('/tmp/md-rto-drill-contract/drill.key').write_text(base64.b64encode(bytes([83])*32).decode()+'\n')
+          PY
+          chmod 600 "$key"
+
+          cat >"$repo/.env" <<EOF
+          BACKUP_HOST_DIR=$backup
+          RESTORE_PRIVACY_REPLAY_HOST_DIR=$replay
+          RESTORE_RTO_DRILL_REPORT_HOST_DIR=$reports
+          RESTORE_RTO_DRILL_REPORT_KEY_FILE=$key
+          MOCK_SWITCH_STATUS=COMPLETED
+          EOF
+
+          for name in verify-club-backup.sh replay-club-restore-privacy-db.sh authorize-club-restore-promotion.sh prepare-club-restore-promotion-plan.sh prepare-club-restore-promotion-candidates.sh; do
+            cat >"$repo/infra/backup/$name" <<'SH'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          exit 0
+          SH
+            chmod +x "$repo/infra/backup/$name"
+          done
+
+          cat >"$repo/infra/backup/stage-club-restore.sh" <<'SH'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          printf '%s\n' '{"ok":true,"stagingName":"restore-20260809T120100Z-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}'
+          SH
+          chmod +x "$repo/infra/backup/stage-club-restore.sh"
+
+          cat >"$repo/infra/backup/authorize-club-restore-promotion-switch.sh" <<'SH'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          staging="$1"
+          root="${RESTORE_PRIVACY_REPLAY_HOST_DIR}/${staging}/promotion/switch"
+          mkdir -p "$root"
+          printf '%s\n' '{"record":{"candidateSetId":"restore-0123456789abcdefabcd"}}' >"$root/promotion-switch-intent.json"
+          SH
+          chmod +x "$repo/infra/backup/authorize-club-restore-promotion-switch.sh"
+
+          cat >"$repo/infra/backup/execute-club-restore-promotion-switch.sh" <<'SH'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          if [[ "${MOCK_SWITCH_STATUS}" == COMPLETED ]]; then
+            printf '%s\n' '{"mode":"CLUB_RESTORE_PROMOTION_SWITCH_EXECUTOR","status":"COMPLETED","promotionExecuted":true}'
+            exit 0
+          fi
+          printf '%s\n' '{"mode":"CLUB_RESTORE_PROMOTION_SWITCH_EXECUTOR","status":"ROLLED_BACK","promotionExecuted":false}'
+          exit 1
+          SH
+          chmod +x "$repo/infra/backup/execute-club-restore-promotion-switch.sh"
+
+          bash "$repo/infra/backup/run-club-restore-rto-drill.sh" "$bundle" >"$root/completed.out"
+          test "$(find "$reports" -maxdepth 1 -name 'drill-*.json' | wc -l)" -eq 1
+          first="$(find "$reports" -maxdepth 1 -name 'drill-*.json' | head -n1)"
+          FIRST="$first" KEY="$key" python3 - <<'PY'
+          import base64,hashlib,hmac,json,os
+          from pathlib import Path
+          path=Path(os.environ['FIRST'])
+          envelope=json.loads(path.read_text())
+          signature=envelope.pop('signature')
+          key=base64.b64decode(Path(os.environ['KEY']).read_text().strip())
+          canonical=json.dumps(envelope,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
+          expected='hmac-sha256:'+hmac.new(key,b'masters:restore-rto-drill-report:v1\n'+canonical,hashlib.sha256).hexdigest()
+          assert hmac.compare_digest(signature,expected)
+          record=envelope['record']
+          assert record['status']=='COMPLETED'
+          assert record['rtoMet'] is True
+          assert record['privacyBackupActivationAllowed'] is False
+          assert record['privacyReconciliationIncluded'] is True
+          assert record['controlledPromotionIncluded'] is True
+          assert len(record['phases'])==8
+          assert all(item['status']=='COMPLETED' for item in record['phases'])
+          PY
+
+          sed -i 's/MOCK_SWITCH_STATUS=COMPLETED/MOCK_SWITCH_STATUS=ROLLED_BACK/' "$repo/.env"
+          set +e
+          bash "$repo/infra/backup/run-club-restore-rto-drill.sh" "$bundle" >"$root/rolled-back.out"
+          code=$?
+          set -e
+          test "$code" -ne 0
+          test "$(find "$reports" -maxdepth 1 -name 'drill-*.json' | wc -l)" -eq 2
+          second="$(find "$reports" -maxdepth 1 -name 'drill-*.json' ! -path "$first" | head -n1)"
+          SECOND="$second" python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          record=json.loads(Path(os.environ['SECOND']).read_text())['record']
+          assert record['status']=='ROLLED_BACK'
+          assert record['rtoMet'] is False
+          assert record['privacyBackupActivationAllowed'] is False
+          assert record['terminalPhase']=='EXECUTE_SWITCH'
+          assert record['phases'][-1]['status']=='FAILED'
+          PY
+
+      - name: Verify report permissions and no task/release gate auto-completion
+        run: |
+          test "$(stat -c '%a' /tmp/md-rto-drill-contract/reports)" = 700
+          while IFS= read -r path; do test "$(stat -c '%a' "$path")" = 600; done < <(find /tmp/md-rto-drill-contract/reports -maxdepth 1 -name 'drill-*.json')
+          grep -q -- '- \[ \] Privacy-Reconciliation, Healthcheck, kontrollierte Promotion und RTO praktisch testen' TASKS.md
+          grep -q -- '- \[ \] Backup und Restore praktisch getestet wurden' TASKS.md
+          grep -q '^PRIVACY_BACKUP_STATE=DISABLED$' .env.example
