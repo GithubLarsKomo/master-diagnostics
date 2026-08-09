@@ -1,0 +1,216 @@
+name: Restore Promotion Switch Assessment Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-promotion-switch-assessment-contract.yml'
+      - 'packages/db/**'
+      - 'infra/backup/assess-club-restore-promotion-switch.sh'
+      - 'infra/docker-compose.restore-promotion-assessment.yml'
+      - 'docs/restore-private-promotion-switch-assessment.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-promotion-switch-assessment-contract.yml'
+      - 'packages/db/**'
+      - 'infra/backup/assess-club-restore-promotion-switch.sh'
+      - 'infra/docker-compose.restore-promotion-assessment.yml'
+      - 'docs/restore-private-promotion-switch-assessment.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify authentication and execution state-machine units
+        run: |
+          pnpm --filter @masters/db exec vitest run \
+            test/restore-private-promotion-switch-authentication.test.ts \
+            test/restore-private-promotion-switch-execution.test.ts
+
+      - name: Prepare authentic switch intent and journal
+        run: |
+          rm -rf /tmp/restore-switch-assessment-contract
+          mkdir -p \
+            /tmp/restore-switch-assessment-contract/switch \
+            /tmp/restore-switch-assessment-contract/evidence
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path('/tmp/restore-switch-assessment-contract')
+          root.joinpath('promotion.key').write_text(base64.b64encode(bytes([109]) * 32).decode() + '\n')
+          candidates = [
+              {'role':'LIBSQL','sourceSubpath':'libsql','candidateVolumeName':'master-diagnostics-restore-0123456789abcdefabcd-libsql','rollbackVolumeName':'infra_libsql-data','sourceFingerprint':'sha256:'+'1'*64,'candidateFingerprint':'sha256:'+'1'*64,'fileCount':2,'directoryCount':2,'byteCount':2048},
+              {'role':'REPORTS','sourceSubpath':'reports','candidateVolumeName':'master-diagnostics-restore-0123456789abcdefabcd-reports','rollbackVolumeName':'infra_report-data','sourceFingerprint':'sha256:'+'2'*64,'candidateFingerprint':'sha256:'+'2'*64,'fileCount':3,'directoryCount':2,'byteCount':4096},
+              {'role':'TENANT_EXPORTS','sourceSubpath':'tenant-exports','candidateVolumeName':'master-diagnostics-restore-0123456789abcdefabcd-tenant-exports','rollbackVolumeName':'infra_export-data','sourceFingerprint':'sha256:'+'3'*64,'candidateFingerprint':'sha256:'+'3'*64,'fileCount':0,'directoryCount':1,'byteCount':0},
+              {'role':'DATA_SUBJECT_DELIVERY','sourceSubpath':'data-subject-delivery','candidateVolumeName':'master-diagnostics-restore-0123456789abcdefabcd-data-subject-delivery','rollbackVolumeName':'infra_data-subject-delivery-data','sourceFingerprint':'sha256:'+'4'*64,'candidateFingerprint':'sha256:'+'4'*64,'fileCount':1,'directoryCount':1,'byteCount':256},
+          ]
+          body = {
+              'healthcheckVersion': 1,
+              'planFingerprint': 'sha256:' + 'a' * 64,
+              'activeVolumeSetFingerprint': 'sha256:' + 'b' * 64,
+              'candidateSetId': 'restore-0123456789abcdefabcd',
+              'candidates': candidates,
+          }
+          report = {
+              'mode':'ISOLATED_RESTORE_PROMOTION_CANDIDATE_SET_HEALTHCHECK',
+              'status':'CANDIDATE_SET_HEALTHY',
+              'healthcheckVersion':1,
+              'evidenceRecomputed':True,
+              'candidateMutationAllowed':False,
+              'productionMutationAllowed':False,
+              'promotionExecuted':False,
+              **body,
+              'candidateSetFingerprint':'sha256:' + hashlib.sha256(json.dumps(body, sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
+          }
+          root.joinpath('candidate-healthcheck.json').write_text(json.dumps(report, separators=(',', ':')) + '\n')
+          PY
+          chmod 600 \
+            /tmp/restore-switch-assessment-contract/promotion.key \
+            /tmp/restore-switch-assessment-contract/candidate-healthcheck.json
+
+          env \
+            RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE=/tmp/restore-switch-assessment-contract/candidate-healthcheck.json \
+            RESTORE_PRIVATE_PROMOTION_INTENT_DIR=/tmp/restore-switch-assessment-contract/switch \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-switch-assessment-contract/promotion.key \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-intent >/tmp/assessment-intent.json
+
+          env \
+            RESTORE_PRIVATE_PROMOTION_CANDIDATE_HEALTHCHECK_FILE=/tmp/restore-switch-assessment-contract/candidate-healthcheck.json \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE=/tmp/restore-switch-assessment-contract/switch/promotion-switch-intent.json \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-switch-assessment-contract/promotion.key \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_DIR=/tmp/restore-switch-assessment-contract/evidence \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-journal >/tmp/assessment-journal.json
+
+      - name: Verify rollback-bound pre-start assessment without re-running candidate healthcheck
+        run: |
+          env \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE=/tmp/restore-switch-assessment-contract/switch/promotion-switch-intent.json \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE=/tmp/restore-switch-assessment-contract/evidence/promotion-switch-journal.json \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR=/tmp/restore-switch-assessment-contract/evidence \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-switch-assessment-contract/promotion.key \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME=infra_libsql-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME=infra_report-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME=infra_export-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME=infra_data-subject-delivery-data \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/assessment-ready.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('/tmp/assessment-ready.json').read_text())
+          assert result['mode'] == 'ISOLATED_RESTORE_PROMOTION_SWITCH_EXECUTION_ASSESSMENT'
+          assert result['status'] == 'READY_TO_START'
+          assert result['switchIntentAuthenticated'] is True
+          assert result['journalVerified'] is True
+          assert result['eventCount'] == 0
+          assert result['currentVolumeSet'] == 'ROLLBACK'
+          assert result['productionMutationAllowed'] is True
+          assert result['promotionExecuted'] is False
+          PY
+
+      - name: Persist CUTOVER_STARTED evidence and recover candidate selection from live mount identity
+        run: |
+          env \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE=/tmp/restore-switch-assessment-contract/switch/promotion-switch-intent.json \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE=/tmp/restore-switch-assessment-contract/evidence/promotion-switch-journal.json \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR=/tmp/restore-switch-assessment-contract/evidence \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-switch-assessment-contract/promotion.key \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_EVENT_PHASE=CUTOVER_STARTED \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-event >/tmp/event-started.json
+
+          env \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE=/tmp/restore-switch-assessment-contract/switch/promotion-switch-intent.json \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE=/tmp/restore-switch-assessment-contract/evidence/promotion-switch-journal.json \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR=/tmp/restore-switch-assessment-contract/evidence \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-switch-assessment-contract/promotion.key \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME=master-diagnostics-restore-0123456789abcdefabcd-libsql \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME=master-diagnostics-restore-0123456789abcdefabcd-reports \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME=master-diagnostics-restore-0123456789abcdefabcd-tenant-exports \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME=master-diagnostics-restore-0123456789abcdefabcd-data-subject-delivery \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/assessment-recover-candidate.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          event = json.loads(Path('/tmp/event-started.json').read_text())
+          result = json.loads(Path('/tmp/assessment-recover-candidate.json').read_text())
+          assert event['status'] == 'EVENT_PERSISTED'
+          assert event['phase'] == 'CUTOVER_STARTED'
+          assert event['productionMutationApplied'] is False
+          assert result['status'] == 'RECOVER_CANDIDATE_SELECTION'
+          assert result['currentVolumeSet'] == 'CANDIDATE'
+          assert result['eventCount'] == 1
+          assert result['productionMutationAllowed'] is False
+          PY
+
+      - name: Verify candidate evidence and rollback recovery state
+        run: |
+          env \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE=/tmp/restore-switch-assessment-contract/switch/promotion-switch-intent.json \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE=/tmp/restore-switch-assessment-contract/evidence/promotion-switch-journal.json \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR=/tmp/restore-switch-assessment-contract/evidence \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-switch-assessment-contract/promotion.key \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_EVENT_PHASE=CANDIDATE_SELECTED \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-event >/tmp/event-candidate.json
+
+          env \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE=/tmp/restore-switch-assessment-contract/switch/promotion-switch-intent.json \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE=/tmp/restore-switch-assessment-contract/evidence/promotion-switch-journal.json \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR=/tmp/restore-switch-assessment-contract/evidence \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-switch-assessment-contract/promotion.key \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME=infra_libsql-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME=infra_report-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME=infra_export-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME=infra_data-subject-delivery-data \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess >/tmp/assessment-recover-rollback.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('/tmp/assessment-recover-rollback.json').read_text())
+          assert result['status'] == 'RECOVER_ROLLBACK_SELECTION'
+          assert result['currentVolumeSet'] == 'ROLLBACK'
+          assert result['eventCount'] == 2
+          assert result['productionMutationAllowed'] is False
+          PY
+
+      - name: Verify tampered switch intent blocks post-cutover assessment
+        run: |
+          cp /tmp/restore-switch-assessment-contract/switch/promotion-switch-intent.json /tmp/restore-switch-assessment-contract/tampered-intent.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('/tmp/restore-switch-assessment-contract/tampered-intent.json')
+          data = json.loads(path.read_text())
+          data['record']['candidateSetFingerprint'] = 'sha256:' + 'f' * 64
+          path.write_text(json.dumps(data, indent=2) + '\n')
+          PY
+          set +e
+          env \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE=/tmp/restore-switch-assessment-contract/tampered-intent.json \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE=/tmp/restore-switch-assessment-contract/evidence/promotion-switch-journal.json \
+            RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR=/tmp/restore-switch-assessment-contract/evidence \
+            RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE=/tmp/restore-switch-assessment-contract/promotion.key \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_LIBSQL_VOLUME=infra_libsql-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_REPORTS_VOLUME=infra_report-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_TENANT_EXPORTS_VOLUME=infra_export-data \
+            RESTORE_PRIVATE_PROMOTION_ACTIVE_DATA_SUBJECT_DELIVERY_VOLUME=infra_data-subject-delivery-data \
+            pnpm --silent --filter @masters/db backup:restore-promotion-switch-assess \
+            >/tmp/tampered-assessment.out 2>/tmp/tampered-assessment.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'signature verification failed' /tmp/tampered-assessment.err
