@@ -1,0 +1,64 @@
+name: Restore Promotion Switch Completion Receipt Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-promotion-switch-completion-receipt-contract.yml'
+      - 'packages/db/src/services/restore-private-promotion-switch-completion-receipt.ts'
+      - 'packages/db/src/prepare-restore-private-promotion-switch-completion-receipt.ts'
+      - 'packages/db/test/restore-private-promotion-switch-completion-receipt.test.ts'
+      - 'docs/restore-private-promotion-switch-completion-receipt.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-promotion-switch-completion-receipt-contract.yml'
+      - 'packages/db/src/services/restore-private-promotion-switch-completion-receipt.ts'
+      - 'packages/db/src/prepare-restore-private-promotion-switch-completion-receipt.ts'
+      - 'packages/db/test/restore-private-promotion-switch-completion-receipt.test.ts'
+      - 'docs/restore-private-promotion-switch-completion-receipt.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify signed completion receipt contract
+        run: pnpm --filter @masters/db exec vitest run test/restore-private-promotion-switch-completion-receipt.test.ts
+
+      - name: Verify receipt core is evidence-only
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          core = Path('packages/db/src/services/restore-private-promotion-switch-completion-receipt.ts').read_text()
+          cli = Path('packages/db/src/prepare-restore-private-promotion-switch-completion-receipt.ts').read_text()
+          for token in (
+              'SIGNED_SWITCH_RECEIPT_AFTER_POST_SWITCH_HEALTHCHECK',
+              'CANDIDATE_SELECTED',
+              'CLUB_RESTORE_PROMOTION_POST_SWITCH_HEALTHCHECK',
+              'rollbackVolumesRetained',
+              'caddyPreserved',
+              'productionMutationCompleted',
+              'promotionExecuted',
+          ):
+              assert token in core or token in cli
+          combined = core + '\n' + cli
+          for forbidden in (
+              'docker compose',
+              'docker volume',
+              'child_process',
+              '/var/run/docker.sock',
+          ):
+              assert forbidden not in combined
+          PY
