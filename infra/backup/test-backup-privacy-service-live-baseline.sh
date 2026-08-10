@@ -3,181 +3,228 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
-fixture=/tmp/backup-privacy-activation-executor
-success="${fixture}/success"
-key="${fixture}/key"
-baseline_tool="${SCRIPT_DIR}/backup-privacy-service-live-baseline.py"
+cutover_fixture=/tmp/backup-privacy-service-live-baseline-v2-fixture
+activation_fixture=/tmp/backup-privacy-activation-executor/success
+key=/tmp/backup-privacy-activation-executor/key
+compose_file="${ROOT_DIR}/infra/docker-compose.club.yml"
+cutover_plan_checker="${SCRIPT_DIR}/check-backup-privacy-service-cutover-plan-v2.py"
+handoff_checker="${SCRIPT_DIR}/check-backup-privacy-target-handoff.py"
+writer="${SCRIPT_DIR}/write-backup-privacy-service-live-baseline.py"
+checker="${SCRIPT_DIR}/check-backup-privacy-service-live-baseline.py"
+volume_resolver="${SCRIPT_DIR}/resolve-active-club-volumes.py"
+containers=()
+volumes=()
 
-# Produce authentic #231 handoff and #234 v2 plan.
-bash "${SCRIPT_DIR}/test-backup-privacy-service-cutover-plan-v2.sh" >/dev/null
-activation_plan="$(cat "${success}/plan-path")"
-pending="$(cat "${success}/pending-path")"
-handoff="$(dirname "${pending}")/activation-target-handoff.json"
-cutover_plan="$(cat "${success}/cutover-v2-plan-path")"
-env_file="${success}/club.env"
-target_checker="${fixture}/target-config-checker.py"
+rm -rf "${cutover_fixture}"
+mkdir -p "${cutover_fixture}"
 
-cleanup() { rm -f -- "${ROOT_DIR}/.env"; }
+cleanup() {
+  if ((${#containers[@]})); then docker rm -f "${containers[@]}" >/dev/null 2>&1 || true; fi
+  if ((${#volumes[@]})); then docker volume rm -f "${volumes[@]}" >/dev/null 2>&1 || true; fi
+  rm -f -- "${ROOT_DIR}/.env"
+}
 trap cleanup EXIT
-cp "${env_file}" "${ROOT_DIR}/.env"; chmod 0600 "${ROOT_DIR}/.env"
 
-root="${fixture}/service-live-baseline"
-rm -rf -- "${root}"
-mkdir -p "${root}/inspect/pre" "${root}/inspect/app-drift" "${root}/inspect/caddy-drift" "${root}/inspect/volume-drift" "${root}/inspect/enabled" "${root}/evidence"
-chmod 0700 "${root}" "${root}/inspect" "${root}/inspect/pre" "${root}/inspect/app-drift" "${root}/inspect/caddy-drift" "${root}/inspect/volume-drift" "${root}/inspect/enabled" "${root}/evidence"
+# Build the canonical #234 target-handoff-authorized cutover plan v2.
+bash "${SCRIPT_DIR}/test-backup-privacy-service-cutover-plan-v2.sh" >/dev/null
+activation_plan="$(cat "${activation_fixture}/plan-path")"
+pending="$(cat "${activation_fixture}/pending-path")"
+handoff="$(dirname "${pending}")/activation-target-handoff.json"
+env_file="${activation_fixture}/club.env"
+target_config_checker=/tmp/backup-privacy-activation-executor/target-config-checker.py
+cutover_plan="$(cat "${activation_fixture}/cutover-v2-plan-path")"
 
-python3 - "${root}" <<'PY'
+test -f "${handoff}"
+test -f "${cutover_plan}"
+grep -Fx 'PRIVACY_BACKUP_STATE=ENABLED' "${env_file}"
+
+# Compose's service-level env_file is ../.env. Mirror the same staged target for
+# read-only rendering; the synthetic live containers below intentionally remain DISABLED.
+cp "${env_file}" "${ROOT_DIR}/.env"
+chmod 0600 "${ROOT_DIR}/.env"
+rendered="${cutover_fixture}/live-baseline-rendered-compose.json"
+docker compose --env-file "${env_file}" -f "${compose_file}" config --format json >"${rendered}"
+project="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["name"])' "${rendered}")"
+
+volume_name() {
+  python3 - "${rendered}" "$1" <<'PY'
 import json,sys
-from pathlib import Path
-root=Path(sys.argv[1])/'inspect'
-project='ci-live-baseline'
-ids={'app':'1'*64,'export-cleanup':'2'*64,'retention-scan':'3'*64,'libsql':'4'*64,'caddy':'5'*64,'app-drift':'6'*64,'caddy-drift':'7'*64}
-images={'web':'sha256:'+'a'*64,'libsql':'sha256:'+'b'*64,'caddy':'sha256:'+'c'*64}
-refs={'web':'masters/web:test','libsql':'ghcr.io/tursodatabase/libsql-server:test','caddy':'caddy:test'}
-vols={'libsql':'ci_libsql','reports':'ci_reports','exports':'ci_exports','delivery':'ci_delivery'}
-
-def mount(name,dest): return {'Type':'volume','Name':name,'Destination':dest,'RW':True}
-def obj(service,cid,image,image_ref,env,mounts,healthy=False):
-    state={'Status':'running'}
-    if healthy: state['Health']={'Status':'healthy'}
-    return [{'Id':cid,'Image':image,'Config':{'Image':image_ref,'Labels':{'com.docker.compose.project':project,'com.docker.compose.service':service},'Env':env},'State':state,'Mounts':mounts}]
-def write(folder,service,cid=None,state='DISABLED',report_volume=None,caddy_id=None):
-    if service=='app':
-        env=[f'PRIVACY_BACKUP_STATE={state}']
-        mounts=[mount(report_volume or vols['reports'],'/var/lib/masters/reports'),mount(vols['exports'],'/var/lib/masters/exports'),mount(vols['delivery'],'/var/lib/masters/data-subject-delivery-packages')]
-        value=obj(service,cid or ids['app'],images['web'],refs['web'],env,mounts,True)
-    elif service=='export-cleanup':
-        env=[f'PRIVACY_BACKUP_STATE={state}']
-        mounts=[mount(vols['exports'],'/var/lib/masters/exports'),mount(vols['delivery'],'/var/lib/masters/data-subject-delivery-packages')]
-        value=obj(service,cid or ids[service],images['web'],refs['web'],env,mounts)
-    elif service=='retention-scan':
-        value=obj(service,cid or ids[service],images['web'],refs['web'],[f'PRIVACY_BACKUP_STATE={state}'],[])
-    elif service=='libsql':
-        value=obj(service,ids['libsql'],images['libsql'],refs['libsql'],[],[mount(vols['libsql'],'/var/lib/sqld')],True)
-    else:
-        value=obj(service,caddy_id or ids['caddy'],images['caddy'],refs['caddy'],[],[])
-    (root/folder/f'{service}.json').write_text(json.dumps(value)+'\n')
-
-for folder in ('pre','app-drift','caddy-drift','volume-drift','enabled'):
-    for service in ('app','export-cleanup','retention-scan','libsql','caddy'):
-        write(folder,service,state='ENABLED' if folder=='enabled' and service in ('app','export-cleanup','retention-scan') else 'DISABLED')
-write('app-drift','app',cid=ids['app-drift'])
-write('caddy-drift','caddy',caddy_id=ids['caddy-drift'])
-write('volume-drift','app',report_volume='ci_reports_changed')
+r=json.load(open(sys.argv[1])); logical=sys.argv[2]
+definition=r['volumes'][logical]
+print(definition.get('name') or f"{r['name']}_{logical}")
 PY
+}
+libsql_volume="$(volume_name libsql-data)"
+report_volume="$(volume_name report-data)"
+export_volume="$(volume_name export-data)"
+delivery_volume="$(volume_name data-subject-delivery-data)"
+caddy_data_volume="$(volume_name caddy-data)"
+caddy_config_volume="$(volume_name caddy-config)"
+volumes=("${libsql_volume}" "${report_volume}" "${export_volume}" "${delivery_volume}" "${caddy_data_volume}" "${caddy_config_volume}")
+for volume in "${volumes[@]}"; do docker volume create "${volume}" >/dev/null; done
 
-common=(
-  --handoff-checker "${SCRIPT_DIR}/check-backup-privacy-target-handoff.py"
-  --target-config-checker "${target_checker}"
+docker pull alpine:3.20 >/dev/null
+label_args=(--label "com.docker.compose.project=${project}" --label 'com.docker.compose.oneoff=False')
+old_runtime_privacy=(
+  --env PRIVACY_BACKUP_STATE=DISABLED
+  --env PRIVACY_NOTIFICATIONS_STATE=DISABLED
+  --env BETTER_AUTH_SECRET=baseline-secret-must-not-be-recorded
+)
+
+app_id="$(docker run -d --name "md-live-app-${GITHUB_RUN_ID:-$$}" "${label_args[@]}" --label com.docker.compose.service=app \
+  "${old_runtime_privacy[@]}" --health-cmd='exit 0' --health-interval=1s --health-timeout=1s --health-retries=10 \
+  -v "${report_volume}:/var/lib/masters/reports" \
+  -v "${export_volume}:/var/lib/masters/exports" \
+  -v "${delivery_volume}:/var/lib/masters/data-subject-delivery-packages" \
+  alpine:3.20 sh -c 'while true; do sleep 3600; done')"
+containers+=("${app_id}")
+libsql_id="$(docker run -d --name "md-live-libsql-${GITHUB_RUN_ID:-$$}" "${label_args[@]}" --label com.docker.compose.service=libsql \
+  --health-cmd='exit 0' --health-interval=1s --health-timeout=1s --health-retries=10 \
+  -v "${libsql_volume}:/var/lib/sqld" alpine:3.20 sh -c 'while true; do sleep 3600; done')"
+containers+=("${libsql_id}")
+export_id="$(docker run -d --name "md-live-export-${GITHUB_RUN_ID:-$$}" "${label_args[@]}" --label com.docker.compose.service=export-cleanup \
+  "${old_runtime_privacy[@]}" -v "${export_volume}:/var/lib/masters/exports" \
+  -v "${delivery_volume}:/var/lib/masters/data-subject-delivery-packages" alpine:3.20 sh -c 'while true; do sleep 3600; done')"
+containers+=("${export_id}")
+retention_id="$(docker run -d --name "md-live-retention-${GITHUB_RUN_ID:-$$}" "${label_args[@]}" --label com.docker.compose.service=retention-scan \
+  "${old_runtime_privacy[@]}" alpine:3.20 sh -c 'while true; do sleep 3600; done')"
+containers+=("${retention_id}")
+caddy_id="$(docker run -d --name "md-live-caddy-${GITHUB_RUN_ID:-$$}" "${label_args[@]}" --label com.docker.compose.service=caddy \
+  -v "${caddy_data_volume}:/data" -v "${caddy_config_volume}:/config" alpine:3.20 sh -c 'while true; do sleep 3600; done')"
+containers+=("${caddy_id}")
+
+wait_healthy() {
+  local id="$1"
+  for _ in $(seq 1 30); do
+    if [[ "$(docker inspect -f '{{.State.Health.Status}}' "${id}")" == healthy ]]; then return 0; fi
+    sleep 1
+  done
+  docker inspect "${id}"
+  return 1
+}
+wait_healthy "${app_id}"
+wait_healthy "${libsql_id}"
+
+chain_args=(
+  --cutover-plan-checker "${cutover_plan_checker}"
+  --handoff-checker "${handoff_checker}"
+  --target-config-checker "${target_config_checker}"
   --activation-plan "${activation_plan}"
   --pending "${pending}"
   --handoff "${handoff}"
   --key-file "${key}"
   --env-file "${env_file}"
-  --compose-file "${ROOT_DIR}/infra/docker-compose.club.yml"
+  --compose-file "${compose_file}"
   --cutover-plan "${cutover_plan}"
+  --volume-resolver "${volume_resolver}"
 )
-inspect_args() {
-  local dir="$1"
-  printf '%q ' \
-    --app-inspect "${dir}/app.json" \
-    --export-inspect "${dir}/export-cleanup.json" \
-    --retention-inspect "${dir}/retention-scan.json" \
-    --libsql-inspect "${dir}/libsql.json" \
-    --caddy-inspect "${dir}/caddy.json"
-}
+baseline_root=/tmp/backup-privacy-service-live-baseline-v2
+rm -rf "${baseline_root}"; mkdir -p "${baseline_root}"; chmod 0700 "${baseline_root}"
 
-pre="${root}/inspect/pre"
-python3 "${baseline_tool}" prepare "${common[@]}" \
-  --app-inspect "${pre}/app.json" --export-inspect "${pre}/export-cleanup.json" --retention-inspect "${pre}/retention-scan.json" \
-  --libsql-inspect "${pre}/libsql.json" --caddy-inspect "${pre}/caddy.json" --output-root "${root}/evidence" >"${root}/prepared.json"
-python3 - "${root}/prepared.json" "${root}/baseline-path" <<'PY'
+python3 "${writer}" "${chain_args[@]}" --output-root "${baseline_root}" \
+  --captured-at 2026-08-10T00:20:00.000Z >"${cutover_fixture}/baseline-write.json"
+python3 - "${cutover_fixture}/baseline-write.json" "${cutover_fixture}/baseline-path.txt" <<'PY'
 import json,sys
 from pathlib import Path
-r=json.load(open(sys.argv[1]))
-assert r['status']=='SERVICE_LIVE_BASELINE_READY'
-assert r['serviceCutoverMutationAllowed'] is True
+r=json.load(open(sys.argv[1])); assert r['status']=='SERVICE_LIVE_BASELINE_RECORDED', r
+assert r['serviceLiveBaselineVersion']==2
+assert r['baselineCreated'] is True
+assert r['serviceCutoverExecutionAllowed'] is False
 assert r['serviceCutoverExecuted'] is False
 assert r['liveRuntimeAttested'] is False
 assert r['activationExecuted'] is False
 Path(sys.argv[2]).write_text(r['baselinePath'])
 PY
-baseline="$(cat "${root}/baseline-path")"
+baseline="$(cat "${cutover_fixture}/baseline-path.txt")"
 test "$(stat -c '%a' "${baseline}")" = 600
-test "$(stat -c '%a' "$(dirname "${baseline}")")" = 700
+test "$(stat -c '%a' "${baseline_root}")" = 700
+! grep -F 'baseline-secret-must-not-be-recorded' "${baseline}"
 
-python3 "${baseline_tool}" check "${common[@]}" --baseline "${baseline}" \
-  --app-inspect "${pre}/app.json" --export-inspect "${pre}/export-cleanup.json" --retention-inspect "${pre}/retention-scan.json" \
-  --libsql-inspect "${pre}/libsql.json" --caddy-inspect "${pre}/caddy.json" >"${root}/verified.json"
-python3 - "${root}/verified.json" <<'PY'
+python3 - "${baseline}" <<'PY'
 import json,sys
-r=json.load(open(sys.argv[1])); assert r['status']=='SERVICE_LIVE_BASELINE_VERIFIED'; assert r['serviceCutoverMutationAllowed'] is True; assert r['activationExecuted'] is False
+r=json.load(open(sys.argv[1]))['record']
+assert r['serviceLiveBaselineVersion']==2
+assert r['cutoverPlanVersion']==2
+assert r['authorizationSource']=='TARGET_HANDOFF_VERIFIED'
+assert r['expectedPreCutoverBackupState']=='DISABLED'
+assert r['targetConfigurationAlreadyStaged'] is True
+assert r['cutoverMutationStarted'] is False
+assert r['serviceCutoverExecuted'] is False
+assert r['liveRuntimeAttested'] is False
+assert r['activationExecuted'] is False
+runtime=[c for c in r['containers'] if c['service'] in {'app','export-cleanup','retention-scan'}]
+assert len(runtime)==3
+assert all(c['privacyEnvironment']['PRIVACY_BACKUP_STATE']=='DISABLED' for c in runtime)
+assert all(c['privacyEnvironment']['PRIVACY_NOTIFICATIONS_STATE']=='DISABLED' for c in runtime)
+assert set(r['dataVolumes'])=={'dataSubjectDelivery','libsql','reports','tenantExports'}
+assert set(r['caddyVolumes'])=={'config','data'}
 PY
 
-# Retry reuses exact baseline.
-python3 "${baseline_tool}" prepare "${common[@]}" \
-  --app-inspect "${pre}/app.json" --export-inspect "${pre}/export-cleanup.json" --retention-inspect "${pre}/retention-scan.json" \
-  --libsql-inspect "${pre}/libsql.json" --caddy-inspect "${pre}/caddy.json" --output-root "${root}/evidence" >"${root}/retry.json"
-python3 - "${root}/retry.json" <<'PY'
+python3 "${checker}" "${chain_args[@]}" --baseline "${baseline}" >"${cutover_fixture}/baseline-check.json"
+python3 - "${cutover_fixture}/baseline-check.json" <<'PY'
+import json,sys
+r=json.load(open(sys.argv[1])); assert r['status']=='SERVICE_LIVE_BASELINE_VERIFIED', r
+assert r['serviceCutoverExecutionAllowed'] is True
+assert r['serviceCutoverExecuted'] is False
+assert r['liveRuntimeAttested'] is False
+assert r['activationExecuted'] is False
+PY
+
+# Unchanged live state deterministically reuses the same signed observation.
+python3 "${writer}" "${chain_args[@]}" --output-root "${baseline_root}" \
+  --captured-at 2026-08-10T00:21:00.000Z >"${cutover_fixture}/baseline-retry.json"
+python3 - "${cutover_fixture}/baseline-retry.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1])); assert r['baselineCreated'] is False and r['baselineReused'] is True
 PY
 
-# Any pre-mutation container or active-volume change invalidates the baseline.
-for case in app-drift caddy-drift volume-drift; do
-  dir="${root}/inspect/${case}"
-  set +e
-  python3 "${baseline_tool}" check "${common[@]}" --baseline "${baseline}" \
-    --app-inspect "${dir}/app.json" --export-inspect "${dir}/export-cleanup.json" --retention-inspect "${dir}/retention-scan.json" \
-    --libsql-inspect "${dir}/libsql.json" --caddy-inspect "${dir}/caddy.json" >"${root}/${case}.json"
-  code=$?
-  set -e
-  test "${code}" -ne 0
-  grep -q 'SERVICE_LIVE_BASELINE_LIVE_DRIFT' "${root}/${case}.json"
-done
-
-# A live ENABLED process set cannot be retroactively captured as the pre-mutation baseline.
-enabled="${root}/inspect/enabled"
-mkdir -p "${root}/enabled-evidence"; chmod 0700 "${root}/enabled-evidence"
+# Duplicate service identity blocks current-state attestation.
+duplicate_id="$(docker run -d --name "md-live-duplicate-app-${GITHUB_RUN_ID:-$$}" "${label_args[@]}" --label com.docker.compose.service=app \
+  "${old_runtime_privacy[@]}" alpine:3.20 sh -c 'while true; do sleep 3600; done')"
+containers+=("${duplicate_id}")
 set +e
-python3 "${baseline_tool}" prepare "${common[@]}" \
-  --app-inspect "${enabled}/app.json" --export-inspect "${enabled}/export-cleanup.json" --retention-inspect "${enabled}/retention-scan.json" \
-  --libsql-inspect "${enabled}/libsql.json" --caddy-inspect "${enabled}/caddy.json" --output-root "${root}/enabled-evidence" >"${root}/enabled.json"
+python3 "${checker}" "${chain_args[@]}" --baseline "${baseline}" >"${cutover_fixture}/baseline-duplicate.json"
 code=$?
 set -e
 test "${code}" -ne 0
-grep -q 'SERVICE_LIVE_BASELINE_MUTABLE_NOT_DISABLED' "${root}/enabled.json"
+grep -F 'SERVICE_LIVE_BASELINE_CONTAINER_CARDINALITY' "${cutover_fixture}/baseline-duplicate.json"
+docker rm -f "${duplicate_id}" >/dev/null
+containers=("${app_id}" "${libsql_id}" "${export_id}" "${retention_id}" "${caddy_id}")
 
-# Baseline tamper is detected.
-cp "${baseline}" "${baseline}.backup"
-python3 - "${baseline}" <<'PY'
+# Signed evidence tampering blocks.
+tamper_dir="${baseline_root}/tamper"; mkdir -p "${tamper_dir}"; chmod 0700 "${tamper_dir}"
+tampered="${tamper_dir}/$(basename "${baseline}")"
+cp "${baseline}" "${tampered}"; chmod 0600 "${tampered}"
+python3 - "${tampered}" <<'PY'
 import json,sys
 from pathlib import Path
-p=Path(sys.argv[1]); d=json.loads(p.read_text()); d['record']['allMutableServicesDisabled']=False; p.write_text(json.dumps(d)+'\n'); p.chmod(0o600)
+p=Path(sys.argv[1]); d=json.loads(p.read_text()); d['record']['containers'][0]['imageReference']='tampered/image:latest'; p.write_text(json.dumps(d)+'\n'); p.chmod(0o600)
 PY
 set +e
-python3 "${baseline_tool}" check "${common[@]}" --baseline "${baseline}" \
-  --app-inspect "${pre}/app.json" --export-inspect "${pre}/export-cleanup.json" --retention-inspect "${pre}/retention-scan.json" \
-  --libsql-inspect "${pre}/libsql.json" --caddy-inspect "${pre}/caddy.json" >"${root}/tamper.json"
+python3 "${checker}" "${chain_args[@]}" --baseline "${tampered}" >"${cutover_fixture}/baseline-tamper.json"
 code=$?
 set -e
 test "${code}" -ne 0
-grep -q 'SERVICE_LIVE_BASELINE_POLICY_INVALID\|SERVICE_LIVE_BASELINE_FINGERPRINT_MISMATCH\|SERVICE_LIVE_BASELINE_SIGNATURE_MISMATCH' "${root}/tamper.json"
-mv "${baseline}.backup" "${baseline}"; chmod 0600 "${baseline}"
+grep -q 'SERVICE_LIVE_BASELINE_.*MISMATCH' "${cutover_fixture}/baseline-tamper.json"
 
-# Evidence is technical-only and does not leak unrelated env secrets.
-! grep -F 'ci-secret-success' "${baseline}"
-! grep -F 'BETTER_AUTH_SECRET' "${baseline}"
+# Restarting the same container keeps its ID but changes StartedAt/RestartCount.
+docker restart "${retention_id}" >/dev/null
+set +e
+python3 "${checker}" "${chain_args[@]}" --baseline "${baseline}" >"${cutover_fixture}/baseline-restart-drift.json"
+code=$?
+set -e
+test "${code}" -ne 0
+grep -F 'SERVICE_LIVE_BASELINE_DRIFT' "${cutover_fixture}/baseline-restart-drift.json"
 
-# Core remains evidence-only.
-python3 - "${baseline_tool}" "${SCRIPT_DIR}/prepare-club-backup-privacy-service-live-baseline.sh" <<'PY'
+# Product collector/verifier remains Docker read-only; mutating calls above are CI fixtures only.
+python3 - "${SCRIPT_DIR}/backup_privacy_service_live_baseline_common.py" "${writer}" "${checker}" <<'PY'
 from pathlib import Path
 import sys
-core=Path(sys.argv[1]).read_text(); host=Path(sys.argv[2]).read_text()
-assert 'docker compose' not in core and 'docker inspect' not in core
-assert 'docker inspect' in host and 'ps -a -q' in host
-for token in (' compose up ', ' compose down ', ' compose stop ', ' compose restart ', 'docker volume', 'os.replace('):
-    assert token not in host, token
+text='\n'.join(Path(p).read_text() for p in sys.argv[1:])
+for required in ('"ps"','"inspect"','"config", "--format", "json"','RestartCount','StartedAt','PRIVACY_BACKUP_STATE'):
+    assert required in text, required
+for forbidden in ('"run"','"create"','"start"','"stop"','"restart"','"rm"','"up"','"down"','docker volume','os.replace('):
+    assert forbidden not in text, forbidden
 PY
 
-echo 'backup privacy service live baseline contract: ok'
+echo 'backup privacy service live baseline v2 contract: ok'
