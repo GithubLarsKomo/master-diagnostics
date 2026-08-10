@@ -49,14 +49,47 @@ def safe_output_dir(path: Path) -> None:
     os.chmod(path, 0o700)
 
 
-def run_readiness(checker: Path, report: Path, drill_key: Path) -> dict[str, Any]:
+def backup_binding(path: Path) -> tuple[str, str]:
+    if not path.is_absolute() or path.is_symlink() or not path.is_file():
+        fail("BACKUP_BUNDLE_UNSAFE", "backup bundle must be an absolute regular non-symlink file")
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return path.name, "sha256:" + digest.hexdigest()
+
+
+def run_readiness(
+    checker: Path,
+    report_verifier: Path,
+    report: Path,
+    drill_key: Path,
+    backup_bundle: Path,
+) -> dict[str, Any]:
     if not checker.is_absolute() or checker.is_symlink() or not checker.is_file():
         fail("READINESS_CHECKER_UNSAFE", "readiness checker must be an absolute regular non-symlink file")
+    if not report_verifier.is_absolute() or report_verifier.is_symlink() or not report_verifier.is_file():
+        fail("DRILL_REPORT_VERIFIER_UNSAFE", "canonical drill report verifier must be an absolute regular non-symlink file")
+    bundle_name, bundle_sha256 = backup_binding(backup_bundle)
     # Deliberately inherit the real environment. The writer must never force
-    # PRIVACY_BACKUP_STATE=DISABLED; #221 must block a prematurely enabled host.
+    # PRIVACY_BACKUP_STATE=DISABLED; a prematurely enabled host must remain blocked.
     proc = subprocess.run(
-        [sys.executable, str(checker), "--report", str(report), "--key-file", str(drill_key)],
-        check=False, capture_output=True, text=True, env=dict(os.environ),
+        [
+            sys.executable,
+            str(checker),
+            "--report", str(report),
+            "--key-file", str(drill_key),
+            "--report-verifier", str(report_verifier),
+            "--expected-bundle-name", bundle_name,
+            "--expected-bundle-sha256", bundle_sha256,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=dict(os.environ),
     )
     try:
         result = json.loads(proc.stdout)
@@ -66,6 +99,10 @@ def run_readiness(checker: Path, report: Path, drill_key: Path) -> dict[str, Any
         fail("READINESS_NOT_MET", f"backup privacy activation readiness is blocked: {result.get('blockers')}")
     if result.get("currentPrivacyBackupState") != "DISABLED":
         fail("READINESS_STATE_INVALID", "manual attestation requires the real backup capability to remain disabled")
+    if result.get("canonicalDrillReportVerification") is not True or result.get("bundleBytesBound") is not True:
+        fail("READINESS_BUNDLE_BINDING_INVALID", "manual attestation requires canonical verification against current backup bytes")
+    if result.get("practicalRestoreEvidenceVerified") is not True:
+        fail("READINESS_PRACTICAL_RESTORE_INVALID", "manual attestation requires verified practical restore evidence")
     if result.get("manualAttestationTarget") != TARGET:
         fail("READINESS_TARGET_MISMATCH", "readiness target does not match backup privacy policy v1")
     if result.get("privacyBackupActivationAllowed") is not False or result.get("automaticActivationPerformed") is not False:
@@ -135,9 +172,12 @@ def persist(output_dir: Path, envelope: dict[str, Any]) -> tuple[Path, bool]:
 
 def main() -> int:
     p = argparse.ArgumentParser()
+    root = Path(__file__).resolve().parent
     p.add_argument("--readiness-checker", required=True, type=Path)
+    p.add_argument("--report-verifier", type=Path, default=root / "check-restore-rto-drill-report.py")
     p.add_argument("--drill-report", required=True, type=Path)
     p.add_argument("--drill-key-file", required=True, type=Path)
+    p.add_argument("--backup-bundle", required=True, type=Path)
     p.add_argument("--attestation-key-file", required=True, type=Path)
     p.add_argument("--output-dir", required=True, type=Path)
     p.add_argument("--attestation-id", required=True)
@@ -146,7 +186,13 @@ def main() -> int:
     p.add_argument("--acknowledge-operational-responsibility", action="store_true")
     args = p.parse_args()
     try:
-        readiness = run_readiness(args.readiness_checker, args.drill_report, args.drill_key_file)
+        readiness = run_readiness(
+            args.readiness_checker,
+            args.report_verifier,
+            args.drill_report,
+            args.drill_key_file,
+            args.backup_bundle,
+        )
         key = read_key(args.attestation_key_file)
         safe_output_dir(args.output_dir)
         record = build_record(args, readiness)
