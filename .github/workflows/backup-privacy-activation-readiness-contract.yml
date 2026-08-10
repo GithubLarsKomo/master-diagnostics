@@ -294,7 +294,7 @@ jobs:
           wrapper=Path('infra/backup/check-club-backup-privacy-activation-readiness.sh').read_text()
           assert 'verify_report' in readiness
           assert 'check-restore-rto-drill-report.py' in readiness
-          for duplicate in ('SIGNING_DOMAIN', 'hmac.new', 'EXPECTED_PHASES', 'reportFingerprint'):
+          for duplicate in ('SIGNING_DOMAIN', 'hmac.new', 'EXPECTED_PHASES', 'hashlib'):
               assert duplicate not in readiness, duplicate
           assert 'masters:restore-rto-drill-report:v1' in verifier
           assert 'def verify_report(' in verifier
