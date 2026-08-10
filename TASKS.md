@@ -20,9 +20,9 @@
 - [x] Rollenmatrix und Tenant-Isolation als Policy-Tests abdecken
 - [x] providerneutrale Identity-Schnittstelle vorbereiten
 - [ ] Clerk-Adapter für den späteren SaaS-Modus implementieren
-- [ ] frische Docker-Installation als eigener Smoke-Test in CI ausführen
+- [x] frische Docker-Installation als eigener Smoke-Test in CI ausführen
 
-**Akzeptanz:** Der lokale Club-Bootstrap, die Anmeldung als Tenant-Admin und die Sperre einer erneuten Einrichtung sind im Browser-E2E-Test nachgewiesen. Der Docker-Smoke-Test bleibt als separates Betriebs-Gate offen.
+**Akzeptanz:** Der lokale Club-Bootstrap, die Anmeldung als Tenant-Admin und die Sperre einer erneuten Einrichtung sind im Browser-E2E-Test nachgewiesen. Zusätzlich startet der kanonische Club-Compose-Stack in CI aus einem leeren Compose-Namespace mit frisch erzeugten Volumes bis zum HTTPS-Healthcheck erfolgreich.
 
 ## Epic 2 — Athleten und Einwilligungen
 
@@ -198,8 +198,8 @@
 
 ## Epic 12 — Betrieb
 
-- [ ] produktives Docker Compose
-- [ ] Caddy-TLS und interne Zertifikate dokumentieren
+- [x] produktives Docker Compose
+- [x] Caddy-TLS und interne Zertifikate dokumentieren
 - [x] verschlüsselte tägliche Backups
 - [ ] Restore-Drill und RTO-Test
   - [x] verschlüsselte Bundles read-only auf Checksumme, GCM, Archivstruktur und Manifest verifizieren
