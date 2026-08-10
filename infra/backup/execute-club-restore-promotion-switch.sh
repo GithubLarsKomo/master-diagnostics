@@ -45,11 +45,14 @@ set -a
 source "${ENV_FILE}"
 set +a
 
+staging_root="${RESTORE_STAGING_HOST_DIR:-/var/lib/master-diagnostics/restore-staging}"
 replay_root="${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}"
 journal_root="${RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_HOST_DIR:-/var/lib/master-diagnostics/restore-promotion-switch-journal}"
 promotion_key="${RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE:-/etc/master-diagnostics/restore-private-promotion.key}"
+backup_key="${BACKUP_KEY_FILE:-/etc/master-diagnostics/backup.key}"
 workspace="${replay_root}/${staging_name}"
 switch_intent="${workspace}/promotion/switch/promotion-switch-intent.json"
+source_provenance="${staging_root}/${staging_name}/restore-source-provenance.json"
 
 require_regular_file() {
   local path="$1" label="$2"
@@ -69,6 +72,8 @@ require_non_symlink_dir() {
 require_non_symlink_dir "${workspace}" "Private restore workspace"
 require_regular_file "${switch_intent}" "Signed restore promotion switch intent"
 require_regular_file "${promotion_key}" "Restore promotion key"
+require_regular_file "${backup_key}" "Backup key"
+require_regular_file "${source_provenance}" "Signed restore source provenance"
 
 candidate_set_id="$(python3 - "${switch_intent}" <<'PY'
 import json, re, sys
@@ -84,9 +89,6 @@ evidence_dir="${journal_root}/${candidate_set_id}"
 journal_file="${evidence_dir}/promotion-switch-journal.json"
 cutover_started_file="${evidence_dir}/promotion-switch-cutover-started.json"
 
-# Before the first mutation, force the complete #212 -> #213 -> #214 fresh trust
-# chain again. On crash/retry after CUTOVER_STARTED, never rerun the pre-cutover
-# healthcheck because the rollback set may intentionally no longer be active.
 if [[ ! -e "${cutover_started_file}" ]]; then
   bash "${PREPARE_JOURNAL_SCRIPT}" "${staging_name}" >/dev/null
 fi
@@ -124,6 +126,8 @@ rollback_volumes=("${volume_lines[@]:4:4}")
 
 export RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_HOST_FILE="${switch_intent}"
 export RESTORE_PRIVATE_PROMOTION_SWITCH_EVIDENCE_HOST_DIR="${evidence_dir}"
+export RESTORE_SOURCE_PROVENANCE_HOST_FILE="${source_provenance}"
+export BACKUP_KEY_FILE="${backup_key}"
 assessment_compose=(
   docker compose --env-file "${ENV_FILE}"
   -f "${COMPOSE_FILE}"
