@@ -48,6 +48,7 @@ jobs:
               'down -v --remove-orphans',
               'PRIVACY_BACKUP_STATE=DISABLED',
               'PRIVACY_NOTIFICATIONS_STATE=DISABLED',
+              'dump_diagnostics',
           ):
               assert required in script, required
           for forbidden in (
@@ -62,7 +63,9 @@ jobs:
       - name: Execute from-empty-volume Club deployment
         env:
           MASTER_DIAGNOSTICS_FRESH_INSTALL_PROJECT: mdfresh${{ github.run_id }}${{ github.run_attempt }}
-        run: bash infra/ci/smoke-club-fresh-install.sh | tee /tmp/club-fresh-install.json
+        run: |
+          set -o pipefail
+          bash infra/ci/smoke-club-fresh-install.sh | tee /tmp/club-fresh-install.json
 
       - name: Verify structured result and cleanup
         env:
