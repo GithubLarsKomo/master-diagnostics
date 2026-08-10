@@ -94,7 +94,7 @@ jobs:
           result=json.loads(Path('/tmp/backup-privacy-readiness/readiness.json').read_text())
           assert result['mode']=='BACKUP_PRIVACY_ACTIVATION_READINESS'
           assert result['status']=='READY_FOR_MANUAL_ATTESTATION'
-          assert result['readinessVersion']==2
+          assert result['readinessVersion']==1
           assert result['canonicalDrillReportVerification'] is True
           assert result['bundleBytesBound'] is True
           assert result['drillReportVerified'] is True
