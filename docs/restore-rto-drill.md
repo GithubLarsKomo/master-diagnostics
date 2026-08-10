@@ -4,7 +4,7 @@
 
 Der Restore-/RTO-Drill ist der erste einzelne Host-Befehl, der die bereits separat gehärteten Epic-12-Bausteine in der realen operativen Reihenfolge ausführt und ihre Laufzeit misst.
 
-Er ersetzt **keinen** fachlichen Freigabeprozess und aktiviert die Backup-Privacy-Capability nicht automatisch. Insbesondere bleibt bis zu einem tatsächlich auf dem vorgesehenen Club-Host erfolgreich ausgeführten und geprüften Drill:
+Er ersetzt **keinen** fachlichen Freigabeprozess und aktiviert die Backup-Privacy-Capability nicht automatisch. Insbesondere bleibt bis zu einem tatsächlich auf dem vorgesehenen Club-Host erfolgreich ausgeführten und unabhängig geprüften Drill:
 
 ```text
 PRIVACY_BACKUP_STATE=DISABLED
@@ -33,7 +33,7 @@ Der Host-Befehl führt exakt diese Phasen aus:
 5. `PREPARE_PROMOTION_PLAN` – unmittelbar aktuelle Promotion-Ausführungsplanung erzeugen.
 6. `PREPARE_CANDIDATES` – versionierte Candidate-Volumes erzeugen und aus der privaten Restore-Kopie befüllen.
 7. `AUTHORIZE_SWITCH` – Candidate-Set erneut prüfen und einen signierten Switch Intent erzeugen.
-8. `EXECUTE_SWITCH` – #219 bounded Cutover ausführen; vor der ersten Mutation wird dort nochmals die frische Candidate-/Journal-Kette geprüft. Candidate-Erfolg benötigt Post-Switch-Healthcheck und signierten Completion Receipt. Fehler konvergieren in den journalgebundenen Rollback-Pfad.
+8. `EXECUTE_SWITCH` – bounded Cutover ausführen; vor der ersten Mutation wird dort nochmals die frische Candidate-/Journal-Kette geprüft. Candidate-Erfolg benötigt Post-Switch-Healthcheck und signierten Completion Receipt. Fehler konvergieren in den journalgebundenen Rollback-Pfad.
 
 Die einzelnen Wrapper behalten ihre eigenen fail-closed Invarianten. Der Drill kopiert diese Logik nicht.
 
@@ -65,7 +65,7 @@ Der Befehl besitzt einen eigenen hostseitigen `flock` und darf daher nicht paral
 
 ## Achtung: reale Produktivmutation
 
-Dies ist **kein read-only Testbefehl**. Die ersten Phasen arbeiten isoliert, aber `EXECUTE_SWITCH` verwendet den in #219 eingeführten produktiven Cutover-Executor. Bei erfolgreichem Candidate-Healthcheck wird der wiederhergestellte Candidate-Satz produktiv aktiv. Bei Fehler wird der gebundene Rollback-Satz wieder ausgewählt.
+Dies ist **kein read-only Testbefehl**. Die ersten Phasen arbeiten isoliert, aber `EXECUTE_SWITCH` verwendet den produktiven Promotion-Cutover-Executor. Bei erfolgreichem Candidate-Healthcheck wird der wiederhergestellte Candidate-Satz produktiv aktiv. Bei Fehler wird der gebundene Rollback-Satz wieder ausgewählt.
 
 Ein realer Drill ist deshalb in einem geplanten Wartungsfenster und mit operativer Beobachtung auszuführen. Die CI ruft diesen Produktivpfad nicht gegen eine reale Club-Installation auf.
 
@@ -104,6 +104,58 @@ Reportstatus:
 
 `rtoMet=true` ist nur möglich, wenn der Gesamtstatus `COMPLETED` ist und die gemessene Dauer höchstens 14.400 Sekunden beträgt.
 
+## Unabhängige Report-Verifikation
+
+Der Report-Writer ist nicht seine eigene Vertrauensinstanz. Nach dem realen Lauf muss der persistierte Report deshalb in einem **separaten Prozess** mit
+
+```text
+infra/backup/check-restore-rto-drill-report.py
+```
+
+verifiziert werden.
+
+Der Checker prüft unter anderem:
+
+- private `0600`-Rechte von Report und Key,
+- HMAC-SHA256 unter der v1-Domain,
+- `reportFingerprint`,
+- exakte v1-Envelope- und Record-Struktur,
+- Drill-ID und Dateinamenbindung,
+- kanonische UTC-Zeitstempel und deren exakte Differenz zu `durationSeconds`,
+- lückenlose Phasenreihenfolge ab `VERIFY_BACKUP`,
+- Status-/Exit-Code-Konsistenz jeder Phase,
+- Terminal-Phase und Gesamtstatus,
+- das feste RTO-Ziel von 14.400 Sekunden,
+- abgeleitete Reconciliation-/Promotion-Flags,
+- die unveränderliche Grenze `privacyBackupActivationAllowed=false`.
+
+Für den praktischen Betriebsnachweis muss der Report zusätzlich an das noch vorhandene Backup-Bundle gebunden werden. Der hostseitige read-only Einstiegspunkt übernimmt das automatisch:
+
+```bash
+bash infra/backup/check-club-restore-rto-drill-report.sh \
+  drill-<32hex> \
+  masters-backup-<timestamp>-<uuid>.mdbak
+```
+
+Der Wrapper berechnet den SHA-256 des aktuellen Bundle-Bytestrings neu und verlangt gleichzeitig:
+
+```text
+status = COMPLETED
+rtoMet = true
+```
+
+Nur dann liefert der unabhängige Checker:
+
+```text
+status = RESTORE_RTO_DRILL_REPORT_VERIFIED
+practicalRestoreEvidenceVerified = true
+privacyBackupActivationAllowed = false
+```
+
+Ein korrekt signierter `ROLLED_BACK`- oder `FAILED`-Report bleibt als technische Evidence verifizierbar, erfüllt aber den praktischen Restore-/RTO-Nachweis nicht. Ebenso blockiert ein HMAC-Tamper, eine inkonsistente Phasenkette oder ein anderes aktuelles Backup-Bundle.
+
+Der Checker verändert weder `TASKS.md` noch die Runtime-Konfiguration. Das Abhaken eines praktischen Betriebs-Gates bleibt eine bewusste Governance-Entscheidung nach Sichtung des realen, verifizierten Reports.
+
 ## Keine automatische Privacy-Aktivierung
 
 Jeder Report enthält fest:
@@ -112,9 +164,9 @@ Jeder Report enthält fest:
 privacyBackupActivationAllowed = false
 ```
 
-Der Drill-Harness ändert weder `.env` noch Runtime-Attestation und schreibt niemals `PRIVACY_BACKUP_STATE=ENABLED`.
+Der Drill-Harness und der unabhängige Checker ändern weder `.env` noch Runtime-Attestation und schreiben niemals `PRIVACY_BACKUP_STATE=ENABLED`.
 
-Das ist absichtlich eine getrennte Governance-Grenze. Erst wenn ein **realer** Drill auf der vorgesehenen Betriebsumgebung erfolgreich abgeschlossen, der signierte Report geprüft und die übrigen Epic-12-Betriebsvoraussetzungen akzeptiert wurden, darf ein späterer separater Aktivierungs-Slice erwogen werden.
+Das ist absichtlich eine getrennte Governance-Grenze. Erst wenn ein **realer** Drill auf der vorgesehenen Betriebsumgebung erfolgreich abgeschlossen, der signierte Report unabhängig geprüft und die übrigen Epic-12-Betriebsvoraussetzungen akzeptiert wurden, darf ein späterer separater Aktivierungs-Slice erwogen werden.
 
 ## CI-Vertrag
 
@@ -123,10 +175,14 @@ Das ist absichtlich eine getrennte Governance-Grenze. Erst wenn ein **realer** D
 - feste Reihenfolge der acht Phasen;
 - keine direkte Docker-/Volume-Mutation im Drill-Orchestrator selbst;
 - `COMPLETED` erzeugt einen gültigen HMAC-Report mit `rtoMet=true` im kurzen Testlauf;
-- `ROLLED_BACK` erzeugt ebenfalls einen signierten Report, aber `rtoMet=false`;
+- unabhängige Verifikation des COMPLETED-Reports gegen die aktuellen Backup-Bytes;
+- der hostseitige Zwei-Argument-Checker liefert `practicalRestoreEvidenceVerified=true`;
+- HMAC-Tamper wird fail-closed erkannt;
+- eine abweichende erwartete Bundle-Fingerprint-Bindung wird abgelehnt;
+- `ROLLED_BACK` bleibt signiert/verifizierbar, scheitert aber an `--require-completed`;
 - Report- und Verzeichnisrechte;
 - `privacyBackupActivationAllowed=false`;
 - `TASKS.md` und Release-Gate bleiben offen;
 - `.env.example` bleibt bei `PRIVACY_BACKUP_STATE=DISABLED`.
 
-Damit ist nach Merge des Harness **noch nicht** behauptet, dass der praktische Restore-/RTO-Test durchgeführt wurde. Genau dieser reale Lauf ist der danach verbleibende operative Nachweis.
+Damit ist nach Merge des Checkers **noch nicht** behauptet, dass der praktische Restore-/RTO-Test durchgeführt wurde. Der reale Lauf plus unabhängige Verifikation sind der danach verbleibende operative Nachweis.
