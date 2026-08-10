@@ -1,0 +1,163 @@
+name: Online Update Execution Event Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/online-update-execution-event-contract.yml'
+      - 'infra/update/**'
+      - 'docs/online-update-execution-events.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/online-update-execution-event-contract.yml'
+      - 'infra/update/**'
+      - 'docs/online-update-execution-events.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare authentic pending journals
+        run: |
+          root=/tmp/online-update-events
+          rm -rf "$root"
+          mkdir -p "$root"
+          python3 - <<'PY'
+          import base64, importlib.util, json
+          from pathlib import Path
+          root=Path('/tmp/online-update-events')
+          for name, byte in [('journal.key',101),('event.key',102)]:
+              root.joinpath(name).write_text(base64.b64encode(bytes([byte])*32).decode()+'\n')
+          spec=importlib.util.spec_from_file_location('journal',Path('infra/update/persist-online-update-execution-journal.py'))
+          journal=importlib.util.module_from_spec(spec); spec.loader.exec_module(journal)
+          app='ghcr.io/githublarskomo/master-diagnostics-app@sha256:'+'2'*64
+          migrator='ghcr.io/githublarskomo/master-diagnostics-migrator@sha256:'+'3'*64
+          record=journal.validate_record({
+              'journalVersion':1,'phase':'PENDING','startedAt':'2026-08-10T09:00:00.000Z',
+              'executionPlanSignature':'hmac-sha256:'+'4'*64,'executionPlanEnvelopeSha256':'sha256:'+'5'*64,
+              'manifestFingerprint':'sha256:'+'6'*64,'currentVersion':'1.0.0','targetVersion':'1.1.0',
+              'images':[{'role':'APP','reference':app,'resolvedDigest':'sha256:'+'2'*64},{'role':'MIGRATOR','reference':migrator,'resolvedDigest':'sha256:'+'3'*64}],
+              'rollbackAnchor':{'fileName':'masters-backup-20260810T080001000Z-12345678-1234-1234-1234-123456789abc.mdbak','sha256':'sha256:'+'7'*64,'createdAt':'2026-08-10T08:00:01.000Z','verified':True,'rollbackAnchor':True},
+              'executionOrder':['ACQUIRE_EXACT_IMAGES','STOP_APPLICATION_WRITERS','RUN_CONTROLLED_MIGRATIONS','START_APPLICATION','VERIFY_APPLICATION_HEALTH','COMPLETE_UPDATE'],
+              'nextStep':'ACQUIRE_EXACT_IMAGES','completedSteps':[],'mutationState':'NOT_STARTED','executionJournalRequiredBeforeMutation':True,
+              'imageAcquisitionStarted':False,'productionMutationStarted':False,'migrationStarted':False,'rollbackStarted':False,'completionRecorded':False,
+              'imagePullAllowed':False,'migrationAllowed':False,'productionMutationAllowed':False,'updateExecuted':False,
+          })
+          key=base64.b64decode(root.joinpath('journal.key').read_text().strip())
+          envelope={'envelopeVersion':1,'record':record,'signature':journal.sign_record(key,record)}
+          for name in ('success','abort','rollback','illegal','tamper'):
+              d=root/name; d.mkdir(); d.joinpath('online-update-execution-journal.json').write_text(json.dumps(envelope,indent=2)+'\n'); d.joinpath('events').mkdir()
+          PY
+          chmod 600 "$root"/*.key "$root"/*/online-update-execution-journal.json
+
+      - name: Verify full successful append-only chain
+        run: |
+          root=/tmp/online-update-events
+          phases=(IMAGE_ACQUISITION_STARTED IMAGES_ACQUIRED WRITER_STOP_STARTED WRITERS_STOPPED MIGRATION_STARTED MIGRATION_COMPLETED APPLICATION_START_STARTED APPLICATION_STARTED HEALTH_VERIFIED COMPLETED)
+          i=0
+          for phase in "${phases[@]}"; do
+            i=$((i+1))
+            printf -v second '%02d' "$i"
+            python3 infra/update/persist-online-update-execution-event.py \
+              --journal "$root/success/online-update-execution-journal.json" --journal-key "$root/journal.key" \
+              --target-dir "$root/success/events" --key-file "$root/event.key" \
+              --phase "$phase" --recorded-at "2026-08-10T09:00:${second}.000Z" > "$root/success/${i}.json"
+          done
+          python3 - <<'PY'
+          import base64,importlib.util,json
+          from pathlib import Path
+          root=Path('/tmp/online-update-events')
+          last=json.loads(root.joinpath('success/10.json').read_text())
+          assert last['phase']=='COMPLETED' and last['sequence']==10
+          assert last['terminal'] is True and last['updateExecuted'] is True
+          assert last['productionMutationStarted'] is True and last['migrationStarted'] is True
+          assert last['nextAllowedPhases']==[]
+          spec=importlib.util.spec_from_file_location('events',Path('infra/update/persist-online-update-execution-event.py')); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          jspec=importlib.util.spec_from_file_location('journal',Path('infra/update/persist-online-update-execution-journal.py')); j=importlib.util.module_from_spec(jspec); jspec.loader.exec_module(j)
+          jkey=base64.b64decode(root.joinpath('journal.key').read_text().strip()); ekey=base64.b64decode(root.joinpath('event.key').read_text().strip())
+          journal=j.verify_envelope(json.loads(root.joinpath('success/online-update-execution-journal.json').read_text()),jkey)
+          events=m.read_events(root/'success/events',ekey,journal)
+          assert [e['record']['sequence'] for e in events]==list(range(1,11))
+          assert all(events[i]['record']['previousEventSignature']==(events[i-1]['signature'] if i else None) for i in range(len(events)))
+          assert events[-1]['record']['healthVerified'] is True
+          assert oct((root/'success/events').stat().st_mode & 0o777)=='0o700'
+          assert all(oct(p.stat().st_mode & 0o777)=='0o600' for p in (root/'success/events').glob('*.json'))
+          PY
+
+      - name: Verify pre-mutation abort and post-stop rollback are distinct
+        run: |
+          root=/tmp/online-update-events
+          for phase in IMAGE_ACQUISITION_STARTED IMAGES_ACQUIRED ABORTED_BEFORE_PRODUCTION_MUTATION; do
+            case "$phase" in IMAGE_ACQUISITION_STARTED) s=01;; IMAGES_ACQUIRED) s=02;; *) s=03;; esac
+            python3 infra/update/persist-online-update-execution-event.py --journal "$root/abort/online-update-execution-journal.json" --journal-key "$root/journal.key" --target-dir "$root/abort/events" --key-file "$root/event.key" --phase "$phase" --recorded-at "2026-08-10T09:01:${s}.000Z" > "$root/abort-$s.json"
+          done
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/online-update-events/abort-03.json').read_text())
+          assert r['phase']=='ABORTED_BEFORE_PRODUCTION_MUTATION' and r['terminal'] is True
+          assert r['productionMutationStarted'] is False and r['updateExecuted'] is False
+          PY
+
+          phases=(IMAGE_ACQUISITION_STARTED IMAGES_ACQUIRED WRITER_STOP_STARTED WRITERS_STOPPED MIGRATION_STARTED ROLLBACK_STARTED ROLLBACK_COMPLETED)
+          i=0
+          for phase in "${phases[@]}"; do
+            i=$((i+1)); printf -v second '%02d' "$i"
+            python3 infra/update/persist-online-update-execution-event.py --journal "$root/rollback/online-update-execution-journal.json" --journal-key "$root/journal.key" --target-dir "$root/rollback/events" --key-file "$root/event.key" --phase "$phase" --recorded-at "2026-08-10T09:02:${second}.000Z" > "$root/rollback-${i}.json"
+          done
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/online-update-events/rollback-7.json').read_text())
+          assert r['phase']=='ROLLBACK_COMPLETED' and r['terminal'] is True
+          assert r['productionMutationStarted'] is True and r['migrationStarted'] is True
+          assert r['updateExecuted'] is False and r['nextAllowedPhases']==[]
+          PY
+
+      - name: Reject illegal rollback, timestamp reversal, and tampering
+        run: |
+          root=/tmp/online-update-events
+          python3 infra/update/persist-online-update-execution-event.py --journal "$root/illegal/online-update-execution-journal.json" --journal-key "$root/journal.key" --target-dir "$root/illegal/events" --key-file "$root/event.key" --phase IMAGE_ACQUISITION_STARTED --recorded-at '2026-08-10T09:03:01.000Z' >/dev/null
+          python3 infra/update/persist-online-update-execution-event.py --journal "$root/illegal/online-update-execution-journal.json" --journal-key "$root/journal.key" --target-dir "$root/illegal/events" --key-file "$root/event.key" --phase IMAGES_ACQUIRED --recorded-at '2026-08-10T09:03:02.000Z' >/dev/null
+          set +e
+          python3 infra/update/persist-online-update-execution-event.py --journal "$root/illegal/online-update-execution-journal.json" --journal-key "$root/journal.key" --target-dir "$root/illegal/events" --key-file "$root/event.key" --phase ROLLBACK_STARTED --recorded-at '2026-08-10T09:03:03.000Z' >/tmp/illegal.out 2>/tmp/illegal.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'is not allowed after current evidence' /tmp/illegal.err
+
+          set +e
+          python3 infra/update/persist-online-update-execution-event.py --journal "$root/illegal/online-update-execution-journal.json" --journal-key "$root/journal.key" --target-dir "$root/illegal/events" --key-file "$root/event.key" --phase WRITER_STOP_STARTED --recorded-at '2026-08-10T09:03:01.500Z' >/tmp/time.out 2>/tmp/time.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'timestamp order is invalid' /tmp/time.err
+
+          python3 infra/update/persist-online-update-execution-event.py --journal "$root/tamper/online-update-execution-journal.json" --journal-key "$root/journal.key" --target-dir "$root/tamper/events" --key-file "$root/event.key" --phase IMAGE_ACQUISITION_STARTED --recorded-at '2026-08-10T09:04:01.000Z' >/dev/null
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=next(Path('/tmp/online-update-events/tamper/events').glob('*.json')); d=json.loads(p.read_text()); d['record']['targetVersion']='9.9.9'; p.write_text(json.dumps(d)+'\n')
+          PY
+          set +e
+          python3 infra/update/persist-online-update-execution-event.py --journal "$root/tamper/online-update-execution-journal.json" --journal-key "$root/journal.key" --target-dir "$root/tamper/events" --key-file "$root/event.key" --phase IMAGES_ACQUIRED --recorded-at '2026-08-10T09:04:02.000Z' >/tmp/tamper.out 2>/tmp/tamper.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'signature verification failed' /tmp/tamper.err
+
+      - name: Verify event protocol remains evidence-only
+        run: |
+          python3 -m py_compile infra/update/persist-online-update-execution-event.py
+          python3 - <<'PY'
+          from pathlib import Path
+          script=Path('infra/update/persist-online-update-execution-event.py').read_text()
+          for token in ('subprocess','docker pull','docker compose','docker manifest','requests.','urllib.request','os.system','Popen('):
+              assert token not in script, token
+          for phase in ('IMAGE_ACQUISITION_STARTED','WRITER_STOP_STARTED','MIGRATION_STARTED','APPLICATION_START_STARTED','ROLLBACK_STARTED','ABORTED_BEFORE_PRODUCTION_MUTATION'):
+              assert phase in script
+          assert 'previousEventSignature' in script
+          assert 'updateExecuted": phase == "COMPLETED"' in script
+          PY
