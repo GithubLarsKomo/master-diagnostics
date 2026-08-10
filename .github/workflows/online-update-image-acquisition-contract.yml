@@ -1,0 +1,176 @@
+name: Online Update Image Acquisition Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/online-update-image-acquisition-contract.yml'
+      - 'infra/update/**'
+      - 'docs/online-update-image-acquisition.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/online-update-image-acquisition-contract.yml'
+      - 'infra/update/**'
+      - 'docs/online-update-image-acquisition.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and publish disposable immutable test images
+        run: |
+          set -Eeuo pipefail
+          root=/tmp/online-update-acquisition
+          rm -rf "$root"
+          mkdir -p "$root/build/app" "$root/build/migrator" "$root/evidence/events" "$root/failure/events"
+          docker run -d --rm --name online-update-contract-registry -p 127.0.0.1:5000:5000 registry:2
+          trap 'docker rm -f online-update-contract-registry >/dev/null 2>&1 || true' EXIT
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:5000/v2/ >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:5000/v2/ >/dev/null
+
+          printf 'app-v1\n' > "$root/build/app/payload"
+          printf 'FROM scratch\nCOPY payload /payload\n' > "$root/build/app/Dockerfile"
+          printf 'migrator-v1\n' > "$root/build/migrator/payload"
+          printf 'FROM scratch\nCOPY payload /payload\n' > "$root/build/migrator/Dockerfile"
+          docker build -q -t 127.0.0.1:5000/md/app:target "$root/build/app" >/dev/null
+          docker build -q -t 127.0.0.1:5000/md/migrator:target "$root/build/migrator" >/dev/null
+          docker push 127.0.0.1:5000/md/app:target >/dev/null
+          docker push 127.0.0.1:5000/md/migrator:target >/dev/null
+          app_ref="$(docker image inspect 127.0.0.1:5000/md/app:target --format '{{index .RepoDigests 0}}')"
+          migrator_ref="$(docker image inspect 127.0.0.1:5000/md/migrator:target --format '{{index .RepoDigests 0}}')"
+          test "$app_ref" != "$migrator_ref"
+          printf '%s\n' "$app_ref" > "$root/app.ref"
+          printf '%s\n' "$migrator_ref" > "$root/migrator.ref"
+          docker image rm -f 127.0.0.1:5000/md/app:target "$app_ref" 127.0.0.1:5000/md/migrator:target "$migrator_ref" >/dev/null
+          test -z "$(docker image ls -q 127.0.0.1:5000/md/app)"
+          test -z "$(docker image ls -q 127.0.0.1:5000/md/migrator)"
+          docker rm -f online-update-contract-registry >/dev/null
+
+      - name: Prepare authentic signed journal bound to disposable images
+        run: |
+          root=/tmp/online-update-acquisition
+          docker run -d --rm --name online-update-contract-registry -p 127.0.0.1:5000:5000 registry:2
+          # The registry container from the previous step is intentionally new and empty, so republish from tar-free local build contexts.
+          docker build -q -t 127.0.0.1:5000/md/app:target "$root/build/app" >/dev/null
+          docker build -q -t 127.0.0.1:5000/md/migrator:target "$root/build/migrator" >/dev/null
+          docker push 127.0.0.1:5000/md/app:target >/dev/null
+          docker push 127.0.0.1:5000/md/migrator:target >/dev/null
+          app_ref="$(docker image inspect 127.0.0.1:5000/md/app:target --format '{{index .RepoDigests 0}}')"
+          migrator_ref="$(docker image inspect 127.0.0.1:5000/md/migrator:target --format '{{index .RepoDigests 0}}')"
+          printf '%s\n' "$app_ref" > "$root/app.ref"
+          printf '%s\n' "$migrator_ref" > "$root/migrator.ref"
+          docker image rm -f 127.0.0.1:5000/md/app:target "$app_ref" 127.0.0.1:5000/md/migrator:target "$migrator_ref" >/dev/null
+          python3 - <<'PY'
+          import base64,importlib.util,json
+          from pathlib import Path
+          root=Path('/tmp/online-update-acquisition')
+          for name,byte in [('journal.key',111),('event.key',112)]:
+              root.joinpath(name).write_text(base64.b64encode(bytes([byte])*32).decode()+'\n')
+          app=root.joinpath('app.ref').read_text().strip(); migrator=root.joinpath('migrator.ref').read_text().strip()
+          def digest(ref): return ref.rsplit('@',1)[1]
+          spec=importlib.util.spec_from_file_location('journal',Path('infra/update/persist-online-update-execution-journal.py'))
+          journal=importlib.util.module_from_spec(spec); spec.loader.exec_module(journal)
+          record=journal.validate_record({
+              'journalVersion':1,'phase':'PENDING','startedAt':'2026-08-10T10:00:00.000Z',
+              'executionPlanSignature':'hmac-sha256:'+'4'*64,'executionPlanEnvelopeSha256':'sha256:'+'5'*64,
+              'manifestFingerprint':'sha256:'+'6'*64,'currentVersion':'1.0.0','targetVersion':'1.1.0',
+              'images':[{'role':'APP','reference':app,'resolvedDigest':digest(app)},{'role':'MIGRATOR','reference':migrator,'resolvedDigest':digest(migrator)}],
+              'rollbackAnchor':{'fileName':'masters-backup-20260810T080001000Z-12345678-1234-1234-1234-123456789abc.mdbak','sha256':'sha256:'+'7'*64,'createdAt':'2026-08-10T08:00:01.000Z','verified':True,'rollbackAnchor':True},
+              'executionOrder':['ACQUIRE_EXACT_IMAGES','STOP_APPLICATION_WRITERS','RUN_CONTROLLED_MIGRATIONS','START_APPLICATION','VERIFY_APPLICATION_HEALTH','COMPLETE_UPDATE'],
+              'nextStep':'ACQUIRE_EXACT_IMAGES','completedSteps':[],'mutationState':'NOT_STARTED','executionJournalRequiredBeforeMutation':True,
+              'imageAcquisitionStarted':False,'productionMutationStarted':False,'migrationStarted':False,'rollbackStarted':False,'completionRecorded':False,
+              'imagePullAllowed':False,'migrationAllowed':False,'productionMutationAllowed':False,'updateExecuted':False,
+          })
+          key=base64.b64decode(root.joinpath('journal.key').read_text().strip())
+          env={'envelopeVersion':1,'record':record,'signature':journal.sign_record(key,record)}
+          for d in (root/'evidence',root/'failure'):
+              d.joinpath('online-update-execution-journal.json').write_text(json.dumps(env,indent=2)+'\n')
+          PY
+          chmod 600 "$root"/*.key "$root"/*/online-update-execution-journal.json
+
+      - name: Acquire exact digests and persist success only afterwards
+        run: |
+          root=/tmp/online-update-acquisition
+          python3 infra/update/acquire-online-update-images.py \
+            --journal "$root/evidence/online-update-execution-journal.json" --journal-key "$root/journal.key" \
+            --events-dir "$root/evidence/events" --event-key "$root/event.key" > "$root/first.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('/tmp/online-update-acquisition')
+          r=json.loads(root.joinpath('first.json').read_text())
+          assert r['mode']=='CLUB_ONLINE_UPDATE_IMAGE_ACQUISITION_V1'
+          assert r['status']=='EXACT_IMAGES_ACQUIRED' and r['phase']=='IMAGES_ACQUIRED'
+          assert r['eventCreated'] is True and r['eventReused'] is False
+          assert r['productionMutationStarted'] is False and r['migrationStarted'] is False and r['updateExecuted'] is False
+          expected={root.joinpath('app.ref').read_text().strip(),root.joinpath('migrator.ref').read_text().strip()}
+          assert {x['reference'] for x in r['images']}==expected
+          assert all(x['reference'] in x['repoDigests'] for x in r['images'])
+          files=sorted(p.name for p in root.joinpath('evidence/events').glob('*.json'))
+          assert files==['online-update-event-image-acquisition-started.json','online-update-event-images-acquired.json']
+          PY
+
+      - name: Reacquire safely after local cache loss without advancing evidence
+        run: |
+          root=/tmp/online-update-acquisition
+          app_ref="$(cat "$root/app.ref")"; migrator_ref="$(cat "$root/migrator.ref")"
+          docker image rm -f "$app_ref" "$migrator_ref" >/dev/null
+          python3 infra/update/acquire-online-update-images.py \
+            --journal "$root/evidence/online-update-execution-journal.json" --journal-key "$root/journal.key" \
+            --events-dir "$root/evidence/events" --event-key "$root/event.key" > "$root/retry.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/online-update-acquisition/retry.json').read_text())
+          assert r['phase']=='IMAGES_ACQUIRED'
+          assert r['eventCreated'] is False and r['eventReused'] is True
+          assert r['productionMutationStarted'] is False
+          PY
+
+      - name: Leave only STARTED evidence when an exact pull fails
+        run: |
+          root=/tmp/online-update-acquisition
+          docker rm -f online-update-contract-registry >/dev/null
+          set +e
+          python3 infra/update/acquire-online-update-images.py \
+            --journal "$root/failure/online-update-execution-journal.json" --journal-key "$root/journal.key" \
+            --events-dir "$root/failure/events" --event-key "$root/event.key" > "$root/failure.out" 2> "$root/failure.err"
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'Pulling immutable image' "$root/failure.err"
+          python3 - <<'PY'
+          import base64,importlib.util,json
+          from pathlib import Path
+          root=Path('/tmp/online-update-acquisition')
+          spec=importlib.util.spec_from_file_location('e',Path('infra/update/persist-online-update-execution-event.py')); e=importlib.util.module_from_spec(spec); spec.loader.exec_module(e)
+          jspec=importlib.util.spec_from_file_location('j',Path('infra/update/persist-online-update-execution-journal.py')); j=importlib.util.module_from_spec(jspec); jspec.loader.exec_module(j)
+          jkey=base64.b64decode(root.joinpath('journal.key').read_text().strip()); ekey=base64.b64decode(root.joinpath('event.key').read_text().strip())
+          journal=j.verify_envelope(json.loads(root.joinpath('failure/online-update-execution-journal.json').read_text()),jkey)
+          events=e.read_events(root/'failure/events',ekey,journal)
+          assert [x['record']['phase'] for x in events]==['IMAGE_ACQUISITION_STARTED']
+          assert events[0]['record']['productionMutationStarted'] is False
+          PY
+
+      - name: Verify executor mutation boundary
+        run: |
+          python3 -m py_compile infra/update/acquire-online-update-images.py
+          python3 - <<'PY'
+          from pathlib import Path
+          script=Path('infra/update/acquire-online-update-images.py').read_text()
+          assert '["pull", reference]' in script
+          assert '["image", "inspect", reference]' in script
+          for token in ('docker compose','docker stop','docker restart','docker rm','volume','RUN_CONTROLLED_MIGRATIONS','RESTORE_VERIFIED_PREUPDATE_BACKUP','requests.','urllib.request','os.system'):
+              assert token not in script, token
+          assert 'IMAGE_ACQUISITION_STARTED' in script and 'IMAGES_ACQUIRED' in script
+          assert 'productionMutationStarted": False' in script
+          PY
+
+      - name: Cleanup disposable registry
+        if: always()
+        run: docker rm -f online-update-contract-registry >/dev/null 2>&1 || true
