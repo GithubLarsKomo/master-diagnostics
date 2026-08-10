@@ -12,6 +12,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEncryptedBackupBundle } from '../src/services/backup-bundle';
+import {
+  readVerifiedRestoreSourceProvenance,
+  RESTORE_SOURCE_PROVENANCE_FILE_NAME,
+} from '../src/services/backup-restore-source-provenance';
 import { stageEncryptedBackupRestore } from '../src/services/backup-restore-staging';
 
 const roots: string[] = [];
@@ -57,7 +61,7 @@ afterEach(async () => {
 });
 
 describe('isolated backup restore staging', () => {
-  it('authenticates a private snapshot and extracts all sources only below a new staging directory', async () => {
+  it('authenticates a private snapshot, persists signed source provenance, and extracts only below staging', async () => {
     const { stagingRoot, productionSentinel, keyFile, created } = await fixture();
 
     const staged = await stageEncryptedBackupRestore({
@@ -74,13 +78,51 @@ describe('isolated backup restore staging', () => {
       restoreReconciliationRequired: true,
       sourceNames,
     });
+    expect(staged.sourceProvenancePath).toBe(join(staged.stagingPath, RESTORE_SOURCE_PROVENANCE_FILE_NAME));
+    expect(staged.sourceProvenanceSignature).toMatch(/^hmac-sha256:[0-9a-f]{64}$/);
     expect((await lstat(stagingRoot)).mode & 0o777).toBe(0o700);
     expect((await lstat(staged.stagingPath)).isDirectory()).toBe(true);
-    expect((await readdir(staged.stagingPath)).sort()).toEqual(['manifest.json', ...sourceNames].sort());
+    expect((await readdir(staged.stagingPath)).sort()).toEqual([
+      'manifest.json',
+      RESTORE_SOURCE_PROVENANCE_FILE_NAME,
+      ...sourceNames,
+    ].sort());
+    expect((await lstat(staged.sourceProvenancePath)).mode & 0o777).toBe(0o600);
+
+    const provenance = await readVerifiedRestoreSourceProvenance(staged.sourceProvenancePath, keyFile);
+    expect(provenance.signature).toBe(staged.sourceProvenanceSignature);
+    expect(provenance.record).toMatchObject({
+      stagingName: staged.stagingName,
+      backupFileName: created.fileName,
+      backupSha256: created.sha256,
+      backupCreatedAt: created.createdAt,
+      bundleVersion: 1,
+      consistency: 'CLEANLY_STOPPED_VOLUMES',
+      restoreReconciliationRequired: true,
+      sourceNames,
+    });
+    expect(provenance.record.backupManifestFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
+
     for (const name of sourceNames) {
       expect(await readFile(join(staged.stagingPath, name, 'marker.txt'), 'utf8')).toBe(`${name}\n`);
     }
     expect(await readFile(productionSentinel, 'utf8')).toBe('production untouched\n');
+  });
+
+  it('rejects tampered restore source provenance', async () => {
+    const { stagingRoot, keyFile, created } = await fixture();
+    const staged = await stageEncryptedBackupRestore({
+      bundlePath: created.outputPath,
+      checksumPath: created.checksumPath,
+      keyFile,
+      stagingRoot,
+    });
+    const value = JSON.parse(await readFile(staged.sourceProvenancePath, 'utf8')) as {
+      record: { backupSha256: string };
+    };
+    value.record.backupSha256 = `sha256:${'f'.repeat(64)}`;
+    await writeFile(staged.sourceProvenancePath, `${JSON.stringify(value, null, 2)}\n`);
+    await expect(readVerifiedRestoreSourceProvenance(staged.sourceProvenancePath, keyFile)).rejects.toThrow('signature verification failed');
   });
 
   it('rejects symlink archive entries before extraction and leaves no staging payload behind', async () => {
