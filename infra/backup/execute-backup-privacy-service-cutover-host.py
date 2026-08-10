@@ -195,9 +195,14 @@ class HostCutover:
             fail("HOST_CUTOVER_COMPOSE_RENDER_DRIFT", "rendered target compose differs from signed plan")
 
     def collect_inspect(self, label: str) -> dict[str, Path]:
-        self.inspect_counter += 1
-        directory = self.evidence_root / "inspect" / f"{self.inspect_counter:04d}-{label}"
-        directory.mkdir(parents=True, exist_ok=False, mode=0o700)
+        while True:
+            self.inspect_counter += 1
+            directory = self.evidence_root / "inspect" / f"{self.inspect_counter:04d}-{label}"
+            try:
+                directory.mkdir(parents=True, exist_ok=False, mode=0o700)
+                break
+            except FileExistsError:
+                continue
         os.chmod(directory, 0o700)
         result: dict[str, Path] = {}
         for service in ALL_SERVICES:
