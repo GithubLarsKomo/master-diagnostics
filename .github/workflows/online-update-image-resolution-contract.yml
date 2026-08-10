@@ -1,0 +1,223 @@
+name: Online Update Image Resolution Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/online-update-image-resolution-contract.yml'
+      - '.github/workflows/online-update-preparation-contract.yml'
+      - 'infra/update/**'
+      - 'packages/db/src/create-backup-bundle.ts'
+      - 'packages/db/src/verify-backup-bundle.ts'
+      - 'packages/db/src/services/backup-bundle.ts'
+      - 'packages/db/src/services/backup-restore-verification.ts'
+      - 'docs/online-update-image-resolution.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/online-update-image-resolution-contract.yml'
+      - '.github/workflows/online-update-preparation-contract.yml'
+      - 'infra/update/**'
+      - 'packages/db/src/create-backup-bundle.ts'
+      - 'packages/db/src/verify-backup-bundle.ts'
+      - 'packages/db/src/services/backup-bundle.ts'
+      - 'packages/db/src/services/backup-restore-verification.ts'
+      - 'docs/online-update-image-resolution.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Start isolated local registry and publish two distinct fixture manifests
+        run: |
+          docker run -d --name md-online-update-registry -p 5000:5000 registry:2.8.3
+          trap 'docker rm -f md-online-update-registry >/dev/null 2>&1 || true' EXIT
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:5000/v2/ >/dev/null && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:5000/v2/ >/dev/null
+          root=/tmp/online-update-resolution
+          rm -rf "$root"
+          mkdir -p "$root/app" "$root/migrator"
+          cat > "$root/app/Dockerfile" <<'EOF'
+          FROM scratch
+          LABEL fixture.role="APP"
+          EOF
+          cat > "$root/migrator/Dockerfile" <<'EOF'
+          FROM scratch
+          LABEL fixture.role="MIGRATOR"
+          EOF
+          docker build -q -t localhost:5000/md-app:fixture "$root/app" >/dev/null
+          docker build -q -t localhost:5000/md-migrator:fixture "$root/migrator" >/dev/null
+          docker push localhost:5000/md-app:fixture > "$root/app-push.txt"
+          docker push localhost:5000/md-migrator:fixture > "$root/migrator-push.txt"
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          root=Path('/tmp/online-update-resolution')
+          for name in ('app','migrator'):
+              text=root.joinpath(f'{name}-push.txt').read_text()
+              matches=re.findall(r'digest: (sha256:[0-9a-f]{64})', text)
+              assert matches, text
+              root.joinpath(f'{name}-digest.txt').write_text(matches[-1]+'\n')
+          assert root.joinpath('app-digest.txt').read_text()!=root.joinpath('migrator-digest.txt').read_text()
+          PY
+
+      - name: Build the authentic selection and preparation chain
+        run: |
+          root=/tmp/online-update-resolution
+          mkdir -p "$root/selection" "$root/preparation" "$root/resolution" "$root/backup-source" "$root/backups"
+          for name in libsql reports tenant-exports data-subject-delivery caddy-data caddy-config; do
+            mkdir -p "$root/backup-source/$name"
+            printf '%s\n' "$name fixture" > "$root/backup-source/$name/content.txt"
+          done
+          cat > "$root/release-notes.md" <<'EOF'
+          # Registry resolution fixture
+          EOF
+          python3 - <<'PY'
+          import base64, hashlib, json
+          from pathlib import Path
+          root=Path('/tmp/online-update-resolution')
+          for name,byte in [('update.key',83),('preparation.key',84),('resolution.key',86),('backup.key',85)]:
+              root.joinpath(name).write_text(base64.b64encode(bytes([byte])*32).decode()+'\n')
+          notes=root.joinpath('release-notes.md').read_bytes()
+          app=root.joinpath('app-digest.txt').read_text().strip()
+          migrator=root.joinpath('migrator-digest.txt').read_text().strip()
+          manifest=json.loads(Path('infra/update/online-update-manifest.example.json').read_text())
+          manifest['releaseNotes']['sha256']='sha256:'+hashlib.sha256(notes).hexdigest()
+          manifest['images']=[
+              {'role':'APP','reference':f'localhost:5000/md-app@{app}'},
+              {'role':'MIGRATOR','reference':f'localhost:5000/md-migrator@{migrator}'},
+          ]
+          root.joinpath('manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+          PY
+          chmod 600 "$root"/*.key "$root/manifest.json" "$root/release-notes.md"
+          python3 infra/update/persist-online-update-selection.py \
+            --manifest "$root/manifest.json" --current-version 1.0.0 \
+            --target-dir "$root/selection" --key-file "$root/update.key" >/dev/null
+          sleep 0.05
+          env BACKUP_SOURCE_DIR="$root/backup-source" BACKUP_TARGET_DIR="$root/backups" BACKUP_KEY_FILE="$root/backup.key" BACKUP_RETENTION_COUNT=30 \
+            pnpm --silent --filter @masters/db backup:bundle > "$root/backup-created.json"
+          bundle_name="$(python3 -c 'import json; print(json.load(open("/tmp/online-update-resolution/backup-created.json"))["fileName"])')"
+          env BACKUP_BUNDLE_FILE="$root/backups/$bundle_name" BACKUP_CHECKSUM_FILE="$root/backups/$bundle_name.sha256" BACKUP_KEY_FILE="$root/backup.key" \
+            pnpm --silent --filter @masters/db backup:verify > "$root/backup-verified.json"
+          python3 infra/update/persist-online-update-preparation.py \
+            --selection "$root/selection/online-update-selection.json" --selection-key "$root/update.key" \
+            --release-notes "$root/release-notes.md" \
+            --backup-bundle "$root/backups/$bundle_name" --backup-verification "$root/backup-verified.json" \
+            --target-dir "$root/preparation" --key-file "$root/preparation.key" >/dev/null
+
+      - name: Resolve exact immutable manifests and reuse signed evidence idempotently
+        run: |
+          root=/tmp/online-update-resolution
+          common=(
+            --preparation "$root/preparation/online-update-preparation.json"
+            --preparation-key "$root/preparation.key"
+            --target-dir "$root/resolution"
+            --key-file "$root/resolution.key"
+            --allow-insecure-localhost
+          )
+          python3 infra/update/resolve-online-update-images.py "${common[@]}" > "$root/first.json"
+          python3 infra/update/resolve-online-update-images.py "${common[@]}" > "$root/second.json"
+          python3 - <<'PY'
+          import json, re
+          from pathlib import Path
+          root=Path('/tmp/online-update-resolution')
+          first=json.loads(root.joinpath('first.json').read_text())
+          second=json.loads(root.joinpath('second.json').read_text())
+          assert first['mode']=='CLUB_ONLINE_UPDATE_IMAGE_RESOLUTION_V1'
+          assert first['status']=='READY_FOR_UPDATE_EXECUTION_PLAN'
+          assert first['resolutionCreated'] is True and first['resolutionReused'] is False
+          assert second['resolutionCreated'] is False and second['resolutionReused'] is True
+          assert first['allImmutableReferencesAvailable'] is True
+          assert first['descriptorDigestsMatch'] is True
+          assert first['imagePullAllowed'] is False
+          assert first['migrationAllowed'] is False
+          assert first['productionMutationAllowed'] is False
+          assert first['updateExecuted'] is False
+          assert [x['role'] for x in first['images']]==['APP','MIGRATOR']
+          expected=[root.joinpath('app-digest.txt').read_text().strip(),root.joinpath('migrator-digest.txt').read_text().strip()]
+          assert [x['digest'] for x in first['images']]==expected
+          evidence=json.loads(root.joinpath('resolution/online-update-image-resolution.json').read_text())
+          assert re.fullmatch(r'hmac-sha256:[0-9a-f]{64}',evidence['signature'])
+          assert oct(root.joinpath('resolution').stat().st_mode & 0o777)=='0o700'
+          assert oct(root.joinpath('resolution/online-update-image-resolution.json').stat().st_mode & 0o777)=='0o600'
+          PY
+
+      - name: Reject unavailable immutable digest and resolution HMAC tampering
+        run: |
+          root=/tmp/online-update-resolution
+          python3 - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          p=Path('infra/update/resolve-online-update-images.py')
+          spec=importlib.util.spec_from_file_location('resolver',p)
+          m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          missing='localhost:5000/md-app@sha256:'+'f'*64
+          try:
+              m.inspect_manifest(missing,True)
+          except Exception as exc:
+              assert 'inspection failed' in str(exc)
+          else:
+              raise AssertionError('missing digest unexpectedly resolved')
+          remote='ghcr.io/example/repo@sha256:'+'a'*64
+          try:
+              m.inspect_manifest(remote,True)
+          except Exception as exc:
+              assert 'only for localhost' in str(exc)
+          else:
+              raise AssertionError('remote insecure registry unexpectedly allowed')
+          PY
+          cp "$root/resolution/online-update-image-resolution.json" "$root/tampered-resolution.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/online-update-resolution/tampered-resolution.json')
+          d=json.loads(p.read_text()); d['record']['targetVersion']='9.9.9'; p.write_text(json.dumps(d)+'\n')
+          PY
+          python3 - <<'PY'
+          import base64, importlib.util, json
+          from pathlib import Path
+          p=Path('infra/update/resolve-online-update-images.py')
+          spec=importlib.util.spec_from_file_location('resolver',p)
+          m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          key=base64.b64decode(Path('/tmp/online-update-resolution/resolution.key').read_text().strip())
+          value=json.loads(Path('/tmp/online-update-resolution/tampered-resolution.json').read_text())
+          try:
+              m.verify_envelope(value,key)
+          except Exception as exc:
+              assert 'signature verification failed' in str(exc)
+          else:
+              raise AssertionError('tampered resolution unexpectedly verified')
+          PY
+
+      - name: Verify registry resolver never pulls layers or mutates the Club stack
+        run: |
+          python3 -m py_compile infra/update/resolve-online-update-images.py
+          python3 - <<'PY'
+          from pathlib import Path
+          script=Path('infra/update/resolve-online-update-images.py').read_text()
+          assert 'docker", "manifest", "inspect"' in script
+          for token in ('docker pull','docker compose','compose up','compose down','compose restart','migrationAllowed": True','productionMutationAllowed": True'):
+              assert token not in script, token
+          assert 'imagePullAllowed": False' in script
+          assert 'migrationAllowed": False' in script
+          assert 'productionMutationAllowed": False' in script
+          PY
+
+      - name: Cleanup registry
+        if: always()
+        run: docker rm -f md-online-update-registry >/dev/null 2>&1 || true
