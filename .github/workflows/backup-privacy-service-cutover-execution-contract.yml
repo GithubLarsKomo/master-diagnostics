@@ -1,0 +1,87 @@
+name: Backup Privacy Service Cutover Execution Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-service-cutover-execution-contract.yml'
+      - 'infra/backup/backup-privacy-service-cutover-execution.py'
+      - 'infra/backup/test-backup-privacy-service-cutover-execution.sh'
+      - 'infra/backup/backup_privacy_service_live_baseline_common.py'
+      - 'infra/backup/write-backup-privacy-service-live-baseline.py'
+      - 'infra/backup/check-backup-privacy-service-live-baseline.py'
+      - 'infra/backup/test-backup-privacy-service-live-baseline.sh'
+      - 'infra/backup/prepare-backup-privacy-service-cutover-plan-v2.py'
+      - 'infra/backup/check-backup-privacy-service-cutover-plan-v2.py'
+      - 'docs/backup-privacy-service-cutover-execution.md'
+      - 'docs/backup-privacy-service-live-baseline.md'
+      - '.env.example'
+      - 'TASKS.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-service-cutover-execution-contract.yml'
+      - 'infra/backup/backup-privacy-service-cutover-execution.py'
+      - 'infra/backup/test-backup-privacy-service-cutover-execution.sh'
+      - 'infra/backup/backup_privacy_service_live_baseline_common.py'
+      - 'infra/backup/write-backup-privacy-service-live-baseline.py'
+      - 'infra/backup/check-backup-privacy-service-live-baseline.py'
+      - 'infra/backup/test-backup-privacy-service-live-baseline.sh'
+      - 'infra/backup/prepare-backup-privacy-service-cutover-plan-v2.py'
+      - 'infra/backup/check-backup-privacy-service-cutover-plan-v2.py'
+      - 'docs/backup-privacy-service-cutover-execution.md'
+      - 'docs/backup-privacy-service-live-baseline.md'
+      - '.env.example'
+      - 'TASKS.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify syntax and evidence-only mutation boundary
+        run: |
+          python3 -m py_compile infra/backup/backup-privacy-service-cutover-execution.py
+          bash -n infra/backup/test-backup-privacy-service-cutover-execution.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('infra/backup/backup-privacy-service-cutover-execution.py').read_text()
+          assert 'masters:backup-privacy-service-live-baseline:v2' in text
+          assert 'masters:backup-privacy-service-cutover-execution-journal:v2' in text
+          assert 'masters:backup-privacy-service-cutover-execution-event:v2' in text
+          assert 'baselineVerifiedBeforeJournal' in text
+          assert 'baselineVerificationFileSha256' in text
+          assert 'rollbackStartedRequiredBeforeReverseMutation' in text
+          assert 'CUTOVER_STARTED' in text and 'ROLLBACK_STARTED' in text and 'COMPLETED' in text
+          assert 'activationExecuted' in text
+          for forbidden in ('docker ', '"docker"', 'compose ', 'subprocess.', 'os.replace('):
+              assert forbidden not in text, forbidden
+          PY
+
+      - name: Verify crash-safe v2 execution evidence chain
+        run: bash infra/backup/test-backup-privacy-service-cutover-execution.sh
+
+      - name: Verify terminal and rollback policy stays explicit
+        run: |
+          grep -F 'activationExecuted=true' docs/backup-privacy-service-cutover-execution.md
+          grep -F 'ROLLBACK_STARTED' docs/backup-privacy-service-cutover-execution.md
+          grep -F 'SERVICE_LIVE_BASELINE_VERIFIED' docs/backup-privacy-service-cutover-execution.md
+          grep -F 'serviceCutoverExecutionAllowed=false' docs/backup-privacy-service-cutover-execution.md
+          grep -F 'serviceCutoverExecutionAllowed=true' docs/backup-privacy-service-cutover-execution.md
+
+      - name: Verify real operational gates remain open
+        run: |
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
