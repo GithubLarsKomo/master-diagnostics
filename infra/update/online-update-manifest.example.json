@@ -1,0 +1,24 @@
+{
+  "manifestVersion": 1,
+  "channel": "stable",
+  "releaseVersion": "1.1.0",
+  "releaseNotes": {
+    "title": "Master Diagnostics 1.1.0",
+    "url": "https://github.com/GithubLarsKomo/master-diagnostics/releases/tag/v1.1.0",
+    "sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "images": [
+    {
+      "role": "APP",
+      "reference": "ghcr.io/githublarskomo/master-diagnostics-app@sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "role": "MIGRATOR",
+      "reference": "ghcr.io/githublarskomo/master-diagnostics-migrator@sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    }
+  ],
+  "migrationPolicy": "CONTROLLED_MIGRATIONS_BEFORE_APP_START",
+  "backupPolicy": "VERIFIED_PREUPDATE_BACKUP_REQUIRED",
+  "rollbackPolicy": "RESTORE_VERIFIED_PREUPDATE_BACKUP",
+  "autoUpdate": false
+}
