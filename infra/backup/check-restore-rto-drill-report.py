@@ -8,7 +8,6 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import re
 import stat
 from datetime import datetime, timezone
@@ -156,7 +155,12 @@ def validate_phases(value: Any, overall_status: str, terminal_phase: Any, durati
     return result
 
 
-def verify_record(record: dict[str, Any], report_path: Path, expected_bundle_name: str | None, expected_bundle_sha256: str | None) -> dict[str, Any]:
+def verify_record(
+    record: dict[str, Any],
+    report_path: Path,
+    expected_bundle_name: str | None,
+    expected_bundle_sha256: str | None,
+) -> dict[str, Any]:
     if set(record) != RECORD_FIELDS:
         fail("RESTORE_RTO_DRILL_RECORD_SHAPE_INVALID", "record fields differ from report v1 contract")
     if record.get("reportVersion") != 1:
@@ -241,6 +245,37 @@ def verify_record(record: dict[str, Any], report_path: Path, expected_bundle_nam
     }
 
 
+def verify_report(
+    report_path: Path,
+    key_file: Path,
+    expected_bundle_name: str | None = None,
+    expected_bundle_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Verify one report and return its normalized, trusted technical claims."""
+    raw = read_private(report_path, "RESTORE_RTO_DRILL_REPORT")
+    key = read_key(key_file)
+    try:
+        envelope = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("RESTORE_RTO_DRILL_REPORT_INVALID: report is not JSON") from exc
+    if not isinstance(envelope, dict) or set(envelope) != {"envelopeVersion", "record", "signature"}:
+        fail("RESTORE_RTO_DRILL_REPORT_SHAPE_INVALID", "report envelope is invalid")
+    if envelope.get("envelopeVersion") != 1 or not isinstance(envelope.get("record"), dict):
+        fail("RESTORE_RTO_DRILL_REPORT_SHAPE_INVALID", "report envelope version/record is invalid")
+    signature = envelope.get("signature")
+    if not isinstance(signature, str) or not HMAC_SHA256.fullmatch(signature):
+        fail("RESTORE_RTO_DRILL_REPORT_SIGNATURE_INVALID", "report signature is invalid")
+    signed_payload = {"envelopeVersion": 1, "record": envelope["record"]}
+    expected_signature = "hmac-sha256:" + hmac.new(
+        key,
+        SIGNING_DOMAIN + canonical_json(signed_payload).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected_signature):
+        fail("RESTORE_RTO_DRILL_REPORT_SIGNATURE_MISMATCH", "report HMAC does not match")
+    return verify_record(envelope["record"], report_path, expected_bundle_name, expected_bundle_sha256)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", required=True, type=Path)
@@ -252,31 +287,9 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        raw = read_private(args.report, "RESTORE_RTO_DRILL_REPORT")
-        key = read_key(args.key_file)
-        try:
-            envelope = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ValueError("RESTORE_RTO_DRILL_REPORT_INVALID: report is not JSON") from exc
-        if not isinstance(envelope, dict) or set(envelope) != {"envelopeVersion", "record", "signature"}:
-            fail("RESTORE_RTO_DRILL_REPORT_SHAPE_INVALID", "report envelope is invalid")
-        if envelope.get("envelopeVersion") != 1 or not isinstance(envelope.get("record"), dict):
-            fail("RESTORE_RTO_DRILL_REPORT_SHAPE_INVALID", "report envelope version/record is invalid")
-        signature = envelope.get("signature")
-        if not isinstance(signature, str) or not HMAC_SHA256.fullmatch(signature):
-            fail("RESTORE_RTO_DRILL_REPORT_SIGNATURE_INVALID", "report signature is invalid")
-        signed_payload = {"envelopeVersion": 1, "record": envelope["record"]}
-        expected_signature = "hmac-sha256:" + hmac.new(
-            key,
-            SIGNING_DOMAIN + canonical_json(signed_payload).encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
-        if not hmac.compare_digest(signature, expected_signature):
-            fail("RESTORE_RTO_DRILL_REPORT_SIGNATURE_MISMATCH", "report HMAC does not match")
-
-        verified = verify_record(
-            envelope["record"],
+        verified = verify_report(
             args.report,
+            args.key_file,
             args.expected_bundle_name,
             args.expected_bundle_sha256,
         )
