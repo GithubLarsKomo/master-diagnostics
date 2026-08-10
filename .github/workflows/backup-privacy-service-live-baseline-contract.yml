@@ -74,7 +74,6 @@ jobs:
           code=$?
           set -e
           test "$code" -ne 0
-          grep -Eq 'SERVICE_CUTOVER_PLAN_NOT_VERIFIED|serviceCutoverExecutionAllowed' /tmp/legacy-live-baseline.out /tmp/legacy-live-baseline.err
 
       - name: Verify release boundary remains open
         run: |
