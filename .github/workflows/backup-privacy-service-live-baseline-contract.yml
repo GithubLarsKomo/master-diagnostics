@@ -42,7 +42,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Verify syntax and evidence-only boundary
+      - name: Verify legacy v1 baseline remains read-only and fail-closed
         run: |
           bash -n infra/backup/prepare-club-backup-privacy-service-live-baseline.sh
           bash -n infra/backup/test-backup-privacy-service-live-baseline.sh
@@ -51,10 +51,14 @@ jobs:
           from pathlib import Path
           core=Path('infra/backup/backup-privacy-service-live-baseline.py').read_text()
           host=Path('infra/backup/prepare-club-backup-privacy-service-live-baseline.sh').read_text()
+          checker=Path('infra/backup/check-backup-privacy-service-cutover-plan-v2.py').read_text()
+          planner=Path('infra/backup/prepare-backup-privacy-service-cutover-plan-v2.py').read_text()
           assert 'masters:backup-privacy-service-live-baseline:v1' in core
           assert 'SERVICE_LIVE_BASELINE_MUTABLE_NOT_DISABLED' in core
           assert 'activeDataVolumesBound' in core
-          assert 'liveBaselineRequiredBeforeMutation' not in core or 'cutover' in core
+          assert "result.get(\"serviceCutoverExecutionAllowed\") is not True" in core
+          assert '"serviceCutoverExecutionAllowed": False' in checker
+          assert '"serviceCutoverExecutionAllowed": False' in planner
           assert 'docker inspect' in host and 'ps -a -q' in host
           for text in (core, host):
               for forbidden in ('docker volume create', 'docker volume rm', 'os.replace('):
@@ -63,8 +67,14 @@ jobs:
               assert forbidden not in host, forbidden
           PY
 
-      - name: Verify authentic v2-plan-bound baseline, drift and tamper gates
-        run: bash infra/backup/test-backup-privacy-service-live-baseline.sh
+      - name: Verify legacy v1 baseline cannot bypass the new pre-baseline gate
+        run: |
+          set +e
+          bash infra/backup/test-backup-privacy-service-live-baseline.sh >/tmp/legacy-live-baseline.out 2>/tmp/legacy-live-baseline.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -Eq 'SERVICE_CUTOVER_PLAN_NOT_VERIFIED|serviceCutoverExecutionAllowed' /tmp/legacy-live-baseline.out /tmp/legacy-live-baseline.err
 
       - name: Verify release boundary remains open
         run: |
