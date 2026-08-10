@@ -69,7 +69,18 @@ jobs:
           PY
 
       - name: Verify success crash retry missing-proof and rollback paths
-        run: bash infra/backup/test-backup-privacy-bounded-host-cutover.sh
+        run: |
+          set +e
+          bash infra/backup/test-backup-privacy-bounded-host-cutover.sh
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ]; then
+            echo '--- bounded-host diagnostic JSON ---'
+            find /tmp/backup-privacy-bounded-host-cutover -maxdepth 2 -type f -name '*.json' -print -exec sh -c 'echo "### $1"; cat "$1"' _ {} \; 2>/dev/null || true
+            echo '--- fake docker tail ---'
+            tail -n 120 /tmp/backup-privacy-bounded-host-cutover/docker.log 2>/dev/null || true
+            exit "$code"
+          fi
 
       - name: Verify real release gates remain open
         run: |
