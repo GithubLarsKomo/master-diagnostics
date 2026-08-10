@@ -82,7 +82,7 @@ def main() -> int:
     output = {
         "mode": "BACKUP_PRIVACY_ACTIVATION_READINESS",
         "status": "READY_FOR_MANUAL_ATTESTATION" if ready else "BLOCKED",
-        "readinessVersion": 2,
+        "readinessVersion": 1,
         "currentPrivacyBackupState": current_state or None,
         "canonicalDrillReportVerification": True if verified is not None else False,
         "bundleBytesBound": bool(verified is not None and verified.get("bundleName") == args.expected_bundle_name and verified.get("bundleFingerprint") == args.expected_bundle_sha256),
