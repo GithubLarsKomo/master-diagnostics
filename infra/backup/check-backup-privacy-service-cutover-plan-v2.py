@@ -236,7 +236,7 @@ def main() -> int:
             "cutoverPlanFingerprint": record["cutoverPlanFingerprint"],
             "authorizationSource": record["authorizationSource"],
             "renderedComposeSha256": record["renderedComposeSha256"],
-            "serviceCutoverExecutionAllowed": True,
+            "serviceCutoverExecutionAllowed": False,
             "liveBaselineRequiredBeforeMutation": True,
             "serviceCutoverExecuted": False,
             "liveRuntimeAttested": False,
