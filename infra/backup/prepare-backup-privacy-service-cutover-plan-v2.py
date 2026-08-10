@@ -283,7 +283,7 @@ def main() -> int:
             "planPath": str(path),
             "planCreated": created,
             "planReused": not created,
-            "serviceCutoverExecutionAllowed": True,
+            "serviceCutoverExecutionAllowed": False,
             "liveBaselineRequiredBeforeMutation": True,
             "serviceCutoverExecuted": False,
             "liveRuntimeAttested": False,

@@ -11,7 +11,6 @@ target_checker="${fixture}/target-config-checker.py"
 prepare="${SCRIPT_DIR}/prepare-backup-privacy-service-cutover-plan-v2.py"
 check="${SCRIPT_DIR}/check-backup-privacy-service-cutover-plan-v2.py"
 
-# Produce the authentic nonterminal TARGET_HANDOFF_VERIFIED chain from #231.
 bash "${SCRIPT_DIR}/test-backup-privacy-target-handoff.sh" >/dev/null
 activation_plan="$(cat "${success}/plan-path")"
 pending="$(cat "${success}/pending-path")"
@@ -20,7 +19,6 @@ env_file="${success}/club.env"
 test -f "${handoff}"
 test -f "${target_checker}"
 
-# Compose service-level env_file is ../.env. Mirror only the synthetic target fixture.
 cleanup() { rm -f -- "${ROOT_DIR}/.env"; }
 trap cleanup EXIT
 cp "${env_file}" "${ROOT_DIR}/.env"
@@ -40,6 +38,7 @@ r=json.load(open(sys.argv[1]))
 assert r['status']=='SERVICE_CUTOVER_PLAN_READY'
 assert r['serviceCutoverPlanVersion']==2
 assert r['authorizationSource']=='TARGET_HANDOFF_VERIFIED'
+assert r['serviceCutoverExecutionAllowed'] is False
 assert r['liveBaselineRequiredBeforeMutation'] is True
 assert r['serviceCutoverExecuted'] is False
 assert r['liveRuntimeAttested'] is False
@@ -60,13 +59,12 @@ r=json.load(open(sys.argv[1]))
 assert r['status']=='SERVICE_CUTOVER_PLAN_VERIFIED'
 assert r['serviceCutoverPlanVersion']==2
 assert r['authorizationSource']=='TARGET_HANDOFF_VERIFIED'
-assert r['serviceCutoverExecutionAllowed'] is True
+assert r['serviceCutoverExecutionAllowed'] is False
 assert r['liveBaselineRequiredBeforeMutation'] is True
 assert r['serviceCutoverExecuted'] is False
 assert r['activationExecuted'] is False
 PY
 
-# Deterministic retry reuses identical plan.
 python3 "${prepare}" \
   --handoff-checker "${handoff_checker}" --target-config-checker "${target_checker}" \
   --activation-plan "${activation_plan}" --pending "${pending}" --handoff "${handoff}" \
@@ -77,7 +75,6 @@ import json,sys
 r=json.load(open(sys.argv[1])); assert r['planCreated'] is False and r['planReused'] is True
 PY
 
-# Handoff tampering blocks planning before a plan can be trusted.
 cp "${handoff}" "${handoff}.backup"
 python3 - "${handoff}" <<'PY'
 import json,sys
@@ -96,7 +93,6 @@ test "${code}" -ne 0
 grep -q 'TARGET_HANDOFF_NOT_VERIFIED' "${success}/cutover-v2-handoff-tamper.json"
 mv "${handoff}.backup" "${handoff}"; chmod 0600 "${handoff}"
 
-# Compose-file byte drift after planning invalidates verification even when target env is unchanged.
 cp "${ROOT_DIR}/infra/docker-compose.club.yml" "${success}/compose-v2-copy.yml"; chmod 0600 "${success}/compose-v2-copy.yml"
 cp "${env_file}" "${fixture}/.env"; chmod 0600 "${fixture}/.env"
 copy_root="${fixture}/cutover-v2-copy"; mkdir -p "${copy_root}"; chmod 0700 "${copy_root}"
@@ -118,7 +114,6 @@ set -e
 test "${code}" -ne 0
 grep -q 'SERVICE_CUTOVER_ARTIFACT_DRIFT' "${success}/cutover-v2-compose-drift.json"
 
-# Plan HMAC/fingerprint and version tampering both fail closed.
 cp "${cutover_plan}" "${success}/tampered-cutover-v2.json"; chmod 0600 "${success}/tampered-cutover-v2.json"
 python3 - "${success}/tampered-cutover-v2.json" <<'PY'
 import json,sys
@@ -136,7 +131,6 @@ set -e
 test "${code}" -ne 0
 grep -q 'SERVICE_CUTOVER_PLAN_VERSION_INVALID' "${success}/cutover-v2-plan-tamper.json"
 
-# v2 is read-only: Compose may only be rendered, never mutated.
 python3 - "${prepare}" "${check}" <<'PY'
 from pathlib import Path
 import sys
@@ -144,6 +138,7 @@ text='\n'.join(Path(p).read_text() for p in sys.argv[1:])
 assert '"config", "--format", "json"' in text
 assert 'TARGET_HANDOFF_VERIFIED' in text
 assert 'liveBaselineRequiredBeforeMutation' in text
+assert '"serviceCutoverExecutionAllowed": False' in text
 for forbidden in ('"up"','"run"','"restart"','"stop"','"down"','docker volume','os.replace('):
     assert forbidden not in text, forbidden
 PY
