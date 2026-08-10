@@ -9,6 +9,8 @@ on:
       - 'infra/backup/check-backup-privacy-activation-plan.py'
       - 'infra/backup/write-backup-privacy-manual-attestation.py'
       - 'infra/backup/check-backup-privacy-manual-attestation.py'
+      - 'infra/backup/check-backup-privacy-activation-readiness.py'
+      - 'infra/backup/check-restore-rto-drill-report.py'
       - 'docs/backup-privacy-activation-execution.md'
   push:
     branches: [main]
@@ -19,6 +21,8 @@ on:
       - 'infra/backup/check-backup-privacy-activation-plan.py'
       - 'infra/backup/write-backup-privacy-manual-attestation.py'
       - 'infra/backup/check-backup-privacy-manual-attestation.py'
+      - 'infra/backup/check-backup-privacy-activation-readiness.py'
+      - 'infra/backup/check-restore-rto-drill-report.py'
       - 'docs/backup-privacy-activation-execution.md'
 
 jobs:
@@ -30,13 +34,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare signed drill, attestation and reversible activation plan
+      - name: Prepare signed drill, byte-bound attestation and reversible activation plan
         run: |
           set -Eeuo pipefail
           root="$ROOT"
           rm -rf "$root"
-          mkdir -p "$root/reports" "$root/attestations" "$root/plans" "$root/executions"
+          mkdir -p "$root/reports" "$root/attestations" "$root/plans" "$root/executions" "$root/backups"
           chmod 700 "$root/reports" "$root/attestations" "$root/plans" "$root/executions"
+          bundle=masters-backup-20260809T120000Z-33333333-3333-3333-3333-333333333333.mdbak
+          printf 'execution-evidence-bound-backup\n' >"$root/backups/$bundle"
+          bundle_fp="sha256:$(sha256sum "$root/backups/$bundle" | awk '{print $1}')"
           python3 - <<'PY'
           import base64,json,os
           from pathlib import Path
@@ -50,8 +57,7 @@ jobs:
           python3 infra/backup/write-restore-rto-drill-report.py \
             --output-dir "$root/reports" --key-file "$root/key" \
             --drill-id drill-33333333333333333333333333333333 \
-            --bundle-name masters-backup-20260809T120000Z-33333333-3333-3333-3333-333333333333.mdbak \
-            --bundle-sha256 sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --bundle-name "$bundle" --bundle-sha256 "$bundle_fp" \
             --staging-name restore-20260809T120100Z-44444444-4444-4444-4444-444444444444 \
             --candidate-set-id restore-0123456789abcdefabcd \
             --started-at 2026-08-09T12:00:00.000Z --completed-at 2026-08-09T12:02:00.000Z \
@@ -60,8 +66,9 @@ jobs:
           python3 infra/backup/write-backup-privacy-manual-attestation.py \
             --readiness-checker "$GITHUB_WORKSPACE/infra/backup/check-backup-privacy-activation-readiness.py" \
             --drill-report "$root/reports/drill-33333333333333333333333333333333.json" \
-            --drill-key-file "$root/key" --attestation-key-file "$root/key" \
-            --output-dir "$root/attestations" --attestation-id attestation-44444444444444444444444444444444 \
+            --drill-key-file "$root/key" --backup-bundle "$root/backups/$bundle" \
+            --attestation-key-file "$root/key" --output-dir "$root/attestations" \
+            --attestation-id attestation-44444444444444444444444444444444 \
             --attestor-id ci-operator --attested-at 2026-08-09T12:05:00.000Z \
             --acknowledge-operational-responsibility >/dev/null
           python3 infra/backup/prepare-backup-privacy-activation-plan.py \
