@@ -62,9 +62,11 @@ jobs:
           assert "backupFileName" in core
           assert "backupSha256" in core
           assert "backupManifestFingerprint" in core
-          assert "persistSignedRestoreSourceProvenance" in staging
-          assert "verifyStagedTopLevel(stagingPath)" in staging
-          assert staging.index("verifyStagedTopLevel(stagingPath)") < staging.index("persistSignedRestoreSourceProvenance")
+          verify_call = "await verifyStagedTopLevel(stagingPath)"
+          persist_call = "await persistSignedRestoreSourceProvenance({"
+          assert verify_call in staging
+          assert persist_call in staging
+          assert staging.index(verify_call) < staging.index(persist_call)
           assert "sourceProvenanceSignature" in cli
           for token in (
               'docker compose',
