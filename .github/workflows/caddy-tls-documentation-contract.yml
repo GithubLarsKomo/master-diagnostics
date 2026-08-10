@@ -1,0 +1,98 @@
+name: Caddy TLS Documentation Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/caddy-tls-documentation-contract.yml'
+      - 'docs/caddy-tls.md'
+      - 'docs/deployment-club.md'
+      - 'infra/caddy/Caddyfile'
+      - 'infra/docker-compose.club.yml'
+      - 'TASKS.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/caddy-tls-documentation-contract.yml'
+      - 'docs/caddy-tls.md'
+      - 'docs/deployment-club.md'
+      - 'infra/caddy/Caddyfile'
+      - 'infra/docker-compose.club.yml'
+      - 'TASKS.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify canonical public TLS default
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          caddy = Path('infra/caddy/Caddyfile').read_text()
+          assert '{$APP_HOST:localhost}' in caddy
+          assert 'reverse_proxy app:3000' in caddy
+          assert 'tls internal' not in caddy, 'repository default must remain public automatic TLS'
+          assert 'X-Content-Type-Options nosniff' in caddy
+          assert 'Referrer-Policy strict-origin-when-cross-origin' in caddy
+          assert 'Permissions-Policy' in caddy
+          PY
+
+      - name: Verify persistent Caddy state in Compose and backup
+        run: |
+          cp .env.example .env
+          sed -i 's/diagnostics.example.org/localhost/g' .env
+          sed -i 's/replace-with-at-least-32-random-bytes/ci-only-secret-with-at-least-32-characters/' .env
+          docker compose --env-file .env -f infra/docker-compose.club.yml config --format json >/tmp/club-compose.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          config = json.loads(Path('/tmp/club-compose.json').read_text())
+          caddy = config['services']['caddy']
+          mounts = {item['target']: item for item in caddy.get('volumes', [])}
+          assert mounts['/data']['type'] == 'volume'
+          assert mounts['/config']['type'] == 'volume'
+          assert mounts['/etc/caddy/Caddyfile']['read_only'] is True
+          assert 'caddy-data' in config['volumes']
+          assert 'caddy-config' in config['volumes']
+
+          backup = config['services']['backup-bundle']
+          backup_mounts = {item['target']: item for item in backup.get('volumes', [])}
+          assert backup_mounts['/backup-source/caddy-data']['read_only'] is True
+          assert backup_mounts['/backup-source/caddy-config']['read_only'] is True
+          PY
+
+      - name: Verify public and internal TLS operating guidance
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          tls = Path('docs/caddy-tls.md').read_text()
+          deployment = Path('docs/deployment-club.md').read_text()
+          required_tls = (
+              'öffentliches automatisches TLS',
+              'tls internal',
+              'Trusted Root Certification Authorities',
+              'Private Schlüssel',
+              'caddy-data',
+              'caddy-config',
+              'docker compose down -v',
+              'Rotation',
+              'openssl s_client',
+              'Restore',
+          )
+          for text in required_tls:
+              assert text in tls, text
+          assert 'docs/caddy-tls.md' in deployment
+          assert 'tls internal' in deployment
+          assert 'caddy-data' in deployment and 'caddy-config' in deployment
+          assert 'docker compose down -v' in deployment
+          PY
+
+      - name: Verify documentation does not weaken deployment gates
+        run: |
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
