@@ -1,0 +1,80 @@
+name: Backup Privacy Bounded Host Cutover Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-bounded-host-cutover-contract.yml'
+      - 'infra/backup/execute-backup-privacy-service-cutover-host.py'
+      - 'infra/backup/test-backup-privacy-bounded-host-cutover.sh'
+      - 'infra/backup/backup-privacy-service-cutover-execution.py'
+      - 'infra/backup/backup-privacy-service-cutover-preflight.py'
+      - 'infra/backup/backup-privacy-service-live-runtime-attestation.py'
+      - 'infra/backup/check-backup-privacy-service-live-baseline.py'
+      - 'infra/backup/execute-backup-privacy-activation.py'
+      - 'docs/backup-privacy-bounded-host-cutover.md'
+      - 'infra/docker-compose.club.yml'
+      - '.env.example'
+      - 'TASKS.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-bounded-host-cutover-contract.yml'
+      - 'infra/backup/execute-backup-privacy-service-cutover-host.py'
+      - 'infra/backup/test-backup-privacy-bounded-host-cutover.sh'
+      - 'infra/backup/backup-privacy-service-cutover-execution.py'
+      - 'infra/backup/backup-privacy-service-cutover-preflight.py'
+      - 'infra/backup/backup-privacy-service-live-runtime-attestation.py'
+      - 'infra/backup/check-backup-privacy-service-live-baseline.py'
+      - 'infra/backup/execute-backup-privacy-activation.py'
+      - 'docs/backup-privacy-bounded-host-cutover.md'
+      - 'infra/docker-compose.club.yml'
+      - '.env.example'
+      - 'TASKS.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify syntax and explicit host mutation boundary
+        run: |
+          python3 -m py_compile infra/backup/execute-backup-privacy-service-cutover-host.py
+          bash -n infra/backup/test-backup-privacy-bounded-host-cutover.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('infra/backup/execute-backup-privacy-service-cutover-host.py').read_text()
+          assert 'MUTABLE = ("export-cleanup", "retention-scan", "app")' in text
+          assert 'PRESERVED = ("libsql", "caddy")' in text
+          assert '"--force-recreate"' in text
+          assert '"--no-deps"' in text
+          assert '"--no-build"' in text
+          assert '"--pull", "never"' in text
+          assert 'privacy-check' in text
+          assert 'preflight-proof.json' in text
+          assert 'ROLLBACK_STARTED' in text
+          assert 'restore_prestate_env' in text
+          assert 'target-attestation.json' in text and 'rollback-attestation.json' in text
+          PY
+
+      - name: Verify success crash retry missing-proof and rollback paths
+        run: bash infra/backup/test-backup-privacy-bounded-host-cutover.sh
+
+      - name: Verify real release gates remain open
+        run: |
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
+          grep -F 'Noch keine reale Freigabe' docs/backup-privacy-bounded-host-cutover.md
+          grep -F 'keinen produktiven Host-Cutover' docs/backup-privacy-bounded-host-cutover.md
