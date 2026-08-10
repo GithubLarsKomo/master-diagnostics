@@ -95,8 +95,7 @@ def evaluate(args: argparse.Namespace, core: Any) -> tuple[bytes, dict[str, Any]
     live_class, live_reason = core.classify_live(baseline_env["record"], live)
     events = core.read_events(args.journal.parent, key, journal_env)
     assessment = core.assess_state(live_class, live_reason, events, journal_env)
-    expected_state = args.state
-    if expected_state == "ENABLED":
+    if args.state == "ENABLED":
         if live_class != "TARGET" or assessment.get("status") not in {"READY_TO_VALIDATE_LIVE", "READY_TO_COMPLETE", "COMPLETED"}:
             fail("LIVE_RUNTIME_ATTESTATION_TARGET_NOT_VERIFIED", f"target live state is not attestable: {assessment.get('status')}")
     else:
@@ -105,7 +104,47 @@ def evaluate(args: argparse.Namespace, core: Any) -> tuple[bytes, dict[str, Any]
     return key, plan_env, baseline_env, journal_env, live, assessment
 
 
-def bounded_live_state(core: Any, baseline: dict[str, Any], live: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def inspect_paths(args: argparse.Namespace) -> dict[str, Path]:
+    return {
+        "app": args.app_inspect,
+        "export-cleanup": args.export_inspect,
+        "retention-scan": args.retention_inspect,
+        "libsql": args.libsql_inspect,
+        "caddy": args.caddy_inspect,
+    }
+
+
+def bounded_privacy_environment(core: Any, path: Path, service: str, expected_backup: str) -> dict[str, str]:
+    raw = core.read_file(path, "LIVE_RUNTIME_ATTESTATION_INSPECT")
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"LIVE_RUNTIME_ATTESTATION_INSPECT_INVALID: invalid inspect JSON for {service}") from exc
+    if not isinstance(parsed, list) or len(parsed) != 1 or not isinstance(parsed[0], dict):
+        fail("LIVE_RUNTIME_ATTESTATION_INSPECT_INVALID", f"inspect for {service} must contain exactly one object")
+    config = parsed[0].get("Config")
+    raw_env = config.get("Env") if isinstance(config, dict) else None
+    if not isinstance(raw_env, list):
+        fail("LIVE_RUNTIME_ATTESTATION_ENV_INVALID", f"Config.Env for {service} is invalid")
+    values: dict[str, str] = {}
+    for item in raw_env:
+        if not isinstance(item, str) or "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        if not (key.startswith("PRIVACY_BACKUP_") or key.startswith("PRIVACY_NOTIFICATIONS_")):
+            continue
+        if key in values:
+            fail("LIVE_RUNTIME_ATTESTATION_ENV_DUPLICATE", f"{service} contains duplicate {key}")
+        values[key] = value
+    if values.get("PRIVACY_BACKUP_STATE") != expected_backup:
+        fail("LIVE_RUNTIME_ATTESTATION_BACKUP_STATE_MISMATCH", f"{service} backup state differs from requested attestation")
+    if values.get("PRIVACY_NOTIFICATIONS_STATE") != "DISABLED":
+        fail("LIVE_RUNTIME_ATTESTATION_NOTIFICATIONS_NOT_DISABLED", f"{service} notifications privacy is not DISABLED")
+    return {key: values[key] for key in sorted(values)}
+
+
+def bounded_live_state(core: Any, baseline: dict[str, Any], live: dict[str, dict[str, Any]], args: argparse.Namespace) -> dict[str, Any]:
+    paths = inspect_paths(args)
     services: list[dict[str, Any]] = []
     for name in core.ALL_SERVICES:
         item = live[name]
@@ -118,7 +157,11 @@ def bounded_live_state(core: Any, baseline: dict[str, Any], live: dict[str, dict
             "healthStatus": item.get("healthStatus"),
         }
         if name in core.MUTABLE:
-            value["privacyEnvironment"] = item.get("privacyEnvironment")
+            bounded_env = bounded_privacy_environment(core, paths[name], name, args.state)
+            for key, expected in item.get("privacyEnvironment", {}).items():
+                if bounded_env.get(key) != expected:
+                    fail("LIVE_RUNTIME_ATTESTATION_BACKUP_ENV_DRIFT", f"{name} backup privacy evidence differs from execution assessment")
+            value["privacyEnvironment"] = bounded_env
         services.append(value)
     data_volumes = {
         role: core.mount_name(live[service], destination)
@@ -141,13 +184,14 @@ def bounded_live_state(core: Any, baseline: dict[str, Any], live: dict[str, dict
 
 
 def build_record(args: argparse.Namespace, core: Any, plan: dict[str, Any], baseline: dict[str, Any], journal: dict[str, Any], live: dict[str, dict[str, Any]], assessment: dict[str, Any]) -> dict[str, Any]:
-    recorded_at = args.recorded_at or canonical_now()
+    recorded_at = getattr(args, "recorded_at", None) or canonical_now()
     validate_timestamp(recorded_at)
-    bounded = bounded_live_state(core, baseline, live)
+    bounded = bounded_live_state(core, baseline, live, args)
     record: dict[str, Any] = {
         "liveRuntimeAttestationVersion": ATTESTATION_VERSION,
         "recordedAt": recorded_at,
         "backupState": args.state,
+        "notificationsState": "DISABLED",
         "status": "VERIFIED",
         "activationId": plan["activationId"],
         "cutoverId": plan["cutoverId"],
@@ -178,7 +222,10 @@ def persist(path: Path, document: dict[str, Any]) -> bool:
         fail("LIVE_RUNTIME_ATTESTATION_OUTPUT_DIR_UNSAFE", "output directory is unsafe")
     os.chmod(path.parent, 0o700)
     if path.exists():
-        existing = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("LIVE_RUNTIME_ATTESTATION_CONFLICT: existing attestation is not JSON") from exc
         if existing != document:
             fail("LIVE_RUNTIME_ATTESTATION_CONFLICT", "existing attestation differs")
         return False
@@ -201,7 +248,12 @@ def validate_document(document: dict[str, Any], key: bytes) -> dict[str, Any]:
     if document.get("attestationVersion") != ATTESTATION_VERSION or not isinstance(document.get("record"), dict):
         fail("LIVE_RUNTIME_ATTESTATION_DOCUMENT_INVALID", "attestation document is invalid")
     record = document["record"]
-    if record.get("liveRuntimeAttestationVersion") != ATTESTATION_VERSION or record.get("status") != "VERIFIED" or record.get("backupState") != document["backupState"]:
+    if (
+        record.get("liveRuntimeAttestationVersion") != ATTESTATION_VERSION
+        or record.get("status") != "VERIFIED"
+        or record.get("backupState") != document["backupState"]
+        or record.get("notificationsState") != "DISABLED"
+    ):
         fail("LIVE_RUNTIME_ATTESTATION_RECORD_INVALID", "attestation record state is invalid")
     validate_timestamp(record.get("recordedAt") or "")
     fingerprint = record.get("attestationFingerprint")
@@ -246,7 +298,6 @@ def check(args: argparse.Namespace) -> dict[str, Any]:
         fail("LIVE_RUNTIME_ATTESTATION_DOCUMENT_INVALID", "attestation root must be an object")
     record = validate_document(document, key)
     expected = build_record(args, core, plan_env["record"], baseline_env["record"], journal_env["record"], live, assessment)
-    # recordedAt is immutable observation metadata; all state-bearing fields must re-attest.
     expected["recordedAt"] = record["recordedAt"]
     expected["attestationFingerprint"] = record_fingerprint(expected)
     if record != expected:
@@ -255,6 +306,7 @@ def check(args: argparse.Namespace) -> dict[str, Any]:
         "mode": "BACKUP_PRIVACY_SERVICE_LIVE_RUNTIME_ATTESTATION_VERIFICATION",
         "status": "VERIFIED",
         "backupState": record["backupState"],
+        "notificationsState": "DISABLED",
         "attestationVersion": ATTESTATION_VERSION,
         "attestationFingerprint": record["attestationFingerprint"],
         "attestationFileSha256": sha256_bytes(raw),
