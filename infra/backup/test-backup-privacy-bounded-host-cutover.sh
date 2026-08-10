@@ -21,14 +21,24 @@ fixture=/tmp/backup-privacy-bounded-host-cutover
 rm -rf "${fixture}"; mkdir -p "${fixture}/bin"; chmod 0700 "${fixture}"
 cp "${env_file}" "${fixture}/target.env"; chmod 0600 "${fixture}/target.env"
 
-# Seed a stateful fake Docker daemon from the authentic signed-baseline-derived inspect fixtures.
-python3 - "${pre_inspect}" "${fixture}/pre-state.json" <<'PY'
+# Seed a stateful fake Docker daemon from the execution fixture, restoring the
+# raw Docker metadata intentionally omitted by the execution-only snapshots but
+# required by independent Baseline-v2 re-verification.
+python3 - "${pre_inspect}" "${baseline}" "${fixture}/pre-state.json" <<'PY'
 import json,sys
 from pathlib import Path
-source=Path(sys.argv[1]); state={}
+source=Path(sys.argv[1])
+baseline=json.loads(Path(sys.argv[2]).read_text())['record']
+signed={item['service']:item for item in baseline['containers']}
+state={}
 for service in ('app','export-cleanup','retention-scan','libsql','caddy'):
-    state[service]=json.loads((source/f'{service}.json').read_text())[0]
-Path(sys.argv[2]).write_text(json.dumps(state)+'\n')
+    item=json.loads((source/f'{service}.json').read_text())[0]
+    snap=signed[service]
+    item.setdefault('State',{})['StartedAt']=snap['startedAt']
+    item['RestartCount']=snap['restartCount']
+    item['Name']='/'+snap['containerName']
+    state[service]=item
+Path(sys.argv[3]).write_text(json.dumps(state)+'\n')
 PY
 
 cat >"${fixture}/bin/docker" <<'PY'
@@ -65,9 +75,8 @@ def privacy_state(path):
 
 def mutate(service, backup):
     state=load(); item=state[service]
-    counter=int(os.environ.get('FAKE_DOCKER_COUNTER','0'))
     counter_file=Path(os.environ['FAKE_DOCKER_COUNTER_FILE'])
-    if counter_file.exists(): counter=int(counter_file.read_text())
+    counter=int(counter_file.read_text()) if counter_file.exists() else 0
     counter+=1; counter_file.write_text(str(counter))
     item['Id']=(format((counter % 14)+1,'x')*64)[:64]
     env=[x for x in item['Config'].get('Env',[]) if not x.startswith('PRIVACY_BACKUP_') and not x.startswith('PRIVACY_NOTIFICATIONS_')]
@@ -84,6 +93,8 @@ def mutate(service, backup):
         env += ['PRIVACY_BACKUP_STATE=DISABLED','PRIVACY_NOTIFICATIONS_STATE=DISABLED']
     item['Config']['Env']=env
     item['State']['Status']='running'; item['State']['Running']=True
+    item['State']['StartedAt']=f'2026-08-10T03:00:{counter:02d}.000000000Z'
+    item['RestartCount']=int(item.get('RestartCount') or 0)+1
     if service=='app': item['State']['Health']={'Status':'healthy'}
     state[service]=item; save(state)
 
@@ -158,6 +169,8 @@ run_host() {
     --evidence-root "${fixture}/${name}-evidence"
 }
 
+cutover_id="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["record"]["cutoverId"])' "${cutover_plan}")"
+
 # Success: preflight precedes exactly one target recreate of each mutable service.
 reset_fixture
 run_host success >"${fixture}/success.json"
@@ -188,7 +201,7 @@ crash_code=$?
 set -e
 test "${crash_code}" -ne 0
 test -f "${fixture}/crash-evidence/preflight/preflight-proof.json"
-test -f "${fixture}/crash-execution/$(python3 -c 'import json;print(json.load(open("'"${cutover_plan}"'"))["record"]["cutoverId"])')/service-cutover-started.json"
+test -f "${fixture}/crash-execution/${cutover_id}/service-cutover-started.json"
 unset FAKE_DOCKER_CRASH_AFTER_SERVICE
 run_host crash >"${fixture}/crash-retry.json"
 python3 - "${fixture}/crash-retry.json" <<'PY'
@@ -252,7 +265,6 @@ assert ('export-cleanup','ENABLED') in [(e['service'],e['backup']) for e in ups]
 assert ('export-cleanup','DISABLED') in [(e['service'],e['backup']) for e in ups],ups
 assert all(e['service'] not in {'libsql','caddy'} for e in ups)
 PY
-cutover_id="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["record"]["cutoverId"])' "${cutover_plan}")"
 test -f "${fixture}/rollback-execution/${cutover_id}/service-cutover-rollback-started.json"
 test -f "${fixture}/rollback-execution/${cutover_id}/service-cutover-rollback-verified.json"
 
