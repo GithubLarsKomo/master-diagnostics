@@ -53,17 +53,16 @@ def parse_semver(value: Any, label: str) -> tuple[int, int, int, str | None]:
 def ensure_upgrade(current: str, target: str) -> None:
     current_parsed = parse_semver(current, "Current version")
     target_parsed = parse_semver(target, "Target version")
+    if target_parsed[3] is not None:
+        fail("Stable online update channel refuses prerelease targets")
     current_core = current_parsed[:3]
     target_core = target_parsed[:3]
     if target_core < current_core:
         fail("Online update preflight refuses a version downgrade")
     if target_core == current_core:
-        if current_parsed[3] == target_parsed[3]:
-            fail("Online update target must differ from the current version")
         if current_parsed[3] is None:
-            fail("Online update preflight refuses moving from a stable release to a prerelease")
-        if target_parsed[3] is not None and target_parsed[3] <= current_parsed[3]:
-            fail("Online update target prerelease must be newer than the current prerelease")
+            fail("Online update target must differ from the current version")
+        # Moving from a prerelease of the same core version to its stable release is allowed.
 
 
 def canonical_json(value: Any) -> str:
