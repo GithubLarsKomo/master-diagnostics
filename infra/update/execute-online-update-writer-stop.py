@@ -5,14 +5,19 @@ from __future__ import annotations
 
 import argparse
 import base64
+import fcntl
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+
+DOCKER_TIMEOUT_SECONDS = 30
 
 
 class WriterStopError(ValueError):
@@ -45,6 +50,14 @@ def require_regular_file(path: Path, label: str) -> Path:
     return path
 
 
+def require_safe_dir(path: Path, label: str) -> Path:
+    if not path.is_absolute():
+        fail(f"{label} path must be absolute")
+    if path.is_symlink() or not path.is_dir():
+        fail(f"{label} must be a non-symlink directory")
+    return path
+
+
 def read_json(path: Path, label: str) -> Any:
     require_regular_file(path, label)
     try:
@@ -64,6 +77,22 @@ def read_key(path: Path, label: str) -> bytes:
     return key
 
 
+@contextmanager
+def execution_lock(events_dir: Path) -> Iterator[None]:
+    require_safe_dir(events_dir, "Online update execution-event directory")
+    lock_path = events_dir / ".writer-stop-executor.lock"
+    if lock_path.exists() and (lock_path.is_symlink() or not lock_path.is_file()):
+        fail("Writer-stop executor lock path is unsafe")
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
 def run_docker(args: list[str], label: str) -> str:
     is_inspect = args[:1] == ["inspect"] and len(args) == 2
     is_stop = args[:1] == ["stop"] and len(args) == 2 and re.fullmatch(r"[0-9a-f]{12,64}", args[1]) is not None
@@ -72,10 +101,17 @@ def run_docker(args: list[str], label: str) -> str:
         fail(f"Unsafe Docker command rejected by writer-stop executor: {' '.join(args)}")
     try:
         completed = subprocess.run(
-            ["docker", *args], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            ["docker", *args],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=DOCKER_TIMEOUT_SECONDS,
         )
     except FileNotFoundError as exc:
         raise WriterStopError("Docker CLI is unavailable") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise WriterStopError(f"{label} timed out") from exc
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or "").strip()
         raise WriterStopError(f"{label} failed" + (f": {detail}" if detail else "")) from exc
@@ -106,9 +142,7 @@ def inspect_container(container_id: str, label: str) -> dict[str, Any]:
     return values[0]
 
 
-def verify_bound_writer(
-    item: dict[str, Any], project: str, compose_args: list[str]
-) -> dict[str, Any]:
+def verify_bound_writer(item: dict[str, Any], project: str, compose_args: list[str]) -> dict[str, Any]:
     service = item["service"]
     container_id = item["containerId"]
     inspected = inspect_container(container_id, f"writer {service}")
@@ -134,18 +168,11 @@ def verify_bound_writer(
             fail(f"Writer {service} has a replacement or ambiguous running container")
     elif running_ids:
         fail(f"Writer {service} has a replacement running after the bound container stopped")
-    return {
-        "service": service,
-        "containerId": container_id,
-        "running": running,
-        "status": state.get("Status"),
-    }
+    return {"service": service, "containerId": container_id, "running": running, "status": state.get("Status")}
 
 
 def verify_libsql_available(compose_args: list[str], project: str) -> dict[str, Any]:
-    ids = parse_running_ids(
-        run_docker([*compose_args, "ps", "-q", "libsql"], "Resolving libSQL container"), "libsql"
-    )
+    ids = parse_running_ids(run_docker([*compose_args, "ps", "-q", "libsql"], "Resolving libSQL container"), "libsql")
     if len(ids) != 1:
         fail("Writer-stop executor requires exactly one running libSQL container")
     item = inspect_container(ids[0], "libSQL")
@@ -164,13 +191,32 @@ def verify_libsql_available(compose_args: list[str], project: str) -> dict[str, 
 def run_fresh_assessment(args: argparse.Namespace) -> dict[str, Any]:
     assessor = Path(__file__).with_name("assess-online-update-pre-stop.py")
     command = [
-        sys.executable, str(assessor),
-        "--journal", str(args.journal), "--journal-key", str(args.journal_key),
-        "--events-dir", str(args.events_dir), "--event-key", str(args.event_key),
-        "--compose-file", str(args.compose_file), "--env-file", str(args.env_file),
+        sys.executable,
+        str(assessor),
+        "--journal",
+        str(args.journal),
+        "--journal-key",
+        str(args.journal_key),
+        "--events-dir",
+        str(args.events_dir),
+        "--event-key",
+        str(args.event_key),
+        "--compose-file",
+        str(args.compose_file),
+        "--env-file",
+        str(args.env_file),
     ]
     try:
-        completed = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        completed = subprocess.run(
+            command,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=DOCKER_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise WriterStopError("Fresh pre-stop assessment timed out") from exc
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or "").strip()
         raise WriterStopError("Fresh pre-stop assessment failed" + (f": {detail}" if detail else "")) from exc
@@ -183,43 +229,51 @@ def run_fresh_assessment(args: argparse.Namespace) -> dict[str, Any]:
     return value
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--journal", required=True, type=Path)
-    parser.add_argument("--journal-key", required=True, type=Path)
-    parser.add_argument("--events-dir", required=True, type=Path)
-    parser.add_argument("--event-key", required=True, type=Path)
-    parser.add_argument("--intent", required=True, type=Path)
-    parser.add_argument("--intent-key", required=True, type=Path)
-    parser.add_argument("--compose-file", required=True, type=Path)
-    parser.add_argument("--env-file", required=True, type=Path)
-    args = parser.parse_args()
-    try:
-        require_regular_file(args.compose_file, "Club Compose file")
-        require_regular_file(args.env_file, "Club environment file")
-        journal_module = load_module("persist-online-update-execution-journal.py", "master_diagnostics_online_update_execution_journal")
-        event_module = load_module("persist-online-update-execution-event.py", "master_diagnostics_online_update_execution_event")
-        intent_module = load_module("persist-online-update-writer-stop-intent.py", "master_diagnostics_online_update_writer_stop_intent")
+def find_event(events: list[dict[str, Any]], phase: str) -> dict[str, Any] | None:
+    return next((event for event in events if event["record"]["phase"] == phase), None)
 
-        journal_key = journal_module.read_key(args.journal_key)
-        journal = journal_module.verify_envelope(read_json(args.journal, "Online update execution journal"), journal_key)
-        event_key = read_key(args.event_key, "Online update execution-event key")
+
+def persist_rollback_started(event_module: Any, events_dir: Path, event_key: bytes, journal: dict[str, Any]) -> dict[str, Any] | None:
+    events = event_module.read_events(events_dir, event_key, journal)
+    if not events:
+        return None
+    last_phase = events[-1]["record"]["phase"]
+    if last_phase == "ROLLBACK_STARTED":
+        return events[-1]
+    if last_phase not in {"WRITER_STOP_STARTED", "WRITERS_STOPPED"}:
+        return None
+    _, _, envelope, _ = event_module.persist_event(events_dir, event_key, journal, "ROLLBACK_STARTED", canonical_now())
+    return envelope
+
+
+def execute(args: argparse.Namespace) -> dict[str, Any]:
+    require_regular_file(args.compose_file, "Club Compose file")
+    require_regular_file(args.env_file, "Club environment file")
+    journal_module = load_module("persist-online-update-execution-journal.py", "master_diagnostics_online_update_execution_journal")
+    event_module = load_module("persist-online-update-execution-event.py", "master_diagnostics_online_update_execution_event")
+    intent_module = load_module("persist-online-update-writer-stop-intent.py", "master_diagnostics_online_update_writer_stop_intent")
+
+    journal_key = journal_module.read_key(args.journal_key)
+    journal = journal_module.verify_envelope(read_json(args.journal, "Online update execution journal"), journal_key)
+    event_key = read_key(args.event_key, "Online update execution-event key")
+    intent_key = intent_module.read_key(args.intent_key)
+    intent = intent_module.verify_envelope(read_json(args.intent, "Online update writer-stop intent"), intent_key)
+    irec = intent["record"]
+    if irec["journalSignature"] != journal["signature"] or irec["targetVersion"] != journal["record"]["targetVersion"]:
+        fail("Writer-stop intent does not match execution journal")
+
+    with execution_lock(args.events_dir):
         events = event_module.read_events(args.events_dir, event_key, journal)
         if not events:
             fail("Writer-stop executor requires existing online update execution events")
         last_phase = events[-1]["record"]["phase"]
         if last_phase not in {"IMAGES_ACQUIRED", "WRITER_STOP_STARTED", "WRITERS_STOPPED"}:
             fail(f"Writer-stop executor cannot run after phase {last_phase}")
-
-        intent_key = intent_module.read_key(args.intent_key)
-        intent = intent_module.verify_envelope(read_json(args.intent, "Online update writer-stop intent"), intent_key)
-        irec = intent["record"]
-        if irec["journalSignature"] != journal["signature"] or irec["targetVersion"] != journal["record"]["targetVersion"]:
-            fail("Writer-stop intent does not match execution journal")
+        images_acquired = find_event(events, "IMAGES_ACQUIRED")
+        if images_acquired is None or irec["imagesAcquiredEventSignature"] != images_acquired["signature"]:
+            fail("Writer-stop intent lost binding to original IMAGES_ACQUIRED event")
 
         if last_phase == "IMAGES_ACQUIRED":
-            if irec["imagesAcquiredEventSignature"] != events[-1]["signature"]:
-                fail("Writer-stop intent is not bound to current IMAGES_ACQUIRED event")
             fresh = run_fresh_assessment(args)
             if not intent_module.same_binding(irec, fresh):
                 fail("Fresh pre-stop assessment no longer matches durable writer-stop intent")
@@ -227,35 +281,38 @@ def main() -> int:
                 args.events_dir, event_key, journal, "WRITER_STOP_STARTED", canonical_now()
             )
             last_phase = started["record"]["phase"]
-        elif irec["imagesAcquiredEventSignature"] != events[1]["signature"]:
-            fail("Writer-stop intent lost binding to original IMAGES_ACQUIRED event")
 
         compose_args = compose_base(args.env_file, args.compose_file)
         project = irec["composeProject"]
         before: list[dict[str, Any]] = []
-        for writer in irec["writers"]:
-            state = verify_bound_writer(writer, project, compose_args)
-            before.append(state)
-            if state["running"]:
-                run_docker(["stop", writer["containerId"]], f"Stopping exact writer {writer['service']}")
+        try:
+            for writer in irec["writers"]:
+                state = verify_bound_writer(writer, project, compose_args)
+                before.append(state)
+                if state["running"]:
+                    run_docker(["stop", writer["containerId"]], f"Stopping exact writer {writer['service']}")
 
-        after = [verify_bound_writer(writer, project, compose_args) for writer in irec["writers"]]
-        if any(item["running"] for item in after):
-            fail("Not all intent-bound application writers are stopped")
-        libsql = verify_libsql_available(compose_args, project)
+            after = [verify_bound_writer(writer, project, compose_args) for writer in irec["writers"]]
+            if any(item["running"] for item in after):
+                fail("Not all intent-bound application writers are stopped")
+            libsql = verify_libsql_available(compose_args, project)
 
-        current_events = event_module.read_events(args.events_dir, event_key, journal)
-        if current_events[-1]["record"]["phase"] == "WRITER_STOP_STARTED":
-            _, created, stopped, current_events = event_module.persist_event(
-                args.events_dir, event_key, journal, "WRITERS_STOPPED", canonical_now()
-            )
-        elif current_events[-1]["record"]["phase"] == "WRITERS_STOPPED":
-            created = False
-            stopped = current_events[-1]
-        else:
-            fail("Writer-stop execution evidence advanced unexpectedly")
+            current_events = event_module.read_events(args.events_dir, event_key, journal)
+            if current_events[-1]["record"]["phase"] == "WRITER_STOP_STARTED":
+                _, created, stopped, current_events = event_module.persist_event(
+                    args.events_dir, event_key, journal, "WRITERS_STOPPED", canonical_now()
+                )
+            elif current_events[-1]["record"]["phase"] == "WRITERS_STOPPED":
+                created = False
+                stopped = current_events[-1]
+            else:
+                fail("Writer-stop execution evidence advanced unexpectedly")
+        except (OSError, WriterStopError, ValueError) as exc:
+            rollback = persist_rollback_started(event_module, args.events_dir, event_key, journal)
+            suffix = f"; ROLLBACK_STARTED={rollback['signature']}" if rollback is not None else ""
+            raise WriterStopError(f"Writer-stop execution failed after production-mutation boundary: {exc}{suffix}") from exc
 
-        print(json.dumps({
+        return {
             "mode": "CLUB_ONLINE_UPDATE_WRITER_STOP_EXECUTOR_V1",
             "status": "APPLICATION_WRITERS_STOPPED",
             "targetVersion": journal["record"]["targetVersion"],
@@ -272,7 +329,23 @@ def main() -> int:
             "writersStopped": True,
             "migrationStarted": False,
             "updateExecuted": False,
-        }, sort_keys=True, separators=(",", ":")))
+        }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--journal", required=True, type=Path)
+    parser.add_argument("--journal-key", required=True, type=Path)
+    parser.add_argument("--events-dir", required=True, type=Path)
+    parser.add_argument("--event-key", required=True, type=Path)
+    parser.add_argument("--intent", required=True, type=Path)
+    parser.add_argument("--intent-key", required=True, type=Path)
+    parser.add_argument("--compose-file", required=True, type=Path)
+    parser.add_argument("--env-file", required=True, type=Path)
+    args = parser.parse_args()
+    try:
+        result = execute(args)
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
     except (OSError, WriterStopError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
