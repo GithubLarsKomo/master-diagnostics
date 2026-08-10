@@ -129,7 +129,7 @@ wait_for_running_service caddy 120
 # Prove the expected fresh persistent volume set was created by this namespace.
 for logical in libsql-data report-data export-data data-subject-delivery-data caddy-data caddy-config; do
   docker volume inspect "${PROJECT_NAME}_${logical}" >/dev/null
- done
+done
 
 # Health must be reachable through the actual Caddy TLS endpoint, not only inside the app container.
 health_body="$(curl --fail --silent --show-error --insecure \
@@ -139,13 +139,13 @@ health_body="$(curl --fail --silent --show-error --insecure \
 python3 - "${health_body}" <<'PY'
 import json, sys
 payload=json.loads(sys.argv[1])
-if payload.get('ok') is not True:
+if payload.get('status') != 'ok' or payload.get('service') != 'masters-diagnostics-web' or payload.get('deploymentMode') != 'club':
     raise SystemExit(f"Unexpected health payload: {payload!r}")
 PY
 
 # The fresh database volume must no longer be empty after migrations/bootstrap readiness.
-libsql_volume="${PROJECT_NAME}_libsql-data"
-entry_count="$(docker run --rm -v "${libsql_volume}:/data:ro" alpine:3.22 sh -c 'find /data -mindepth 1 -type f | wc -l')"
+libsql_id="$(container_id libsql)"
+entry_count="$(docker exec "${libsql_id}" sh -c 'find /var/lib/sqld -mindepth 1 -type f | wc -l')"
 if [[ ! "${entry_count}" =~ ^[0-9]+$ ]] || (( entry_count < 1 )); then
   echo "Fresh libSQL volume contains no persisted database files." >&2
   exit 1
