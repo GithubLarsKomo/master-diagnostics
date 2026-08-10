@@ -1,0 +1,246 @@
+name: Online Update Pre-Stop Assessment Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/online-update-pre-stop-assessment-contract.yml'
+      - 'infra/update/assess-online-update-pre-stop.py'
+      - 'infra/update/persist-online-update-execution-event.py'
+      - 'infra/update/persist-online-update-execution-journal.py'
+      - 'docs/online-update-pre-stop-assessment.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/online-update-pre-stop-assessment-contract.yml'
+      - 'infra/update/assess-online-update-pre-stop.py'
+      - 'infra/update/persist-online-update-execution-event.py'
+      - 'infra/update/persist-online-update-execution-journal.py'
+      - 'docs/online-update-pre-stop-assessment.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare authentic journal, events and fake Docker evidence
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/online-update-pre-stop
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/events" "$ROOT/events-started" "$ROOT/bin"
+          printf 'services: {}\n' >"$ROOT/compose.yml"
+          printf 'APP_HOST=localhost\n' >"$ROOT/.env"
+          python3 - <<'PY'
+          import base64, importlib.util, json
+          from pathlib import Path
+
+          root = Path('/tmp/online-update-pre-stop')
+          key = bytes([113]) * 32
+          root.joinpath('key').write_text(base64.b64encode(key).decode() + '\n')
+          root.joinpath('key').chmod(0o600)
+
+          def load(name, file):
+              spec = importlib.util.spec_from_file_location(name, Path('infra/update') / file)
+              mod = importlib.util.module_from_spec(spec)
+              assert spec.loader is not None
+              spec.loader.exec_module(mod)
+              return mod
+
+          journal_mod = load('journal_mod', 'persist-online-update-execution-journal.py')
+          event_mod = load('event_mod', 'persist-online-update-execution-event.py')
+          record = journal_mod.validate_record({
+              'journalVersion': 1,
+              'phase': 'PENDING',
+              'startedAt': '2026-08-10T14:30:00.000Z',
+              'executionPlanSignature': 'hmac-sha256:' + '1' * 64,
+              'executionPlanEnvelopeSha256': 'sha256:' + '2' * 64,
+              'manifestFingerprint': 'sha256:' + '3' * 64,
+              'currentVersion': '1.0.0',
+              'targetVersion': '1.1.0',
+              'images': [
+                  {'role':'APP','reference':'registry.test/app@sha256:' + 'a'*64,'resolvedDigest':'sha256:' + 'a'*64},
+                  {'role':'MIGRATOR','reference':'registry.test/migrator@sha256:' + 'b'*64,'resolvedDigest':'sha256:' + 'b'*64},
+              ],
+              'rollbackAnchor': {'fileName':'pre.mdbak','sha256':'sha256:'+'4'*64,'createdAt':'2026-08-10T14:29:00.000Z','verified':True,'rollbackAnchor':True},
+              'executionOrder':['ACQUIRE_EXACT_IMAGES','STOP_APPLICATION_WRITERS','RUN_CONTROLLED_MIGRATIONS','START_APPLICATION','VERIFY_APPLICATION_HEALTH','COMPLETE_UPDATE'],
+              'nextStep':'ACQUIRE_EXACT_IMAGES',
+              'completedSteps':[],
+              'mutationState':'NOT_STARTED',
+              'executionJournalRequiredBeforeMutation':True,
+              'imageAcquisitionStarted':False,
+              'productionMutationStarted':False,
+              'migrationStarted':False,
+              'rollbackStarted':False,
+              'completionRecorded':False,
+              'imagePullAllowed':False,
+              'migrationAllowed':False,
+              'productionMutationAllowed':False,
+              'updateExecuted':False,
+          })
+          envelope = {'envelopeVersion':1,'record':record,'signature':journal_mod.sign_record(key, record)}
+          root.joinpath('journal.json').write_text(json.dumps(envelope, indent=2) + '\n')
+          root.joinpath('journal.json').chmod(0o600)
+
+          event_mod.persist_event(root/'events', key, envelope, 'IMAGE_ACQUISITION_STARTED', '2026-08-10T14:31:00.000Z')
+          event_mod.persist_event(root/'events', key, envelope, 'IMAGES_ACQUIRED', '2026-08-10T14:32:00.000Z')
+          event_mod.persist_event(root/'events-started', key, envelope, 'IMAGE_ACQUISITION_STARTED', '2026-08-10T14:31:00.000Z')
+          PY
+          chmod 600 "$ROOT/compose.yml" "$ROOT/.env"
+
+          cat >"$ROOT/bin/docker" <<'PY'
+          #!/usr/bin/env python3
+          import json, os, sys
+          args=sys.argv[1:]
+          app_ref='registry.test/app@sha256:'+'a'*64
+          migrator_ref='registry.test/migrator@sha256:'+'b'*64
+          ids={
+            'app':'1'*64,
+            'export-cleanup':'2'*64,
+            'retention-scan':'3'*64,
+          }
+          if args[:2]==['image','inspect'] and len(args)==3:
+              ref=args[2]
+              if ref not in {app_ref,migrator_ref}: sys.exit(9)
+              digests=[] if os.environ.get('FAKE_BAD_IMAGE')=='1' else [ref]
+              image_id='sha256:'+('c'*64 if ref==app_ref else 'd'*64)
+              print(json.dumps([{'Id':image_id,'RepoDigests':digests}]))
+              sys.exit(0)
+          if args and args[0]=='compose' and 'config' in args:
+              print(json.dumps({
+                'name':'clubtest',
+                'services':{
+                  'app':{'restart':'unless-stopped','environment':{'DATABASE_URL':'http://libsql:8080'}},
+                  'export-cleanup':{'restart':'unless-stopped','environment':{'DATABASE_URL':'http://libsql:8080'}},
+                  'retention-scan':{'restart':'unless-stopped','environment':{'DATABASE_URL':'http://libsql:8080'}},
+                  'migrate':{'restart':'no','environment':{'DATABASE_URL':'http://libsql:8080'}},
+                  'backup-job':{'restart':'no','profiles':['backup'],'environment':{'DATABASE_URL':'http://libsql:8080'}},
+                  'caddy':{'restart':'unless-stopped','environment':{}},
+                }
+              }))
+              sys.exit(0)
+          if args and args[0]=='compose' and 'ps' in args and '-q' in args:
+              service=args[-1]
+              if os.environ.get('FAKE_MISSING_WRITER')==service:
+                  sys.exit(0)
+              if service not in ids: sys.exit(8)
+              print(ids[service])
+              sys.exit(0)
+          if args[:1]==['inspect'] and len(args)==2:
+              cid=args[1]
+              service=next((name for name,value in ids.items() if value==cid),None)
+              if service is None: sys.exit(7)
+              print(json.dumps([{
+                'Id':cid,
+                'Image':'sha256:' + {'app':'e','export-cleanup':'f','retention-scan':'9'}[service]*64,
+                'Config':{'Image':'clubtest-'+service+':current','Labels':{'com.docker.compose.project':'clubtest','com.docker.compose.service':service}},
+                'State':{'Running':True,'Status':'running','StartedAt':'2026-08-10T14:00:00.000000000Z'},
+              }]))
+              sys.exit(0)
+          print('unexpected fake docker invocation: '+' '.join(args), file=sys.stderr)
+          sys.exit(99)
+          PY
+          chmod +x "$ROOT/bin/docker"
+
+      - name: Verify ready assessment is deterministic and read-only
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/online-update-pre-stop
+          export PATH="$ROOT/bin:$PATH"
+          common=(
+            --journal "$ROOT/journal.json"
+            --journal-key "$ROOT/key"
+            --events-dir "$ROOT/events"
+            --event-key "$ROOT/key"
+            --compose-file "$ROOT/compose.yml"
+            --env-file "$ROOT/.env"
+          )
+          python3 infra/update/assess-online-update-pre-stop.py "${common[@]}" >"$ROOT/out1.json"
+          python3 infra/update/assess-online-update-pre-stop.py "${common[@]}" >"$ROOT/out2.json"
+          diff -u "$ROOT/out1.json" "$ROOT/out2.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result=json.loads(Path('/tmp/online-update-pre-stop/out1.json').read_text())
+          assert result['mode']=='CLUB_ONLINE_UPDATE_PRE_STOP_ASSESSMENT_V1'
+          assert result['status']=='READY_FOR_WRITER_STOP_EVIDENCE'
+          assert result['currentEventPhase']=='IMAGES_ACQUIRED'
+          assert result['targetImagesLocallyVerified'] is True
+          assert result['writerServices']==['app','export-cleanup','retention-scan']
+          assert [item['service'] for item in result['writers']]==result['writerServices']
+          assert all(item['running'] is True for item in result['writers'])
+          assert result['productionMutationStarted'] is False
+          assert result['writerStopStarted'] is False
+          assert result['migrationStarted'] is False
+          assert result['updateExecuted'] is False
+          PY
+
+      - name: Reject pre-acquisition-completion state
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/online-update-pre-stop
+          export PATH="$ROOT/bin:$PATH"
+          set +e
+          python3 infra/update/assess-online-update-pre-stop.py \
+            --journal "$ROOT/journal.json" --journal-key "$ROOT/key" \
+            --events-dir "$ROOT/events-started" --event-key "$ROOT/key" \
+            --compose-file "$ROOT/compose.yml" --env-file "$ROOT/.env" \
+            >"$ROOT/not-ready.out" 2>"$ROOT/not-ready.err"
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'requires current phase IMAGES_ACQUIRED' "$ROOT/not-ready.err"
+
+      - name: Reject local image identity drift
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/online-update-pre-stop
+          export PATH="$ROOT/bin:$PATH"
+          set +e
+          FAKE_BAD_IMAGE=1 python3 infra/update/assess-online-update-pre-stop.py \
+            --journal "$ROOT/journal.json" --journal-key "$ROOT/key" \
+            --events-dir "$ROOT/events" --event-key "$ROOT/key" \
+            --compose-file "$ROOT/compose.yml" --env-file "$ROOT/.env" \
+            >"$ROOT/bad-image.out" 2>"$ROOT/bad-image.err"
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'exact journal-bound RepoDigest' "$ROOT/bad-image.err"
+
+      - name: Reject missing writer identity
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/online-update-pre-stop
+          export PATH="$ROOT/bin:$PATH"
+          set +e
+          FAKE_MISSING_WRITER=retention-scan python3 infra/update/assess-online-update-pre-stop.py \
+            --journal "$ROOT/journal.json" --journal-key "$ROOT/key" \
+            --events-dir "$ROOT/events" --event-key "$ROOT/key" \
+            --compose-file "$ROOT/compose.yml" --env-file "$ROOT/.env" \
+            >"$ROOT/missing-writer.out" 2>"$ROOT/missing-writer.err"
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'exactly one running writer container for retention-scan' "$ROOT/missing-writer.err"
+
+      - name: Verify source contains only read-only Docker surface
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          source=Path('infra/update/assess-online-update-pre-stop.py').read_text()
+          for required in (
+              '["image", "inspect"]',
+              '["inspect"]',
+              '"config", "--format", "json"',
+              '"ps", "-q"',
+              'IMAGES_ACQUIRED',
+              'READY_FOR_WRITER_STOP_EVIDENCE',
+          ):
+              assert required in source
+          for forbidden in (
+              'docker pull', 'docker compose stop', 'docker compose down', 'docker compose up',
+              'docker compose restart', 'docker volume', 'WRITER_STOP_STARTED', 'persist_event(',
+              'subprocess.Popen', 'os.remove(', 'unlink(', 'write_text(', 'write_bytes(',
+          ):
+              assert forbidden not in source
+          PY
