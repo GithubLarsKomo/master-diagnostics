@@ -1,0 +1,75 @@
+name: Restore Promotion Switch Completion Receipt Verifier Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-promotion-switch-completion-receipt-verifier-contract.yml'
+      - 'packages/db/package.json'
+      - 'packages/db/src/verify-restore-private-promotion-switch-completion-receipt.ts'
+      - 'packages/db/src/services/restore-private-promotion-switch-completion-receipt.ts'
+      - 'packages/db/test/restore-private-promotion-switch-completion-receipt.test.ts'
+      - 'docs/restore-private-promotion-switch-completion-receipt-verifier.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-promotion-switch-completion-receipt-verifier-contract.yml'
+      - 'packages/db/package.json'
+      - 'packages/db/src/verify-restore-private-promotion-switch-completion-receipt.ts'
+      - 'packages/db/src/services/restore-private-promotion-switch-completion-receipt.ts'
+      - 'packages/db/test/restore-private-promotion-switch-completion-receipt.test.ts'
+      - 'docs/restore-private-promotion-switch-completion-receipt-verifier.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify existing signed receipt reader contract
+        run: pnpm --filter @masters/db exec vitest run test/restore-private-promotion-switch-completion-receipt.test.ts
+
+      - name: Verify read-only verifier surface
+        run: |
+          pnpm --filter @masters/db typecheck
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cli = Path('packages/db/src/verify-restore-private-promotion-switch-completion-receipt.ts').read_text()
+          package = Path('packages/db/package.json').read_text()
+
+          assert 'backup:restore-promotion-switch-completion-receipt-verify' in package
+          assert 'readAuthenticatedRestorePrivatePromotionSwitchIntent' in cli
+          assert 'readVerifiedRestorePrivatePromotionSwitchJournal' in cli
+          assert 'readVerifiedRestorePrivatePromotionSwitchExecutionEvents' in cli
+          assert 'readVerifiedRestorePrivatePromotionSwitchCompletionReceipt' in cli
+          assert 'RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_FILE_NAME' in cli
+          assert "status: 'VERIFIED'" in cli
+          assert 'receiptSignature' in cli
+          assert 'postSwitchHealthcheckFingerprint' in cli
+          assert 'productionMutationCompleted' in cli
+          assert 'promotionExecuted' in cli
+
+          for forbidden in (
+              'ensureSignedRestorePrivatePromotionSwitchCompletionReceipt',
+              'createRestorePrivatePromotionSwitchCompletionReceiptRecord',
+              'writeFile',
+              'mkdir',
+              'chmod',
+              'child_process',
+              'docker compose',
+              'docker volume',
+              '/var/run/docker.sock',
+          ):
+              assert forbidden not in cli
+          PY
