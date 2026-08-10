@@ -2,6 +2,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { SignedRestoreSourceProvenanceEnvelope } from '../src/services/backup-restore-source-provenance';
 import {
   createRestorePrivatePromotionSwitchCompletionReceiptRecord,
   ensureSignedRestorePrivatePromotionSwitchCompletionReceipt,
@@ -15,6 +16,26 @@ import {
 import type { SignedRestorePrivatePromotionSwitchJournalEnvelope } from '../src/services/restore-private-promotion-switch-journal';
 
 const candidateSetId = 'restore-0123456789abcdefabcd';
+
+function sourceProvenance(overrides: Partial<SignedRestoreSourceProvenanceEnvelope['record']> = {}): Readonly<SignedRestoreSourceProvenanceEnvelope> {
+  return Object.freeze({
+    envelopeVersion: 1 as const,
+    signature: `hmac-sha256:${'6'.repeat(64)}` as const,
+    record: Object.freeze({
+      provenanceVersion: 1 as const,
+      stagingName: 'restore-20260806T050000000Z-12345678-1234-1234-1234-123456789abc',
+      backupFileName: 'masters-backup-20260806T050000000Z-12345678-1234-1234-1234-123456789abc.mdbak',
+      backupSha256: `sha256:${'5'.repeat(64)}` as const,
+      backupCreatedAt: '2026-08-06T05:00:00.000Z',
+      backupManifestFingerprint: `sha256:${'4'.repeat(64)}` as const,
+      bundleVersion: 1 as const,
+      consistency: 'CLEANLY_STOPPED_VOLUMES' as const,
+      restoreReconciliationRequired: true as const,
+      sourceNames: Object.freeze(['libsql', 'reports', 'tenant-exports', 'data-subject-delivery', 'caddy-data', 'caddy-config']),
+      ...overrides,
+    }),
+  });
+}
 
 function journal(): Readonly<SignedRestorePrivatePromotionSwitchJournalEnvelope> {
   return Object.freeze({
@@ -85,20 +106,20 @@ async function fixture() {
 }
 
 describe('restore private promotion switch completion receipt', () => {
-  it('binds a healthy candidate post-switch report to journal and candidate-selection evidence', async () => {
+  it('binds source provenance, health and candidate evidence', async () => {
     const { events } = await fixture();
-    const record = createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck(), '2026-08-09T11:06:00.000Z');
+    const record = createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck(), sourceProvenance(), '2026-08-09T11:06:00.000Z');
     expect(record).toMatchObject({
       receiptVersion: 1,
       status: 'PROMOTED',
       candidateSetId,
+      sourceProvenanceSignature: sourceProvenance().signature,
+      sourceStagingName: sourceProvenance().record.stagingName,
+      sourceBackupFileName: sourceProvenance().record.backupFileName,
+      sourceBackupSha256: sourceProvenance().record.backupSha256,
+      sourceBackupCreatedAt: sourceProvenance().record.backupCreatedAt,
+      sourceBackupManifestFingerprint: sourceProvenance().record.backupManifestFingerprint,
       currentVolumeSet: 'CANDIDATE',
-      libsqlHealth: 'HEALTHY',
-      appHealth: 'HEALTHY',
-      exportCleanupRunning: true,
-      retentionScanRunning: true,
-      caddyPreserved: true,
-      rollbackVolumesRetained: true,
       productionMutationCompleted: true,
       promotionExecuted: true,
     });
@@ -106,20 +127,24 @@ describe('restore private promotion switch completion receipt', () => {
     expect(record.postSwitchHealthcheckFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
-  it('persists signed immutable receipt and reuses it idempotently', async () => {
+  it('persists immutable receipt and rejects provenance drift on retry', async () => {
     const { keyFile, evidenceDir, events } = await fixture();
-    const first = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(evidenceDir, keyFile, journal(), events, healthcheck(), '2026-08-09T11:06:00.000Z');
+    const first = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(evidenceDir, keyFile, journal(), events, healthcheck(), sourceProvenance(), '2026-08-09T11:06:00.000Z');
     expect(first.created).toBe(true);
-    expect(first.envelope.signature).toMatch(/^hmac-sha256:[0-9a-f]{64}$/);
-    const second = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(evidenceDir, keyFile, journal(), events, healthcheck(), '2026-08-09T11:10:00.000Z');
+    const second = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(evidenceDir, keyFile, journal(), events, healthcheck(), sourceProvenance(), '2026-08-09T11:10:00.000Z');
     expect(second.created).toBe(false);
     expect(second.envelope).toEqual(first.envelope);
     expect(await readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(first.path, keyFile, journal(), events)).toEqual(first.envelope);
+    await expect(ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(
+      evidenceDir, keyFile, journal(), events, healthcheck(),
+      sourceProvenance({ backupSha256: `sha256:${'f'.repeat(64)}` }),
+      '2026-08-09T11:10:00.000Z',
+    )).rejects.toThrow('does not match verified restore source provenance');
   });
 
   it('remains verifiable after COMPLETED but cannot be newly created after completion', async () => {
     const { keyFile, evidenceDir, events } = await fixture();
-    const receipt = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(evidenceDir, keyFile, journal(), events, healthcheck(), '2026-08-09T11:06:00.000Z');
+    const receipt = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(evidenceDir, keyFile, journal(), events, healthcheck(), sourceProvenance(), '2026-08-09T11:06:00.000Z');
     await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(evidenceDir, keyFile, journal(), 'COMPLETED', '2026-08-09T11:07:00.000Z');
     const completedEvents = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(evidenceDir, keyFile, journal());
     expect(await readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(receipt.path, keyFile, journal(), completedEvents)).toEqual(receipt.envelope);
@@ -132,31 +157,30 @@ describe('restore private promotion switch completion receipt', () => {
     await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(freshEvidence, freshKey, journal(), 'CANDIDATE_SELECTED', '2026-08-09T11:02:00.000Z');
     await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(freshEvidence, freshKey, journal(), 'COMPLETED', '2026-08-09T11:07:00.000Z');
     const lateEvents = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(freshEvidence, freshKey, journal());
-    await expect(ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(freshEvidence, freshKey, journal(), lateEvents, healthcheck(), '2026-08-09T11:08:00.000Z')).rejects.toThrow('incompatible with rollback or non-completion execution evidence');
+    await expect(ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(freshEvidence, freshKey, journal(), lateEvents, healthcheck(), sourceProvenance(), '2026-08-09T11:08:00.000Z')).rejects.toThrow('incompatible with rollback or non-completion execution evidence');
   });
 
-  it('rejects unhealthy or mismatched post-switch evidence', async () => {
+  it('rejects unhealthy, mismatched, or malformed source evidence', async () => {
     const { events } = await fixture();
-    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck({ appHealth: 'BROKEN' as 'HEALTHY' }), '2026-08-09T11:06:00.000Z')).toThrow('requires a healthy post-switch report');
-    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck({ candidateSetId: 'restore-fedcba9876543210abcd' }), '2026-08-09T11:06:00.000Z')).toThrow('candidate-set ID does not match');
-    const badVolumes = healthcheck().candidateVolumes.map((item, index) => index === 1 ? { ...item, volumeName: 'wrong_reports' } : item);
-    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck({ candidateVolumes: badVolumes }), '2026-08-09T11:06:00.000Z')).toThrow('does not match durable journal candidate');
+    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck({ appHealth: 'BROKEN' as 'HEALTHY' }), sourceProvenance(), '2026-08-09T11:06:00.000Z')).toThrow('requires a healthy post-switch report');
+    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck({ candidateSetId: 'restore-fedcba9876543210abcd' }), sourceProvenance(), '2026-08-09T11:06:00.000Z')).toThrow('candidate-set ID does not match');
+    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck(), sourceProvenance({ backupFileName: 'wrong.mdbak' }), '2026-08-09T11:06:00.000Z')).toThrow('backup file name is invalid');
   });
 
   it('rejects rollback evidence as a completion source', async () => {
     const { root, keyFile, evidenceDir } = await fixture();
     await ensureSignedRestorePrivatePromotionSwitchExecutionEvent(evidenceDir, keyFile, journal(), 'ROLLBACK_STARTED', '2026-08-09T11:03:00.000Z');
     const events = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(evidenceDir, keyFile, journal());
-    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck(), '2026-08-09T11:06:00.000Z')).toThrow('incompatible with rollback or non-completion execution evidence');
+    expect(() => createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal(), events, healthcheck(), sourceProvenance(), '2026-08-09T11:06:00.000Z')).toThrow('incompatible with rollback or non-completion execution evidence');
     expect(root).toBeTruthy();
   });
 
   it('detects persisted receipt tampering', async () => {
     const { keyFile, evidenceDir, events } = await fixture();
-    const created = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(evidenceDir, keyFile, journal(), events, healthcheck(), '2026-08-09T11:06:00.000Z');
-    const parsed = JSON.parse(await readFile(created.path, 'utf8')) as { record: { appHealth: string }; signature: string };
-    parsed.record.appHealth = 'BROKEN';
+    const created = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(evidenceDir, keyFile, journal(), events, healthcheck(), sourceProvenance(), '2026-08-09T11:06:00.000Z');
+    const parsed = JSON.parse(await readFile(created.path, 'utf8')) as { record: { sourceBackupSha256: string }; signature: string };
+    parsed.record.sourceBackupSha256 = `sha256:${'f'.repeat(64)}`;
     await writeFile(created.path, `${JSON.stringify(parsed, null, 2)}\n`);
-    await expect(readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(created.path, keyFile, journal(), events)).rejects.toThrow();
+    await expect(readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(created.path, keyFile, journal(), events)).rejects.toThrow('signature verification failed');
   });
 });
