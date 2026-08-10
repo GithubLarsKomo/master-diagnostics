@@ -17,6 +17,22 @@ baseline_verification="${baseline_fixture}/baseline-verification-private.json"
 success_journal="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["journalPath"])' "${execution_fixture}/prepared.json")"
 rollback_journal="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["journalPath"])' "${execution_fixture}/rollback-prepared.json")"
 
+# #244 classifies only BACKUP_*; the independent runtime attester additionally
+# requires notifications to remain explicitly DISABLED after every recreate.
+python3 - "${execution_fixture}/inspect/target" "${execution_fixture}/inspect/rollback" <<'PY'
+import json,sys
+from pathlib import Path
+for folder in map(Path, sys.argv[1:]):
+    for service in ('app','export-cleanup','retention-scan'):
+        path=folder/f'{service}.json'
+        data=json.loads(path.read_text())
+        env=data[0]['Config']['Env']
+        env=[item for item in env if not item.startswith('PRIVACY_NOTIFICATIONS_STATE=')]
+        env.append('PRIVACY_NOTIFICATIONS_STATE=DISABLED')
+        data[0]['Config']['Env']=env
+        path.write_text(json.dumps(data)+'\n')
+PY
+
 out=/tmp/backup-privacy-service-live-runtime-attestation
 rm -rf "${out}"; mkdir -p "${out}"; chmod 0700 "${out}"
 
@@ -50,16 +66,19 @@ r=json.load(open(sys.argv[1])); rec=r['record']
 assert r['status']=='VERIFIED' and r['backupState']=='ENABLED'
 assert r['signature'].startswith('hmac-sha256:')
 assert rec['liveRuntimeAttestationVersion']==1
+assert rec['notificationsState']=='DISABLED'
 assert rec['executionAssessmentStatus']=='COMPLETED'
 assert rec['liveState']=='TARGET'
 assert rec['liveRuntimeAttested'] is True
 assert rec['activationExecuted'] is True
 assert len(rec['boundedLiveState']['services'])==5
+mutable=[s for s in rec['boundedLiveState']['services'] if s['service'] in {'app','export-cleanup','retention-scan'}]
+assert all(s['privacyEnvironment']['PRIVACY_NOTIFICATIONS_STATE']=='DISABLED' for s in mutable)
 PY
 python3 "${tool}" check "${target_args[@]}" --attestation "${target_attestation}" >"${out}/target-check.json"
 python3 - "${out}/target-check.json" <<'PY'
 import json,sys
-r=json.load(open(sys.argv[1])); assert r['status']=='VERIFIED'; assert r['backupState']=='ENABLED'; assert r['liveRuntimeAttested'] is True
+r=json.load(open(sys.argv[1])); assert r['status']=='VERIFIED'; assert r['backupState']=='ENABLED'; assert r['notificationsState']=='DISABLED'; assert r['liveRuntimeAttested'] is True
 PY
 
 # The signed document remains byte-compatible with the #244 event validator: it binds the complete signed-file SHA.
@@ -81,8 +100,8 @@ python3 - "${rollback_attestation}" "${out}/rollback-check.json" <<'PY'
 import json,sys
 signed=json.load(open(sys.argv[1])); checked=json.load(open(sys.argv[2]))
 assert signed['backupState']=='DISABLED'; assert signed['record']['executionAssessmentStatus']=='ROLLED_BACK'
-assert signed['record']['activationExecuted'] is False
-assert checked['status']=='VERIFIED' and checked['backupState']=='DISABLED'
+assert signed['record']['notificationsState']=='DISABLED'; assert signed['record']['activationExecuted'] is False
+assert checked['status']=='VERIFIED' and checked['backupState']=='DISABLED' and checked['notificationsState']=='DISABLED'
 PY
 python3 - "${execution_core}" "${rollback_attestation}" <<'PY'
 import importlib.util,sys
@@ -91,7 +110,7 @@ spec=importlib.util.spec_from_file_location('execution', Path(sys.argv[1])); m=i
 assert m.validate_attestation(Path(sys.argv[2]), 'ROLLBACK_VERIFIED').startswith('sha256:')
 PY
 
-# Wrong requested state is fail-closed even if all evidence files are otherwise valid.
+# Wrong requested backup state is fail-closed even if all evidence files are otherwise valid.
 set +e
 mapfile -t wrong_args < <(common_args "${rollback_journal}" "${execution_fixture}/inspect/rollback" ENABLED)
 python3 "${tool}" prepare "${wrong_args[@]}" --output "${out}/wrong-state.json" >"${out}/wrong-state-result.json"
@@ -99,6 +118,24 @@ code=$?
 set -e
 test "${code}" -ne 0
 grep -F 'LIVE_RUNTIME_ATTESTATION_TARGET_NOT_VERIFIED' "${out}/wrong-state-result.json"
+
+# Notifications drift is independently blocked even though #244's backup-only classifier stays TARGET.
+notifications_dir="${out}/notifications-drift"
+cp -a "${execution_fixture}/inspect/target" "${notifications_dir}"
+python3 - "${notifications_dir}/app.json" <<'PY'
+import json,sys
+from pathlib import Path
+p=Path(sys.argv[1]); d=json.loads(p.read_text()); env=d[0]['Config']['Env']
+d[0]['Config']['Env']=['PRIVACY_NOTIFICATIONS_STATE=ENABLED' if x.startswith('PRIVACY_NOTIFICATIONS_STATE=') else x for x in env]
+p.write_text(json.dumps(d)+'\n')
+PY
+set +e
+mapfile -t notification_args < <(common_args "${success_journal}" "${notifications_dir}" ENABLED)
+python3 "${tool}" prepare "${notification_args[@]}" --output "${out}/notifications-drift.json" >"${out}/notifications-drift-result.json"
+code=$?
+set -e
+test "${code}" -ne 0
+grep -F 'LIVE_RUNTIME_ATTESTATION_NOTIFICATIONS_NOT_DISABLED' "${out}/notifications-drift-result.json"
 
 # HMAC tampering is detected before a signed attestation can be trusted.
 cp "${target_attestation}" "${out}/tampered.json"; chmod 0600 "${out}/tampered.json"
@@ -126,6 +163,7 @@ text=Path(sys.argv[1]).read_text()
 for forbidden in ('"docker"','docker compose','subprocess.','os.replace(','force-recreate'):
     assert forbidden not in text, forbidden
 assert 'masters:backup-privacy-service-live-runtime-attestation:v1' in text
+assert 'PRIVACY_NOTIFICATIONS_STATE' in text
 assert 'boundedLiveState' in text
 PY
 
