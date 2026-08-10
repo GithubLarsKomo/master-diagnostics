@@ -1,0 +1,55 @@
+name: Backup Privacy Service Cutover Execution Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-service-cutover-execution-contract.yml'
+      - 'infra/backup/backup-privacy-service-cutover-execution.py'
+      - 'infra/backup/test-backup-privacy-service-cutover-start.sh'
+      - 'infra/backup/backup-privacy-service-live-baseline.py'
+      - 'docs/backup-privacy-service-cutover-execution.md'
+      - '.env.example'
+      - 'TASKS.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-service-cutover-execution-contract.yml'
+      - 'infra/backup/backup-privacy-service-cutover-execution.py'
+      - 'infra/backup/test-backup-privacy-service-cutover-start.sh'
+      - 'infra/backup/backup-privacy-service-live-baseline.py'
+      - 'docs/backup-privacy-service-cutover-execution.md'
+      - '.env.example'
+      - 'TASKS.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify syntax and pre-mutation execution boundary
+        run: |
+          python3 -m py_compile infra/backup/backup-privacy-service-cutover-execution.py
+          bash -n infra/backup/test-backup-privacy-service-cutover-start.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('infra/backup/backup-privacy-service-cutover-execution.py').read_text()
+          assert 'masters:backup-privacy-service-cutover-execution:v1' in text
+          assert 'CUTOVER_STARTED' in text
+          assert 'liveBaselineMustRemainVerifiedBeforeMutation' in text
+          assert 'rollbackRequiredOnCutoverFailure' in text
+          assert '"productionMutationApplied":False' in text or '"productionMutationApplied": False' in text
+          for forbidden in ('docker compose','docker inspect','docker ps','docker run','docker restart','docker stop','docker rm','docker volume','os.replace('):
+              assert forbidden not in text, forbidden
+          PY
+
+      - name: Verify signed CUTOVER_STARTED evidence and retry/drift gates
+        run: bash infra/backup/test-backup-privacy-service-cutover-start.sh
+
+      - name: Verify release and mutation gates remain open
+        run: |
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
+          grep -F 'CUTOVER_STARTED' docs/backup-privacy-service-cutover-execution.md
+          grep -F 'keine Container-Mutation' docs/backup-privacy-service-cutover-execution.md
