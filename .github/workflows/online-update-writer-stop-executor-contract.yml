@@ -217,7 +217,10 @@ jobs:
           assert 'WRITER_STOP_STARTED' in source and 'WRITERS_STOPPED' in source and 'ROLLBACK_STARTED' in source
           assert source.index('"WRITER_STOP_STARTED"') < source.index('run_docker(["stop"')
           assert 'verify_libsql_available' in source
-          assert 'docker' not in source.split('def run_docker',1)[0].lower()
+          assert '["docker", *args]' in source
+          assert 'is_stop = args[:1] == ["stop"]' in source
+          assert 'is_inspect = args[:1] == ["inspect"]' in source
+          assert 'is_compose_ps' in source
           for forbidden in ('docker pull','docker compose up','docker compose down','docker compose restart','docker volume','MIGRATION_STARTED','ROLLBACK_COMPLETED','backup:restore','restore-backup'):
               assert forbidden not in source
           PY
