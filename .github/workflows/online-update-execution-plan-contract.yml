@@ -1,0 +1,159 @@
+name: Online Update Execution Plan Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/online-update-execution-plan-contract.yml'
+      - 'infra/update/**'
+      - 'docs/online-update-execution-plan.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/online-update-execution-plan-contract.yml'
+      - 'infra/update/**'
+      - 'docs/online-update-execution-plan.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare authentic signed preparation and registry-resolution evidence
+        run: |
+          root=/tmp/online-update-plan
+          rm -rf "$root"
+          mkdir -p "$root/preparation" "$root/resolution" "$root/plan"
+          python3 - <<'PY'
+          import base64, importlib.util, json
+          from pathlib import Path
+          root=Path('/tmp/online-update-plan')
+          for name, byte in [('preparation.key',84),('resolution.key',86),('plan.key',87)]:
+              root.joinpath(name).write_text(base64.b64encode(bytes([byte])*32).decode()+'\n')
+
+          def load(path,name):
+              spec=importlib.util.spec_from_file_location(name,Path(path))
+              m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+          prep=load('infra/update/persist-online-update-preparation.py','prep')
+          resolution=load('infra/update/resolve-online-update-images.py','resolution')
+          app='ghcr.io/githublarskomo/master-diagnostics-app@sha256:'+'2'*64
+          migrator='ghcr.io/githublarskomo/master-diagnostics-migrator@sha256:'+'3'*64
+          prep_record=prep.validate_record({
+              'preparationVersion':1,'phase':'PREPARED','selectionSignature':'hmac-sha256:'+'1'*64,
+              'selectedAt':'2026-08-10T08:00:00.000Z','currentVersion':'1.0.0','targetVersion':'1.1.0',
+              'manifestFingerprint':'sha256:'+'4'*64,
+              'images':[{'role':'APP','reference':app},{'role':'MIGRATOR','reference':migrator}],
+              'releaseNotes':{'sha256':'sha256:'+'5'*64,'byteCount':128,'verified':True},
+              'preUpdateBackup':{'fileName':'masters-backup-20260810T080001000Z-12345678-1234-1234-1234-123456789abc.mdbak','sha256':'sha256:'+'6'*64,'createdAt':'2026-08-10T08:00:01.000Z','bundleVersion':1,'consistency':'CLEANLY_STOPPED_VOLUMES','restoreReconciliationRequired':True,'verified':True,'createdAfterSelection':True},
+              'backupPolicy':'VERIFIED_PREUPDATE_BACKUP_REQUIRED','rollbackPolicy':'RESTORE_VERIFIED_PREUPDATE_BACKUP',
+              'releaseNotesBytesVerified':True,'preUpdateBackupVerified':True,'preUpdateBackupCreatedAfterSelection':True,
+              'imagePullAllowed':False,'migrationAllowed':False,'productionMutationAllowed':False,'updateExecuted':False,
+          })
+          prep_key=base64.b64decode(root.joinpath('preparation.key').read_text().strip())
+          prep_env={'envelopeVersion':1,'record':prep_record,'signature':prep.sign_record(prep_key,prep_record)}
+          root.joinpath('preparation/online-update-preparation.json').write_text(json.dumps(prep_env,indent=2)+'\n')
+
+          resolution_record=resolution.validate_record({
+              'resolutionVersion':1,'phase':'RESOLVED','preparationSignature':prep_env['signature'],
+              'manifestFingerprint':prep_record['manifestFingerprint'],'targetVersion':'1.1.0',
+              'images':[
+                  {'role':'APP','reference':app,'digest':'sha256:'+'2'*64,'mediaType':'application/vnd.oci.image.manifest.v1+json','size':512,'available':True},
+                  {'role':'MIGRATOR','reference':migrator,'digest':'sha256:'+'3'*64,'mediaType':'application/vnd.oci.image.manifest.v1+json','size':640,'available':True},
+              ],
+              'allImmutableReferencesAvailable':True,'descriptorDigestsMatch':True,
+              'imagePullAllowed':False,'migrationAllowed':False,'productionMutationAllowed':False,'updateExecuted':False,
+          })
+          resolution_key=base64.b64decode(root.joinpath('resolution.key').read_text().strip())
+          resolution_env={'envelopeVersion':1,'record':resolution_record,'signature':resolution.sign_record(resolution_key,resolution_record)}
+          root.joinpath('resolution/online-update-image-resolution.json').write_text(json.dumps(resolution_env,indent=2)+'\n')
+          PY
+          chmod 600 "$root"/*.key "$root/preparation/online-update-preparation.json" "$root/resolution/online-update-image-resolution.json"
+
+      - name: Persist and idempotently reuse exact signed execution plan
+        run: |
+          root=/tmp/online-update-plan
+          common=(
+            --preparation "$root/preparation/online-update-preparation.json"
+            --preparation-key "$root/preparation.key"
+            --resolution "$root/resolution/online-update-image-resolution.json"
+            --resolution-key "$root/resolution.key"
+            --target-dir "$root/plan"
+            --key-file "$root/plan.key"
+          )
+          python3 infra/update/persist-online-update-execution-plan.py "${common[@]}" > "$root/first.json"
+          python3 infra/update/persist-online-update-execution-plan.py "${common[@]}" > "$root/second.json"
+          python3 - <<'PY'
+          import json,re
+          from pathlib import Path
+          root=Path('/tmp/online-update-plan')
+          first=json.loads(root.joinpath('first.json').read_text()); second=json.loads(root.joinpath('second.json').read_text())
+          assert first['mode']=='CLUB_ONLINE_UPDATE_EXECUTION_PLAN_V1'
+          assert first['status']=='PLANNED_AWAITING_EXECUTION_JOURNAL'
+          assert first['planCreated'] is True and first['planReused'] is False
+          assert second['planCreated'] is False and second['planReused'] is True
+          assert first['planSignature']==second['planSignature']
+          assert re.fullmatch(r'hmac-sha256:[0-9a-f]{64}',first['planSignature'])
+          assert first['executionOrder']==['ACQUIRE_EXACT_IMAGES','STOP_APPLICATION_WRITERS','RUN_CONTROLLED_MIGRATIONS','START_APPLICATION','VERIFY_APPLICATION_HEALTH','COMPLETE_UPDATE']
+          assert first['rollbackBackupSha256']=='sha256:'+'6'*64
+          assert first['imagePullAllowed'] is False and first['migrationAllowed'] is False
+          assert first['productionMutationAllowed'] is False and first['updateExecuted'] is False
+          evidence=root/'plan'/'online-update-execution-plan.json'
+          env=json.loads(evidence.read_text())
+          assert env['record']['executionJournalRequiredBeforeMutation'] is True
+          assert env['record']['completionReceiptRequiredAfterHealthcheck'] is True
+          assert env['record']['rollbackReceiptRequiredAfterRollback'] is True
+          assert oct(evidence.stat().st_mode & 0o777)=='0o600'
+          assert oct(evidence.parent.stat().st_mode & 0o777)=='0o700'
+          PY
+
+      - name: Reject cross-evidence mismatch and plan tampering
+        run: |
+          root=/tmp/online-update-plan
+          cp "$root/resolution/online-update-image-resolution.json" "$root/resolution/mismatch.json"
+          python3 - <<'PY'
+          import base64,importlib.util,json
+          from pathlib import Path
+          root=Path('/tmp/online-update-plan')
+          p=root/'resolution/mismatch.json'; d=json.loads(p.read_text()); d['record']['targetVersion']='1.2.0'
+          spec=importlib.util.spec_from_file_location('r',Path('infra/update/resolve-online-update-images.py')); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          key=base64.b64decode(root.joinpath('resolution.key').read_text().strip()); d['signature']=m.sign_record(key,d['record']); p.write_text(json.dumps(d,indent=2)+'\n')
+          PY
+          set +e
+          python3 infra/update/persist-online-update-execution-plan.py \
+            --preparation "$root/preparation/online-update-preparation.json" --preparation-key "$root/preparation.key" \
+            --resolution "$root/resolution/mismatch.json" --resolution-key "$root/resolution.key" \
+            --target-dir "$root/mismatch-plan" --key-file "$root/plan.key" >/tmp/mismatch.out 2>/tmp/mismatch.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'target version does not match' /tmp/mismatch.err
+
+          cp "$root/plan/online-update-execution-plan.json" "$root/tampered-plan.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/online-update-plan/tampered-plan.json'); d=json.loads(p.read_text()); d['record']['executionOrder'][1]='RUN_CONTROLLED_MIGRATIONS'; p.write_text(json.dumps(d)+'\n')
+          PY
+          python3 - <<'PY'
+          import base64,importlib.util,json
+          from pathlib import Path
+          spec=importlib.util.spec_from_file_location('p',Path('infra/update/persist-online-update-execution-plan.py')); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          key=base64.b64decode(Path('/tmp/online-update-plan/plan.key').read_text().strip()); value=json.loads(Path('/tmp/online-update-plan/tampered-plan.json').read_text())
+          try: m.verify_envelope(value,key)
+          except Exception: pass
+          else: raise AssertionError('tampered plan unexpectedly verified')
+          PY
+
+      - name: Verify plan is deterministic and cannot mutate update state
+        run: |
+          python3 -m py_compile infra/update/persist-online-update-execution-plan.py
+          python3 - <<'PY'
+          from pathlib import Path
+          script=Path('infra/update/persist-online-update-execution-plan.py').read_text()
+          for token in ('subprocess','docker pull','docker manifest','docker compose','requests.','urllib.request','new Date','datetime.now'):
+              assert token not in script, token
+          assert 'executionJournalRequiredBeforeMutation": True' in script
+          assert 'imagePullAllowed": False' in script
+          assert 'migrationAllowed": False' in script
+          assert 'productionMutationAllowed": False' in script
+          PY
