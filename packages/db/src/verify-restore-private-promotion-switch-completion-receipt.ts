@@ -26,12 +26,7 @@ async function main(): Promise<void> {
   const intent = await readAuthenticatedRestorePrivatePromotionSwitchIntent(intentFile, keyFile);
   const journal = await readVerifiedRestorePrivatePromotionSwitchJournal(journalFile, keyFile, intent);
   const events = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(executionDir, keyFile, journal);
-  const receipt = await readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(
-    receiptFile,
-    keyFile,
-    journal,
-    events,
-  );
+  const receipt = await readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(receiptFile, keyFile, journal, events);
 
   process.stdout.write(`${JSON.stringify({
     mode: MODE,
@@ -44,6 +39,13 @@ async function main(): Promise<void> {
     candidateSetId: receipt.record.candidateSetId,
     candidateSetFingerprint: receipt.record.candidateSetFingerprint,
     candidateSelectedEventSignature: receipt.record.candidateSelectedEventSignature,
+    sourceProvenanceVersion: receipt.record.sourceProvenanceVersion,
+    sourceProvenanceSignature: receipt.record.sourceProvenanceSignature,
+    sourceStagingName: receipt.record.sourceStagingName,
+    sourceBackupFileName: receipt.record.sourceBackupFileName,
+    sourceBackupSha256: receipt.record.sourceBackupSha256,
+    sourceBackupCreatedAt: receipt.record.sourceBackupCreatedAt,
+    sourceBackupManifestFingerprint: receipt.record.sourceBackupManifestFingerprint,
     postSwitchHealthcheckFingerprint: receipt.record.postSwitchHealthcheckFingerprint,
     currentVolumeSet: receipt.record.currentVolumeSet,
     libsqlHealth: receipt.record.libsqlHealth,
