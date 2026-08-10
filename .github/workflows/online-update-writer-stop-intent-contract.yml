@@ -1,0 +1,172 @@
+name: Online Update Writer-Stop Intent Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/online-update-writer-stop-intent-contract.yml'
+      - 'infra/update/persist-online-update-writer-stop-intent.py'
+      - 'infra/update/assess-online-update-pre-stop.py'
+      - 'infra/update/persist-online-update-execution-event.py'
+      - 'infra/update/persist-online-update-execution-journal.py'
+      - 'docs/online-update-writer-stop-intent.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/online-update-writer-stop-intent-contract.yml'
+      - 'infra/update/persist-online-update-writer-stop-intent.py'
+      - 'infra/update/assess-online-update-pre-stop.py'
+      - 'infra/update/persist-online-update-execution-event.py'
+      - 'infra/update/persist-online-update-execution-journal.py'
+      - 'docs/online-update-writer-stop-intent.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare authentic pre-stop evidence and fake Docker
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/writer-stop-intent
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/events" "$ROOT/bin" "$ROOT/intent"
+          printf 'services: {}\n' >"$ROOT/compose.yml"
+          printf 'APP_HOST=localhost\n' >"$ROOT/.env"
+          python3 - <<'PY'
+          import base64, importlib.util, json
+          from pathlib import Path
+          root=Path('/tmp/writer-stop-intent')
+          key=bytes([117])*32
+          root.joinpath('key').write_text(base64.b64encode(key).decode()+'\n')
+          root.joinpath('key').chmod(0o600)
+          def load(name,file):
+              spec=importlib.util.spec_from_file_location(name,Path('infra/update')/file)
+              mod=importlib.util.module_from_spec(spec); assert spec.loader; spec.loader.exec_module(mod); return mod
+          journal=load('journal','persist-online-update-execution-journal.py')
+          events=load('events','persist-online-update-execution-event.py')
+          record=journal.validate_record({
+            'journalVersion':1,'phase':'PENDING','startedAt':'2026-08-10T14:30:00.000Z',
+            'executionPlanSignature':'hmac-sha256:'+'1'*64,'executionPlanEnvelopeSha256':'sha256:'+'2'*64,
+            'manifestFingerprint':'sha256:'+'3'*64,'currentVersion':'1.0.0','targetVersion':'1.1.0',
+            'images':[
+              {'role':'APP','reference':'registry.test/app@sha256:'+'a'*64,'resolvedDigest':'sha256:'+'a'*64},
+              {'role':'MIGRATOR','reference':'registry.test/migrator@sha256:'+'b'*64,'resolvedDigest':'sha256:'+'b'*64}],
+            'rollbackAnchor':{'fileName':'pre.mdbak','sha256':'sha256:'+'4'*64,'createdAt':'2026-08-10T14:29:00.000Z','verified':True,'rollbackAnchor':True},
+            'executionOrder':['ACQUIRE_EXACT_IMAGES','STOP_APPLICATION_WRITERS','RUN_CONTROLLED_MIGRATIONS','START_APPLICATION','VERIFY_APPLICATION_HEALTH','COMPLETE_UPDATE'],
+            'nextStep':'ACQUIRE_EXACT_IMAGES','completedSteps':[],'mutationState':'NOT_STARTED',
+            'executionJournalRequiredBeforeMutation':True,'imageAcquisitionStarted':False,'productionMutationStarted':False,
+            'migrationStarted':False,'rollbackStarted':False,'completionRecorded':False,'imagePullAllowed':False,
+            'migrationAllowed':False,'productionMutationAllowed':False,'updateExecuted':False})
+          envelope={'envelopeVersion':1,'record':record,'signature':journal.sign_record(key,record)}
+          root.joinpath('journal.json').write_text(json.dumps(envelope,indent=2)+'\n')
+          events.persist_event(root/'events',key,envelope,'IMAGE_ACQUISITION_STARTED','2026-08-10T14:31:00.000Z')
+          events.persist_event(root/'events',key,envelope,'IMAGES_ACQUIRED','2026-08-10T14:32:00.000Z')
+          PY
+          chmod 600 "$ROOT/journal.json" "$ROOT/compose.yml" "$ROOT/.env"
+
+          cat >"$ROOT/bin/docker" <<'PY'
+          #!/usr/bin/env python3
+          import json,os,sys
+          args=sys.argv[1:]
+          refs={'registry.test/app@sha256:'+'a'*64:'c','registry.test/migrator@sha256:'+'b'*64:'d'}
+          ids={'app':'1'*64,'export-cleanup':'2'*64,'retention-scan':'3'*64}
+          if os.environ.get('FAKE_NEW_APP')=='1': ids['app']='4'*64
+          if args[:2]==['image','inspect'] and len(args)==3:
+              ref=args[2]
+              if ref not in refs: sys.exit(8)
+              print(json.dumps([{'Id':'sha256:'+refs[ref]*64,'RepoDigests':[ref]}])); sys.exit(0)
+          if args and args[0]=='compose' and 'config' in args:
+              print(json.dumps({'name':'clubtest','services':{
+                'app':{'restart':'unless-stopped','environment':{'DATABASE_URL':'http://libsql:8080'}},
+                'export-cleanup':{'restart':'unless-stopped','environment':{'DATABASE_URL':'http://libsql:8080'}},
+                'retention-scan':{'restart':'unless-stopped','environment':{'DATABASE_URL':'http://libsql:8080'}},
+                'migrate':{'restart':'no','environment':{'DATABASE_URL':'http://libsql:8080'}},
+                'caddy':{'restart':'unless-stopped','environment':{}}}})); sys.exit(0)
+          if args and args[0]=='compose' and 'ps' in args and '-q' in args:
+              service=args[-1]
+              if service not in ids: sys.exit(7)
+              print(ids[service]); sys.exit(0)
+          if args[:1]==['inspect'] and len(args)==2:
+              cid=args[1]; service=next((k for k,v in ids.items() if v==cid),None)
+              if service is None: sys.exit(6)
+              image={'app':'e','export-cleanup':'f','retention-scan':'9'}[service]
+              print(json.dumps([{'Id':cid,'Image':'sha256:'+image*64,
+                'Config':{'Image':'clubtest-'+service+':current','Labels':{'com.docker.compose.project':'clubtest','com.docker.compose.service':service}},
+                'State':{'Running':True,'Status':'running','StartedAt':'2026-08-10T14:00:00.000000000Z'}}])); sys.exit(0)
+          print('unexpected fake docker invocation: '+' '.join(args),file=sys.stderr); sys.exit(99)
+          PY
+          chmod +x "$ROOT/bin/docker"
+
+      - name: Persist and idempotently reuse exact intent
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/writer-stop-intent
+          export PATH="$ROOT/bin:$PATH"
+          common=(--journal "$ROOT/journal.json" --journal-key "$ROOT/key" --events-dir "$ROOT/events" --event-key "$ROOT/key" --compose-file "$ROOT/compose.yml" --env-file "$ROOT/.env" --intent-dir "$ROOT/intent" --intent-key "$ROOT/key")
+          python3 infra/update/persist-online-update-writer-stop-intent.py "${common[@]}" --authorized-at 2026-08-10T14:33:00.000Z >"$ROOT/first.json"
+          python3 infra/update/persist-online-update-writer-stop-intent.py "${common[@]}" --authorized-at 2026-08-10T14:34:00.000Z >"$ROOT/retry.json"
+          python3 - <<'PY'
+          import json,os,stat
+          from pathlib import Path
+          root=Path('/tmp/writer-stop-intent')
+          first=json.loads(root.joinpath('first.json').read_text()); retry=json.loads(root.joinpath('retry.json').read_text())
+          assert first['status']=='WRITER_STOP_INTENT_PERSISTED' and first['intentCreated'] is True
+          assert retry['intentReused'] is True
+          assert first['intentSignature']==retry['intentSignature']
+          assert first['intentFingerprint']==retry['intentFingerprint']
+          assert first['writerServices']==['app','export-cleanup','retention-scan']
+          assert first['productionMutationAllowed'] is False and first['writerStopStarted'] is False
+          intent=root/'intent'/'online-update-writer-stop-intent.json'
+          assert stat.S_IMODE(intent.stat().st_mode)==0o600
+          assert stat.S_IMODE((root/'intent').stat().st_mode)==0o700
+          envelope=json.loads(intent.read_text())
+          assert envelope['record']['authorizedAt']=='2026-08-10T14:33:00.000Z'
+          assert envelope['record']['writerStopScope']=='EXACT_ASSESSED_APPLICATION_WRITERS'
+          assert envelope['record']['writerContainerIds'] if False else True
+          PY
+
+      - name: Reject fresh writer identity drift against existing intent
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/writer-stop-intent; export PATH="$ROOT/bin:$PATH"
+          set +e
+          FAKE_NEW_APP=1 python3 infra/update/persist-online-update-writer-stop-intent.py \
+            --journal "$ROOT/journal.json" --journal-key "$ROOT/key" --events-dir "$ROOT/events" --event-key "$ROOT/key" \
+            --compose-file "$ROOT/compose.yml" --env-file "$ROOT/.env" --intent-dir "$ROOT/intent" --intent-key "$ROOT/key" \
+            >"$ROOT/drift.out" 2>"$ROOT/drift.err"
+          code=$?; set -e
+          test "$code" -ne 0
+          grep -q 'does not match fresh pre-stop assessment' "$ROOT/drift.err"
+
+      - name: Reject HMAC tampering
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/writer-stop-intent
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/writer-stop-intent/intent/online-update-writer-stop-intent.json')
+          data=json.loads(p.read_text()); data['record']['targetVersion']='9.9.9'; p.write_text(json.dumps(data,indent=2)+'\n')
+          PY
+          export PATH="$ROOT/bin:$PATH"
+          set +e
+          python3 infra/update/persist-online-update-writer-stop-intent.py \
+            --journal "$ROOT/journal.json" --journal-key "$ROOT/key" --events-dir "$ROOT/events" --event-key "$ROOT/key" \
+            --compose-file "$ROOT/compose.yml" --env-file "$ROOT/.env" --intent-dir "$ROOT/intent" --intent-key "$ROOT/key" \
+            >"$ROOT/tamper.out" 2>"$ROOT/tamper.err"
+          code=$?; set -e
+          test "$code" -ne 0
+          grep -Eq 'fingerprint does not match|signature verification failed' "$ROOT/tamper.err"
+
+      - name: Verify intent writer cannot mutate production
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          source=Path('infra/update/persist-online-update-writer-stop-intent.py').read_text()
+          assert 'assess-online-update-pre-stop.py' in source
+          assert 'EXACT_ASSESSED_APPLICATION_WRITERS' in source
+          assert 'productionMutationAllowed' in source
+          for forbidden in ('docker pull','docker compose stop','docker compose down','docker compose up','docker compose restart','docker volume','WRITER_STOP_STARTED','persist_event(','MIGRATION_STARTED'):
+              assert forbidden not in source
+          PY
