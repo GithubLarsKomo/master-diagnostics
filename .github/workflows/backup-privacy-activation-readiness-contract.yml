@@ -6,6 +6,7 @@ on:
       - '.github/workflows/backup-privacy-activation-readiness-contract.yml'
       - 'infra/backup/check-backup-privacy-activation-readiness.py'
       - 'infra/backup/check-club-backup-privacy-activation-readiness.sh'
+      - 'infra/backup/check-restore-rto-drill-report.py'
       - 'infra/backup/write-restore-rto-drill-report.py'
       - 'docs/backup-privacy-activation-readiness.md'
       - 'docs/restore-rto-drill.md'
@@ -17,6 +18,7 @@ on:
       - '.github/workflows/backup-privacy-activation-readiness-contract.yml'
       - 'infra/backup/check-backup-privacy-activation-readiness.py'
       - 'infra/backup/check-club-backup-privacy-activation-readiness.sh'
+      - 'infra/backup/check-restore-rto-drill-report.py'
       - 'infra/backup/write-restore-rto-drill-report.py'
       - 'docs/backup-privacy-activation-readiness.md'
       - 'docs/restore-rto-drill.md'
@@ -29,13 +31,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare signed successful real-drill-shaped report
+      - name: Prepare signed successful real-drill-shaped report and bound backup bytes
         run: |
           set -Eeuo pipefail
           root=/tmp/backup-privacy-readiness
+          backup="$root/backups"
           rm -rf "$root"
-          mkdir -p "$root/reports"
+          mkdir -p "$root/reports" "$backup"
           chmod 700 "$root/reports"
+          bundle=masters-backup-20260809T100000Z-11111111-1111-1111-1111-111111111111.mdbak
+          printf 'encrypted-readiness-bundle\n' >"$backup/$bundle"
+          bundle_fp="sha256:$(sha256sum "$backup/$bundle" | awk '{print $1}')"
+          printf '%s\n' "$bundle" >"$root/bundle-name.txt"
+          printf '%s\n' "$bundle_fp" >"$root/bundle-fingerprint.txt"
           python3 - <<'PY'
           import base64, json
           from pathlib import Path
@@ -55,8 +63,8 @@ jobs:
             --output-dir "$root/reports" \
             --key-file "$root/drill.key" \
             --drill-id drill-11111111111111111111111111111111 \
-            --bundle-name masters-backup-20260809T100000Z-11111111-1111-1111-1111-111111111111.mdbak \
-            --bundle-sha256 sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --bundle-name "$bundle" \
+            --bundle-sha256 "$bundle_fp" \
             --staging-name restore-20260809T100100Z-22222222-2222-2222-2222-222222222222 \
             --candidate-set-id restore-0123456789abcdefabcd \
             --started-at 2026-08-09T10:00:00.000Z \
@@ -67,14 +75,18 @@ jobs:
             --phases-file "$root/phases.json" \
             >"$root/writer.json"
 
-      - name: Verify successful report is ready only for manual attestation
+      - name: Verify successful report is ready only through canonical byte-bound verification
         run: |
           set -Eeuo pipefail
           root=/tmp/backup-privacy-readiness
+          bundle="$(cat "$root/bundle-name.txt")"
+          bundle_fp="$(cat "$root/bundle-fingerprint.txt")"
           PRIVACY_BACKUP_STATE=DISABLED \
             python3 infra/backup/check-backup-privacy-activation-readiness.py \
               --report "$root/reports/drill-11111111111111111111111111111111.json" \
               --key-file "$root/drill.key" \
+              --expected-bundle-name "$bundle" \
+              --expected-bundle-sha256 "$bundle_fp" \
               >"$root/readiness.json"
           python3 - <<'PY'
           import json
@@ -82,10 +94,14 @@ jobs:
           result=json.loads(Path('/tmp/backup-privacy-readiness/readiness.json').read_text())
           assert result['mode']=='BACKUP_PRIVACY_ACTIVATION_READINESS'
           assert result['status']=='READY_FOR_MANUAL_ATTESTATION'
+          assert result['readinessVersion']==2
+          assert result['canonicalDrillReportVerification'] is True
+          assert result['bundleBytesBound'] is True
           assert result['drillReportVerified'] is True
           assert result['rtoMet'] is True
           assert result['privacyReconciliationProven'] is True
           assert result['controlledPromotionProven'] is True
+          assert result['practicalRestoreEvidenceVerified'] is True
           assert result['blockers']==[]
           assert result['automaticActivationPerformed'] is False
           assert result['privacyBackupActivationAllowed'] is False
@@ -93,26 +109,60 @@ jobs:
           assert result['manualAttestationTarget']['PRIVACY_BACKUP_RESTORE_RECONCILIATION']=='true'
           PY
 
-      - name: Verify HMAC tampering blocks readiness
+      - name: Verify host wrapper binds readiness to current backup bytes
+        run: |
+          set -Eeuo pipefail
+          root=/tmp/backup-privacy-readiness
+          repo="$root/host-repo"
+          rm -rf "$repo"
+          mkdir -p "$repo/infra/backup"
+          cp infra/backup/check-backup-privacy-activation-readiness.py "$repo/infra/backup/"
+          cp infra/backup/check-restore-rto-drill-report.py "$repo/infra/backup/"
+          cp infra/backup/check-club-backup-privacy-activation-readiness.sh "$repo/infra/backup/"
+          bundle="$(cat "$root/bundle-name.txt")"
+          cat >"$repo/.env" <<EOF
+          BACKUP_HOST_DIR=$root/backups
+          RESTORE_RTO_DRILL_REPORT_HOST_DIR=$root/reports
+          RESTORE_RTO_DRILL_REPORT_KEY_FILE=$root/drill.key
+          PRIVACY_BACKUP_STATE=DISABLED
+          EOF
+          (cd "$repo" && bash infra/backup/check-club-backup-privacy-activation-readiness.sh \
+            drill-11111111111111111111111111111111 "$bundle") >"$root/host-readiness.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/backup-privacy-readiness/host-readiness.json').read_text())
+          assert r['status']=='READY_FOR_MANUAL_ATTESTATION', r
+          assert r['canonicalDrillReportVerification'] is True
+          assert r['bundleBytesBound'] is True
+          assert r['practicalRestoreEvidenceVerified'] is True
+          assert r['privacyBackupActivationAllowed'] is False
+          PY
+
+      - name: Verify canonical HMAC tampering blocks readiness
         run: |
           set -Eeuo pipefail
           root=/tmp/backup-privacy-readiness
           mkdir -p "$root/tampered"
-          cp "$root/reports/drill-11111111111111111111111111111111.json" "$root/tampered/drill-22222222222222222222222222222222.json"
-          chmod 600 "$root/tampered/drill-22222222222222222222222222222222.json"
+          path="$root/tampered/drill-11111111111111111111111111111111.json"
+          cp "$root/reports/drill-11111111111111111111111111111111.json" "$path"
+          chmod 600 "$path"
           python3 - <<'PY'
           import json
           from pathlib import Path
-          path=Path('/tmp/backup-privacy-readiness/tampered/drill-22222222222222222222222222222222.json')
+          path=Path('/tmp/backup-privacy-readiness/tampered/drill-11111111111111111111111111111111.json')
           data=json.loads(path.read_text())
           data['record']['durationSeconds']=121
           path.write_text(json.dumps(data, indent=2)+'\n')
+          path.chmod(0o600)
           PY
+          bundle="$(cat "$root/bundle-name.txt")"
+          bundle_fp="$(cat "$root/bundle-fingerprint.txt")"
           set +e
           PRIVACY_BACKUP_STATE=DISABLED \
             python3 infra/backup/check-backup-privacy-activation-readiness.py \
-              --report "$root/tampered/drill-22222222222222222222222222222222.json" \
-              --key-file "$root/drill.key" \
+              --report "$path" --key-file "$root/drill.key" \
+              --expected-bundle-name "$bundle" --expected-bundle-sha256 "$bundle_fp" \
               >"$root/tampered.json"
           code=$?
           set -e
@@ -120,16 +170,44 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-          result=json.loads(Path('/tmp/backup-privacy-readiness/tampered.json').read_text())
-          assert result['status']=='BLOCKED'
-          assert 'DRILL_REPORT_FINGERPRINT_MISMATCH' in result['blockers']
-          assert result['privacyBackupActivationAllowed'] is False
+          r=json.loads(Path('/tmp/backup-privacy-readiness/tampered.json').read_text())
+          assert r['status']=='BLOCKED'
+          assert r['blockers']==['RESTORE_RTO_DRILL_REPORT_SIGNATURE_MISMATCH'], r
+          assert r['canonicalDrillReportVerification'] is False
+          assert r['privacyBackupActivationAllowed'] is False
+          PY
+
+      - name: Verify different current bundle bytes block readiness
+        run: |
+          set -Eeuo pipefail
+          root=/tmp/backup-privacy-readiness
+          bundle="$(cat "$root/bundle-name.txt")"
+          wrong="sha256:$(printf '0%.0s' {1..64})"
+          set +e
+          PRIVACY_BACKUP_STATE=DISABLED \
+            python3 infra/backup/check-backup-privacy-activation-readiness.py \
+              --report "$root/reports/drill-11111111111111111111111111111111.json" \
+              --key-file "$root/drill.key" \
+              --expected-bundle-name "$bundle" --expected-bundle-sha256 "$wrong" \
+              >"$root/bundle-mismatch.json"
+          code=$?
+          set -e
+          test "$code" -ne 0
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/backup-privacy-readiness/bundle-mismatch.json').read_text())
+          assert r['status']=='BLOCKED'
+          assert r['blockers']==['RESTORE_RTO_DRILL_BUNDLE_MISMATCH'], r
+          assert r['bundleBytesBound'] is False
           PY
 
       - name: Verify incomplete or slow evidence cannot authorize readiness
         run: |
           set -Eeuo pipefail
           root=/tmp/backup-privacy-readiness
+          bundle="$(cat "$root/bundle-name.txt")"
+          bundle_fp="$(cat "$root/bundle-fingerprint.txt")"
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -143,8 +221,8 @@ jobs:
             --output-dir "$root/reports" \
             --key-file "$root/drill.key" \
             --drill-id drill-33333333333333333333333333333333 \
-            --bundle-name masters-backup-20260809T100000Z-11111111-1111-1111-1111-111111111111.mdbak \
-            --bundle-sha256 sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+            --bundle-name "$bundle" \
+            --bundle-sha256 "$bundle_fp" \
             --started-at 2026-08-09T10:00:00.000Z \
             --completed-at 2026-08-09T15:00:00.000Z \
             --duration-seconds 18000 \
@@ -155,7 +233,9 @@ jobs:
           PRIVACY_BACKUP_STATE=DISABLED \
             python3 infra/backup/check-backup-privacy-activation-readiness.py \
               --report "$root/reports/drill-33333333333333333333333333333333.json" \
-              --key-file "$root/drill.key" >"$root/failed-readiness.json"
+              --key-file "$root/drill.key" \
+              --expected-bundle-name "$bundle" --expected-bundle-sha256 "$bundle_fp" \
+              >"$root/failed-readiness.json"
           code=$?
           set -e
           test "$code" -ne 0
@@ -164,20 +244,29 @@ jobs:
           from pathlib import Path
           r=json.loads(Path('/tmp/backup-privacy-readiness/failed-readiness.json').read_text())
           assert r['status']=='BLOCKED'
-          assert 'DRILL_NOT_COMPLETED' in r['blockers']
-          assert 'RTO_TARGET_NOT_MET' in r['blockers']
-          assert 'DRILL_PHASE_NOT_SUCCESSFUL' in r['blockers']
+          assert r['canonicalDrillReportVerification'] is True
+          assert r['bundleBytesBound'] is True
+          assert r['blockers']==[
+              'CONTROLLED_PROMOTION_NOT_PROVEN',
+              'DRILL_NOT_COMPLETED',
+              'PRACTICAL_RESTORE_EVIDENCE_NOT_VERIFIED',
+              'RTO_TARGET_NOT_MET',
+          ], r
           PY
 
-      - name: Verify premature ENABLED state is blocked
+      - name: Verify premature ENABLED state is blocked after canonical verification
         run: |
           set -Eeuo pipefail
           root=/tmp/backup-privacy-readiness
+          bundle="$(cat "$root/bundle-name.txt")"
+          bundle_fp="$(cat "$root/bundle-fingerprint.txt")"
           set +e
           PRIVACY_BACKUP_STATE=ENABLED \
             python3 infra/backup/check-backup-privacy-activation-readiness.py \
               --report "$root/reports/drill-11111111111111111111111111111111.json" \
-              --key-file "$root/drill.key" >"$root/enabled-readiness.json"
+              --key-file "$root/drill.key" \
+              --expected-bundle-name "$bundle" --expected-bundle-sha256 "$bundle_fp" \
+              >"$root/enabled-readiness.json"
           code=$?
           set -e
           test "$code" -ne 0
@@ -187,31 +276,38 @@ jobs:
           r=json.loads(Path('/tmp/backup-privacy-readiness/enabled-readiness.json').read_text())
           assert r['status']=='BLOCKED'
           assert r['blockers']==['BACKUP_CAPABILITY_NOT_DISABLED_DURING_READINESS_REVIEW']
+          assert r['canonicalDrillReportVerification'] is True
+          assert r['bundleBytesBound'] is True
           assert r['automaticActivationPerformed'] is False
           PY
 
-      - name: Verify host wrapper and gate remain read-only
+      - name: Verify single-source verification and read-only boundary
         run: |
           bash -n infra/backup/check-club-backup-privacy-activation-readiness.sh
+          python3 -m py_compile \
+            infra/backup/check-backup-privacy-activation-readiness.py \
+            infra/backup/check-restore-rto-drill-report.py
           python3 - <<'PY'
           from pathlib import Path
-          checker=Path('infra/backup/check-backup-privacy-activation-readiness.py').read_text()
+          readiness=Path('infra/backup/check-backup-privacy-activation-readiness.py').read_text()
+          verifier=Path('infra/backup/check-restore-rto-drill-report.py').read_text()
           wrapper=Path('infra/backup/check-club-backup-privacy-activation-readiness.sh').read_text()
-          combined=checker+'\n'+wrapper
+          assert 'verify_report' in readiness
+          assert 'check-restore-rto-drill-report.py' in readiness
+          for duplicate in ('SIGNING_DOMAIN', 'hmac.new', 'EXPECTED_PHASES', 'reportFingerprint'):
+              assert duplicate not in readiness, duplicate
+          assert 'masters:restore-rto-drill-report:v1' in verifier
+          assert 'def verify_report(' in verifier
+          assert '--expected-bundle-sha256' in wrapper
+          assert 'sha256sum' in wrapper
           for token in (
               'docker compose up', 'docker compose down', 'docker compose stop',
               'docker volume create', 'docker volume rm', 'PRIVACY_BACKUP_STATE=ENABLED',
-              'sed -i', 'write_text(', 'os.environ['
+              'sed -i', 'os.replace('
           ):
-              if token == 'write_text(':
-                  assert token not in checker
-              elif token == 'os.environ[':
-                  assert token not in checker
-              else:
-                  assert token not in combined
-          assert 'PRIVACY_BACKUP_STATE' in checker
-          assert 'privacyBackupActivationAllowed' in checker
-          assert 'automaticActivationPerformed' in checker
+              assert token not in readiness + '\n' + wrapper, token
+          assert 'privacyBackupActivationAllowed' in readiness
+          assert 'automaticActivationPerformed' in readiness
           PY
 
       - name: Verify release gates remain open until a real host drill occurs
