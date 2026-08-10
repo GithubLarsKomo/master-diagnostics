@@ -6,6 +6,8 @@ on:
       - '.github/workflows/restore-rto-drill-contract.yml'
       - 'infra/backup/run-club-restore-rto-drill.sh'
       - 'infra/backup/write-restore-rto-drill-report.py'
+      - 'infra/backup/check-restore-rto-drill-report.py'
+      - 'infra/backup/check-club-restore-rto-drill-report.sh'
       - '.env.example'
       - 'docs/restore-rto-drill.md'
   push:
@@ -14,6 +16,8 @@ on:
       - '.github/workflows/restore-rto-drill-contract.yml'
       - 'infra/backup/run-club-restore-rto-drill.sh'
       - 'infra/backup/write-restore-rto-drill-report.py'
+      - 'infra/backup/check-restore-rto-drill-report.py'
+      - 'infra/backup/check-club-restore-rto-drill-report.sh'
       - '.env.example'
       - 'docs/restore-rto-drill.md'
 
@@ -26,11 +30,16 @@ jobs:
       - name: Verify drill syntax and operational ordering
         run: |
           bash -n infra/backup/run-club-restore-rto-drill.sh
-          python3 -m py_compile infra/backup/write-restore-rto-drill-report.py
+          bash -n infra/backup/check-club-restore-rto-drill-report.sh
+          python3 -m py_compile \
+            infra/backup/write-restore-rto-drill-report.py \
+            infra/backup/check-restore-rto-drill-report.py
           python3 - <<'PY'
           from pathlib import Path
           script=Path('infra/backup/run-club-restore-rto-drill.sh').read_text()
-          report=Path('infra/backup/write-restore-rto-drill-report.py').read_text()
+          writer=Path('infra/backup/write-restore-rto-drill-report.py').read_text()
+          checker=Path('infra/backup/check-restore-rto-drill-report.py').read_text()
+          host_check=Path('infra/backup/check-club-restore-rto-drill-report.sh').read_text()
           order=[
               'verify-club-backup.sh',
               'stage-club-restore.sh',
@@ -44,13 +53,20 @@ jobs:
           positions=[script.index(item) for item in order]
           assert positions == sorted(positions)
           assert 'flock -n 9' in script
-          assert 'rtoTargetSeconds": 14400' in report
-          assert '"privacyBackupActivationAllowed": False' in report
-          assert 'PRIVACY_BACKUP_STATE=ENABLED' not in script
-          assert 'PRIVACY_BACKUP_STATE=ENABLED' not in report
-          assert 'docker volume rm' not in script
-          assert 'docker volume create' not in script
-          assert 'docker cp ' not in script
+          assert 'rtoTargetSeconds": 14400' in writer
+          assert '"privacyBackupActivationAllowed": False' in writer
+          assert 'masters:restore-rto-drill-report:v1' in checker
+          assert 'RESTORE_RTO_DRILL_REPORT_VERIFIED' in checker
+          assert 'practicalRestoreEvidenceVerified' in checker
+          assert '--require-completed' in host_check
+          assert '--require-rto-met' in host_check
+          assert '--expected-bundle-sha256' in host_check
+          for text in (script, writer, checker, host_check):
+              assert 'PRIVACY_BACKUP_STATE=ENABLED' not in text
+          for forbidden in ('docker volume rm', 'docker volume create', 'docker cp '):
+              assert forbidden not in script
+          for forbidden in ('docker ', 'subprocess.', 'os.replace('):
+              assert forbidden not in checker
           PY
 
       - name: Exercise completed and rolled-back drill reports with mocked host chain
@@ -66,10 +82,13 @@ jobs:
           mkdir -p "$repo/infra/backup" "$backup" "$replay" "$reports"
           cp infra/backup/run-club-restore-rto-drill.sh "$repo/infra/backup/"
           cp infra/backup/write-restore-rto-drill-report.py "$repo/infra/backup/"
+          cp infra/backup/check-restore-rto-drill-report.py "$repo/infra/backup/"
+          cp infra/backup/check-club-restore-rto-drill-report.sh "$repo/infra/backup/"
 
           bundle=masters-backup-20260809T120000Z-11111111-2222-3333-4444-555555555555.mdbak
           printf 'encrypted-test-bundle\n' >"$backup/$bundle"
           sha256sum "$backup/$bundle" | awk -v name="$bundle" '{print $1"  "name}' >"$backup/$bundle.sha256"
+          bundle_fp="sha256:$(sha256sum "$backup/$bundle" | awk '{print $1}')"
           python3 - <<'PY'
           import base64
           from pathlib import Path
@@ -126,25 +145,48 @@ jobs:
           bash "$repo/infra/backup/run-club-restore-rto-drill.sh" "$bundle" >"$root/completed.out"
           test "$(find "$reports" -maxdepth 1 -name 'drill-*.json' | wc -l)" -eq 1
           first="$(find "$reports" -maxdepth 1 -name 'drill-*.json' | head -n1)"
-          FIRST="$first" KEY="$key" python3 - <<'PY'
-          import base64,hashlib,hmac,json,os
-          from pathlib import Path
-          path=Path(os.environ['FIRST'])
-          envelope=json.loads(path.read_text())
-          signature=envelope.pop('signature')
-          key=base64.b64decode(Path(os.environ['KEY']).read_text().strip())
-          canonical=json.dumps(envelope,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
-          expected='hmac-sha256:'+hmac.new(key,b'masters:restore-rto-drill-report:v1\n'+canonical,hashlib.sha256).hexdigest()
-          assert hmac.compare_digest(signature,expected)
-          record=envelope['record']
-          assert record['status']=='COMPLETED'
-          assert record['rtoMet'] is True
-          assert record['privacyBackupActivationAllowed'] is False
-          assert record['privacyReconciliationIncluded'] is True
-          assert record['controlledPromotionIncluded'] is True
-          assert len(record['phases'])==8
-          assert all(item['status']=='COMPLETED' for item in record['phases'])
+          first_id="$(basename "$first" .json)"
+
+          python3 "$repo/infra/backup/check-restore-rto-drill-report.py" \
+            --report "$first" --key-file "$key" \
+            --expected-bundle-name "$bundle" --expected-bundle-sha256 "$bundle_fp" \
+            --require-completed --require-rto-met >"$root/completed-check.json"
+          python3 - "$root/completed-check.json" <<'PY'
+          import json,sys
+          r=json.load(open(sys.argv[1]))
+          assert r['status']=='RESTORE_RTO_DRILL_REPORT_VERIFIED', r
+          assert r['drillStatus']=='COMPLETED'
+          assert r['rtoMet'] is True
+          assert r['practicalRestoreEvidenceVerified'] is True
+          assert r['privacyBackupActivationAllowed'] is False
           PY
+
+          (cd "$repo" && bash infra/backup/check-club-restore-rto-drill-report.sh "$first_id" "$bundle") >"$root/host-check.json"
+          grep -F '"status":"RESTORE_RTO_DRILL_REPORT_VERIFIED"' "$root/host-check.json"
+
+          mkdir -p "$root/tamper"; chmod 700 "$root/tamper"
+          tampered="$root/tamper/$(basename "$first")"
+          cp "$first" "$tampered"; chmod 600 "$tampered"
+          python3 - "$tampered" <<'PY'
+          import json,sys
+          from pathlib import Path
+          p=Path(sys.argv[1]); d=json.loads(p.read_text()); d['record']['durationSeconds']+=1; p.write_text(json.dumps(d)+'\n'); p.chmod(0o600)
+          PY
+          set +e
+          python3 "$repo/infra/backup/check-restore-rto-drill-report.py" --report "$tampered" --key-file "$key" >"$root/tamper-check.json"
+          tamper_code=$?
+          set -e
+          test "$tamper_code" -ne 0
+          grep -F 'RESTORE_RTO_DRILL_REPORT_SIGNATURE_MISMATCH' "$root/tamper-check.json"
+
+          set +e
+          python3 "$repo/infra/backup/check-restore-rto-drill-report.py" \
+            --report "$first" --key-file "$key" \
+            --expected-bundle-name "$bundle" --expected-bundle-sha256 "sha256:$(printf '0%.0s' {1..64})" >"$root/bundle-mismatch.json"
+          mismatch_code=$?
+          set -e
+          test "$mismatch_code" -ne 0
+          grep -F 'RESTORE_RTO_DRILL_BUNDLE_MISMATCH' "$root/bundle-mismatch.json"
 
           sed -i 's/MOCK_SWITCH_STATUS=COMPLETED/MOCK_SWITCH_STATUS=ROLLED_BACK/' "$repo/.env"
           set +e
@@ -154,16 +196,23 @@ jobs:
           test "$code" -ne 0
           test "$(find "$reports" -maxdepth 1 -name 'drill-*.json' | wc -l)" -eq 2
           second="$(find "$reports" -maxdepth 1 -name 'drill-*.json' ! -path "$first" | head -n1)"
-          SECOND="$second" python3 - <<'PY'
-          import json,os
-          from pathlib import Path
-          record=json.loads(Path(os.environ['SECOND']).read_text())['record']
-          assert record['status']=='ROLLED_BACK'
-          assert record['rtoMet'] is False
-          assert record['privacyBackupActivationAllowed'] is False
-          assert record['terminalPhase']=='EXECUTE_SWITCH'
-          assert record['phases'][-1]['status']=='FAILED'
+          python3 "$repo/infra/backup/check-restore-rto-drill-report.py" --report "$second" --key-file "$key" >"$root/rollback-check.json"
+          python3 - "$root/rollback-check.json" <<'PY'
+          import json,sys
+          r=json.load(open(sys.argv[1]))
+          assert r['status']=='RESTORE_RTO_DRILL_REPORT_VERIFIED', r
+          assert r['drillStatus']=='ROLLED_BACK'
+          assert r['rtoMet'] is False
+          assert r['practicalRestoreEvidenceVerified'] is False
+          assert r['privacyBackupActivationAllowed'] is False
           PY
+          set +e
+          python3 "$repo/infra/backup/check-restore-rto-drill-report.py" \
+            --report "$second" --key-file "$key" --require-completed >"$root/rollback-required.json"
+          required_code=$?
+          set -e
+          test "$required_code" -ne 0
+          grep -F 'RESTORE_RTO_DRILL_COMPLETION_REQUIRED' "$root/rollback-required.json"
 
       - name: Verify report permissions and no task/release gate auto-completion
         run: |
