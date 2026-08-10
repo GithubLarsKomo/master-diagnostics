@@ -1,0 +1,224 @@
+name: Online Update Preparation Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/online-update-preparation-contract.yml'
+      - '.github/workflows/online-update-selection-contract.yml'
+      - 'infra/update/**'
+      - 'packages/db/src/create-backup-bundle.ts'
+      - 'packages/db/src/verify-backup-bundle.ts'
+      - 'packages/db/src/services/backup-bundle.ts'
+      - 'packages/db/src/services/backup-restore-verification.ts'
+      - 'docs/online-update-preparation.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/online-update-preparation-contract.yml'
+      - '.github/workflows/online-update-selection-contract.yml'
+      - 'infra/update/**'
+      - 'packages/db/src/create-backup-bundle.ts'
+      - 'packages/db/src/verify-backup-bundle.ts'
+      - 'packages/db/src/services/backup-bundle.ts'
+      - 'packages/db/src/services/backup-restore-verification.ts'
+      - 'docs/online-update-preparation.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Prepare signed selection and release-note bytes
+        run: |
+          root=/tmp/online-update-preparation
+          rm -rf "$root"
+          mkdir -p "$root/selection" "$root/preparation" "$root/backup-source" "$root/backups"
+          for name in libsql reports tenant-exports data-subject-delivery caddy-data caddy-config; do
+            mkdir -p "$root/backup-source/$name"
+            printf '%s\n' "$name fixture" > "$root/backup-source/$name/content.txt"
+          done
+          cat > "$root/release-notes.md" <<'EOF'
+          # Master Diagnostics 1.1.0
+
+          Test release notes for the signed online-update preparation contract.
+          EOF
+          python3 - <<'PY'
+          import base64, hashlib, json
+          from pathlib import Path
+          root=Path('/tmp/online-update-preparation')
+          root.joinpath('update.key').write_text(base64.b64encode(bytes([83])*32).decode()+'\n')
+          root.joinpath('preparation.key').write_text(base64.b64encode(bytes([84])*32).decode()+'\n')
+          root.joinpath('backup.key').write_text(base64.b64encode(bytes([85])*32).decode()+'\n')
+          notes=root.joinpath('release-notes.md').read_bytes()
+          manifest=json.loads(Path('infra/update/online-update-manifest.example.json').read_text())
+          manifest['releaseNotes']['sha256']='sha256:'+hashlib.sha256(notes).hexdigest()
+          root.joinpath('manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+          PY
+          chmod 600 "$root/update.key" "$root/preparation.key" "$root/backup.key" "$root/manifest.json" "$root/release-notes.md"
+          python3 infra/update/persist-online-update-selection.py \
+            --manifest "$root/manifest.json" --current-version 1.0.0 \
+            --target-dir "$root/selection" --key-file "$root/update.key" > "$root/selection-result.json"
+
+      - name: Create and canonically verify a fresh encrypted pre-update backup
+        run: |
+          root=/tmp/online-update-preparation
+          sleep 0.05
+          env \
+            BACKUP_SOURCE_DIR="$root/backup-source" \
+            BACKUP_TARGET_DIR="$root/backups" \
+            BACKUP_KEY_FILE="$root/backup.key" \
+            BACKUP_RETENTION_COUNT=30 \
+            pnpm --silent --filter @masters/db backup:bundle > "$root/backup-created.json"
+          bundle_name="$(python3 -c 'import json; print(json.load(open("/tmp/online-update-preparation/backup-created.json"))["fileName"])')"
+          env \
+            BACKUP_BUNDLE_FILE="$root/backups/$bundle_name" \
+            BACKUP_CHECKSUM_FILE="$root/backups/$bundle_name.sha256" \
+            BACKUP_KEY_FILE="$root/backup.key" \
+            pnpm --silent --filter @masters/db backup:verify > "$root/backup-verified.json"
+          python3 - <<'PY'
+          import json
+          from datetime import datetime
+          from pathlib import Path
+          root=Path('/tmp/online-update-preparation')
+          selection=json.loads(root.joinpath('selection/online-update-selection.json').read_text())['record']
+          created=json.loads(root.joinpath('backup-created.json').read_text())
+          verified=json.loads(root.joinpath('backup-verified.json').read_text())
+          assert created['ok'] is True and verified['ok'] is True
+          assert created['fileName']==verified['fileName']
+          assert created['sha256']==verified['sha256']
+          selected=datetime.fromisoformat(selection['selectedAt'].replace('Z','+00:00'))
+          backed=datetime.fromisoformat(verified['createdAt'].replace('Z','+00:00'))
+          assert backed > selected
+          PY
+
+      - name: Persist and idempotently reuse signed preparation evidence
+        run: |
+          root=/tmp/online-update-preparation
+          bundle_name="$(python3 -c 'import json; print(json.load(open("/tmp/online-update-preparation/backup-verified.json"))["fileName"])')"
+          common=(
+            --selection "$root/selection/online-update-selection.json"
+            --selection-key "$root/update.key"
+            --release-notes "$root/release-notes.md"
+            --backup-bundle "$root/backups/$bundle_name"
+            --backup-verification "$root/backup-verified.json"
+            --target-dir "$root/preparation"
+            --key-file "$root/preparation.key"
+          )
+          python3 infra/update/persist-online-update-preparation.py "${common[@]}" > "$root/first.json"
+          python3 infra/update/persist-online-update-preparation.py "${common[@]}" > "$root/second.json"
+          python3 - <<'PY'
+          import json, re
+          from pathlib import Path
+          root=Path('/tmp/online-update-preparation')
+          first=json.loads(root.joinpath('first.json').read_text())
+          second=json.loads(root.joinpath('second.json').read_text())
+          assert first['mode']=='CLUB_ONLINE_UPDATE_PREPARATION_V1'
+          assert first['status']=='READY_FOR_IMMUTABLE_IMAGE_RESOLUTION'
+          assert first['preparationCreated'] is True and first['preparationReused'] is False
+          assert second['preparationCreated'] is False and second['preparationReused'] is True
+          assert first['releaseNotesSha256']==second['releaseNotesSha256']
+          assert first['backupSha256']==second['backupSha256']
+          assert first['backupCreatedAfterSelection'] is True and first['backupVerified'] is True
+          assert first['imagePullAllowed'] is False
+          assert first['migrationAllowed'] is False
+          assert first['productionMutationAllowed'] is False
+          assert first['updateExecuted'] is False
+          evidence=root/'preparation'/'online-update-preparation.json'
+          assert oct(evidence.stat().st_mode & 0o777)=='0o600'
+          assert oct(evidence.parent.stat().st_mode & 0o777)=='0o700'
+          env=json.loads(evidence.read_text())
+          assert re.fullmatch(r'hmac-sha256:[0-9a-f]{64}', env['signature'])
+          assert env['record']['releaseNotes']['verified'] is True
+          assert env['record']['preUpdateBackup']['verified'] is True
+          assert env['record']['preUpdateBackup']['createdAfterSelection'] is True
+          PY
+
+      - name: Reject changed release-note bytes and changed backup bytes
+        run: |
+          root=/tmp/online-update-preparation
+          bundle_name="$(python3 -c 'import json; print(json.load(open("/tmp/online-update-preparation/backup-verified.json"))["fileName"])')"
+          cp "$root/release-notes.md" "$root/release-notes-tampered.md"
+          printf '\ntampered\n' >> "$root/release-notes-tampered.md"
+          set +e
+          python3 infra/update/persist-online-update-preparation.py \
+            --selection "$root/selection/online-update-selection.json" --selection-key "$root/update.key" \
+            --release-notes "$root/release-notes-tampered.md" \
+            --backup-bundle "$root/backups/$bundle_name" --backup-verification "$root/backup-verified.json" \
+            --target-dir "$root/other-prep" --key-file "$root/preparation.key" >/tmp/notes.out 2>/tmp/notes.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'Release-notes bytes do not match' /tmp/notes.err
+
+          cp "$root/backups/$bundle_name" "$root/tampered.mdbak"
+          printf 'x' >> "$root/tampered.mdbak"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('/tmp/online-update-preparation')
+          v=json.loads(root.joinpath('backup-verified.json').read_text())
+          v['fileName']='tampered.mdbak'
+          root.joinpath('tampered-verify.json').write_text(json.dumps(v)+'\n')
+          PY
+          set +e
+          python3 infra/update/persist-online-update-preparation.py \
+            --selection "$root/selection/online-update-selection.json" --selection-key "$root/update.key" \
+            --release-notes "$root/release-notes.md" \
+            --backup-bundle "$root/tampered.mdbak" --backup-verification "$root/tampered-verify.json" \
+            --target-dir "$root/other-prep" --key-file "$root/preparation.key" >/tmp/bundle.out 2>/tmp/bundle.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+
+      - name: Reject backup verification timestamp not strictly after selection
+        run: |
+          root=/tmp/online-update-preparation
+          bundle_name="$(python3 -c 'import json; print(json.load(open("/tmp/online-update-preparation/backup-verified.json"))["fileName"])')"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('/tmp/online-update-preparation')
+          selection=json.loads(root.joinpath('selection/online-update-selection.json').read_text())['record']
+          v=json.loads(root.joinpath('backup-verified.json').read_text())
+          v['createdAt']=selection['selectedAt']
+          root.joinpath('stale-verify.json').write_text(json.dumps(v)+'\n')
+          PY
+          set +e
+          python3 infra/update/persist-online-update-preparation.py \
+            --selection "$root/selection/online-update-selection.json" --selection-key "$root/update.key" \
+            --release-notes "$root/release-notes.md" \
+            --backup-bundle "$root/backups/$bundle_name" --backup-verification "$root/stale-verify.json" \
+            --target-dir "$root/stale-prep" --key-file "$root/preparation.key" >/tmp/stale.out 2>/tmp/stale.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'strictly after selectedAt' /tmp/stale.err
+
+      - name: Verify preparation writer cannot pull images or mutate production
+        run: |
+          python3 -m py_compile \
+            infra/update/preflight-online-update.py \
+            infra/update/persist-online-update-selection.py \
+            infra/update/persist-online-update-preparation.py
+          python3 - <<'PY'
+          from pathlib import Path
+          script=Path('infra/update/persist-online-update-preparation.py').read_text()
+          for token in ('subprocess', 'docker pull', 'docker compose', 'requests.', 'urllib.request', 'os.system'):
+              assert token not in script, token
+          assert 'imagePullAllowed": False' in script
+          assert 'migrationAllowed": False' in script
+          assert 'productionMutationAllowed": False' in script
+          assert 'updateExecuted": False' in script
+          PY
