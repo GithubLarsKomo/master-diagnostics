@@ -164,7 +164,7 @@ services:
       - ${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-restore-unset}/libsql:/var/lib/sqld
     networks: [restore-internal]
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health"]
+      test: ["CMD-SHELL", "while read -r _ local _ state _; do case \"$${local}:$${state}\" in *:1F90:0A) exit 0;; esac; done < /proc/net/tcp; exit 1"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -298,7 +298,7 @@ services:
       - ${RESTORE_PRIVACY_LEDGER_KEY_FILE:-/etc/master-diagnostics/restore-privacy-ledger.key}:/run/secrets/restore-privacy-ledger.key:ro
       - ${RESTORE_PRIVACY_EFFECT_JOURNAL_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-effect-journal}:/privacy-effect-journal:ro
       - ${RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE:-/etc/master-diagnostics/restore-privacy-effect-journal.key}:/run/secrets/restore-privacy-effect-journal.key:ro
-      - ${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-restore-unset}:/restore-replay
+      - ${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-/var/lib/master-diagnostics/restore-privacy-replay}/${RESTORE_STAGING_NAME:-restore-unset}:/restore-replay
     depends_on:
       backup-privacy-artifact-replay:
         condition: service_completed_successfully
@@ -380,7 +380,7 @@ services:
       - libsql-data:/var/lib/sqld
     networks: [internal]
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health"]
+      test: ["CMD-SHELL", "while read -r _ local _ state _; do case \"$${local}:$${state}\" in *:1F90:0A) exit 0;; esac; done < /proc/net/tcp; exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
