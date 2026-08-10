@@ -2,9 +2,9 @@
 
 ## Zweck
 
-Diese Stufe liegt zwischen dem read-only Readiness-Gate aus #221 und einer späteren tatsächlichen Runtime-Aktivierung der Backup-Privacy-Capability.
+Diese Stufe liegt zwischen dem read-only Readiness-Gate und einer späteren tatsächlichen Runtime-Aktivierung der Backup-Privacy-Capability.
 
-Sie erzeugt eine **signierte, unveränderliche manuelle Betriebsfreigabe**, ändert aber noch keine `.env`, startet keine Container neu und setzt `PRIVACY_BACKUP_STATE` nicht auf `ENABLED`.
+Sie erzeugt eine **signierte, unveränderliche manuelle Betriebsfreigabe**, ändert aber noch keine Runtime-Konfiguration, startet keine Container neu und setzt `PRIVACY_BACKUP_STATE` nicht auf `ENABLED`.
 
 Bis zum späteren Aktivierungs-Slice bleibt daher weiterhin:
 
@@ -16,12 +16,14 @@ PRIVACY_BACKUP_STATE=DISABLED
 
 Eine Attestation darf auf der vorgesehenen Club-Installation nur erzeugt werden, wenn:
 
-1. ein echter Host-Restore-/RTO-Drill gemäß #220 erfolgreich abgeschlossen wurde,
-2. dessen signierter Report durch #221 erneut `READY_FOR_MANUAL_ATTESTATION` ergibt,
-3. der reale Runtime-Zustand weiterhin `PRIVACY_BACKUP_STATE=DISABLED` ist,
-4. ein Operator seine Betriebsverantwortung ausdrücklich bestätigt.
+1. ein echter Host-Restore-/RTO-Drill erfolgreich abgeschlossen wurde,
+2. dessen signierter Report durch den **kanonischen unabhängigen RTO-Verifier** geprüft wurde,
+3. der Report noch an die tatsächlich vorhandenen Backup-Bytes gebunden ist,
+4. der Readiness-Checker `READY_FOR_MANUAL_ATTESTATION` ergibt,
+5. der reale Runtime-Zustand weiterhin `PRIVACY_BACKUP_STATE=DISABLED` ist,
+6. ein Operator seine Betriebsverantwortung ausdrücklich bestätigt.
 
-Der Writer erzwingt Punkt 3, indem er die reale Prozessumgebung an den #221-Checker weiterreicht. Er setzt `PRIVACY_BACKUP_STATE` niemals selbst auf `DISABLED`.
+Der Writer erzwingt die Byte-Bindung selbst: Er erhält das konkrete `.mdbak`, berechnet dessen SHA-256 erneut und übergibt Bundle-Name und Fingerprint an den Readiness-Checker. Er übernimmt **keinen** Bundle-Hash blind aus dem Drill-Report.
 
 ## Signaturdomäne
 
@@ -39,8 +41,10 @@ Der Schlüssel soll getrennt vom RTO-Drill-Key verwaltet werden.
 PRIVACY_BACKUP_STATE=DISABLED \
 python3 infra/backup/write-backup-privacy-manual-attestation.py \
   --readiness-checker "$PWD/infra/backup/check-backup-privacy-activation-readiness.py" \
+  --report-verifier "$PWD/infra/backup/check-restore-rto-drill-report.py" \
   --drill-report /var/lib/master-diagnostics/restore-rto-drills/drill-<32-hex>.json \
-  --drill-key-file /etc/master-diagnostics/restore-rto-drill.key \
+  --drill-key-file /etc/master-diagnostics/restore-rto-drill-report.key \
+  --backup-bundle /var/backups/master-diagnostics/masters-backup-<timestamp>-<uuid>.mdbak \
   --attestation-key-file /etc/master-diagnostics/backup-privacy-manual-attestation.key \
   --output-dir /var/lib/master-diagnostics/backup-privacy-attestations \
   --attestation-id attestation-<32-hex> \
@@ -51,23 +55,27 @@ python3 infra/backup/write-backup-privacy-manual-attestation.py \
 
 `--acknowledge-operational-responsibility` ist absichtlich zwingend. Ohne diesen expliziten Schalter wird keine Attestation erzeugt.
 
-Der Writer führt den #221-Readiness-Checker erneut aus und akzeptiert ausschließlich:
+Vor dem Schreiben der Attestation führt der Writer den Readiness-Checker erneut aus und verlangt gleichzeitig:
 
 ```text
 READY_FOR_MANUAL_ATTESTATION
+canonicalDrillReportVerification=true
+bundleBytesBound=true
+practicalRestoreEvidenceVerified=true
+currentPrivacyBackupState=DISABLED
 ```
 
-mit exakt der Policy-v1-Zielkonfiguration.
+Der Writer setzt `PRIVACY_BACKUP_STATE` niemals selbst auf `DISABLED` und verändert das Backup-Bundle nicht.
 
 ## Gebundene Evidence
 
-Der signierte Record bindet mindestens:
+Der signierte Record bindet weiterhin das stabile Attestation-v1-Schema:
 
 - `attestationId`,
 - technische `attestorId`,
 - `attestedAt`,
 - `drillId`,
-- HMAC-verifizierten `drillReportFingerprint`,
+- kanonisch verifizierten `drillReportFingerprint`,
 - `readinessVersion=1`,
 - `readinessStatus=READY_FOR_MANUAL_ATTESTATION`,
 - erfolgreiches RTO-Ziel,
@@ -75,6 +83,8 @@ Der signierte Record bindet mindestens:
 - kontrollierte Promotion,
 - explizite Betriebsverantwortungsbestätigung,
 - die vollständige Backup-Privacy-Policy-v1-Zielkonfiguration.
+
+Die konkrete Bundle-Bindung steckt bereits kryptografisch im `drillReportFingerprint`; zusätzlich wird beim **Erzeugen** der Attestation nachgewiesen, dass die aktuellen Bundle-Bytes noch exakt zu diesem Report gehören. So bleibt das Attestation-v1-Format kompatibel, während die Eingangsprüfung strenger wird.
 
 Die Zielkonfiguration lautet:
 
@@ -92,10 +102,12 @@ Diese Werte sind **nur Zielzustand innerhalb der Attestation**. Der Writer schre
 
 - Attestation-Verzeichnis: `0700`
 - Attestation-Datei: `0600`
-- keine Symlink-Datei als Schlüssel
+- keine Symlink-Datei als Schlüssel oder Backup-Bundle
 - kanonischer Dateiname `attestation-<32-hex>.json`
 - bestehende identische Attestation wird idempotent wiederverwendet
 - derselbe Attestation-Identifier mit abweichendem Inhalt blockiert fail-closed
+
+Ein fehlendes, ersetztes oder unter anderem Namen übergebenes Backup-Bundle kann die Readiness nicht passieren.
 
 ## Verifier
 
@@ -131,7 +143,9 @@ Damit ist die Bedeutung eindeutig: Die manuelle Freigabe ist kryptografisch vorh
 Keine Attestation entsteht, wenn unter anderem:
 
 - der Drill-Report oder dessen HMAC ungültig ist,
-- #221 nicht `READY_FOR_MANUAL_ATTESTATION` ergibt,
+- Report und aktuelles Backup-Bundle nicht denselben Namen/Fingerprint binden,
+- die praktische Restore-Evidence nicht kanonisch verifiziert ist,
+- Readiness nicht `READY_FOR_MANUAL_ATTESTATION` ergibt,
 - der reale Backup-Capability-Zustand bereits `ENABLED` ist,
 - die Policy-Zielkonfiguration abweicht,
 - das Operator-Acknowledgement fehlt,
@@ -141,14 +155,12 @@ Der Verifier blockiert jede Inhalts-, Fingerprint- oder HMAC-Manipulation.
 
 ## CI-Grenze
 
-Der `Backup Privacy Manual Attestation Contract` erzeugt synthetische, aber echt HMAC-signierte Drill-Evidence und prüft die Werkzeugkette. Das ist **keine reale Betriebsfreigabe** und ersetzt weder den Host-Drill noch die spätere Operator-Attestation.
+Der `Backup Privacy Manual Attestation Contract` erzeugt synthetische, aber echt HMAC-signierte Drill-Evidence **und echte Test-Bundle-Bytes**. Er prüft, dass der Writer die Bundle-Datei selbst hasht und eine veränderte Datei nicht zur Attestation führen kann.
 
-Der Contract bestätigt außerdem, dass:
+Die nachgelagerten Activation-Plan-, Execution-Evidence- und Executor-Contracts verwenden dieselbe byte-gebundene Fixture-Kette. Dadurch bleibt die stärkere Readiness-Grenze über alle späteren Artefakte erhalten.
 
-- die Werkzeuge keine Docker-/Compose-Mutation enthalten,
-- `.env.example` weiterhin `PRIVACY_BACKUP_STATE=DISABLED` trägt,
-- die praktischen Restore-/RTO-Tasks und Release-Gates offen bleiben.
+Das ist weiterhin **keine reale Betriebsfreigabe** und ersetzt weder den Host-Drill noch die spätere Operator-Attestation.
 
-## Nächster Slice
+## Nächster Schritt
 
-Erst ein separater Aktivierungs-Slice darf eine **verifizierte reale** Manual-Attestation konsumieren, die Zielwerte atomar in die Runtime-Konfiguration übernehmen, die Runtime-Attestation erneut prüfen und bei jeder Abweichung fail-closed abbrechen oder zurückrollen.
+Erst nach einem realen `COMPLETED`-Drill auf der Zielinstallation, unabhängiger Report-Verifikation gegen das vorhandene `.mdbak`, grünem Readiness-Check und bewusster Operator-Attestation darf die vorhandene bounded Activation-/Service-Cutover-Kette für die reale Capability-Aktivierung verwendet werden.
