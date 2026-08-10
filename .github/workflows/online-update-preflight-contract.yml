@@ -1,0 +1,124 @@
+name: Online Update Preflight Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/online-update-preflight-contract.yml'
+      - 'infra/update/**'
+      - 'docs/online-update-preflight.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/online-update-preflight-contract.yml'
+      - 'infra/update/**'
+      - 'docs/online-update-preflight.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify positive preflight is deterministic and non-mutating
+        run: |
+          manifest="$PWD/infra/update/online-update-manifest.example.json"
+          python3 infra/update/preflight-online-update.py --manifest "$manifest" --current-version 1.0.0 > /tmp/preflight-1.json
+          python3 infra/update/preflight-online-update.py --manifest "$manifest" --current-version 1.0.0 > /tmp/preflight-2.json
+          diff -u /tmp/preflight-1.json /tmp/preflight-2.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result=json.loads(Path('/tmp/preflight-1.json').read_text())
+          assert result['mode']=='CLUB_ONLINE_UPDATE_PREFLIGHT_V1'
+          assert result['status']=='READY_FOR_VERIFIED_BACKUP'
+          assert result['currentVersion']=='1.0.0'
+          assert result['targetVersion']=='1.1.0'
+          assert result['manifestFingerprint'].startswith('sha256:')
+          assert result['operatorSelectionRequired'] is True
+          assert result['verifiedBackupRequiredBeforeMutation'] is True
+          assert result['imagePullAllowed'] is False
+          assert result['migrationAllowed'] is False
+          assert result['productionMutationAllowed'] is False
+          assert result['autoUpdateAllowed'] is False
+          assert result['updateExecuted'] is False
+          assert [i['role'] for i in result['images']] == ['APP','MIGRATOR']
+          assert all('@sha256:' in i['reference'] for i in result['images'])
+          PY
+
+      - name: Reject tags, automatic updates, downgrades and prereleases
+        run: |
+          root=/tmp/online-update-preflight-negative
+          rm -rf "$root"
+          mkdir -p "$root"
+          cp infra/update/online-update-manifest.example.json "$root/base.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('/tmp/online-update-preflight-negative')
+          base=json.loads(root.joinpath('base.json').read_text())
+          cases={}
+          tag=json.loads(json.dumps(base)); tag['images'][0]['reference']='ghcr.io/githublarskomo/master-diagnostics-app:1.1.0'; cases['tag']=tag
+          auto=json.loads(json.dumps(base)); auto['autoUpdate']=True; cases['auto']=auto
+          pre=json.loads(json.dumps(base)); pre['releaseVersion']='1.1.0-rc.1'; cases['prerelease']=pre
+          unknown=json.loads(json.dumps(base)); unknown['unexpected']=True; cases['unknown']=unknown
+          for name,value in cases.items():
+              root.joinpath(f'{name}.json').write_text(json.dumps(value)+'\n')
+          PY
+          assert_rejected() {
+            local file="$1" current="$2" pattern="$3"
+            set +e
+            python3 infra/update/preflight-online-update.py --manifest "$file" --current-version "$current" >/tmp/preflight.out 2>/tmp/preflight.err
+            code=$?
+            set -e
+            test "$code" -ne 0
+            grep -q "$pattern" /tmp/preflight.err
+          }
+          assert_rejected "$root/tag.json" 1.0.0 'immutable registry digest reference'
+          assert_rejected "$root/auto.json" 1.0.0 'automatic online updates are forbidden'
+          assert_rejected "$root/base.json" 2.0.0 'version downgrade'
+          assert_rejected "$root/prerelease.json" 1.0.0 'refuses prerelease targets'
+          assert_rejected "$root/unknown.json" 1.0.0 'fields do not exactly match'
+
+      - name: Reject unsafe manifest and release-note paths
+        run: |
+          root=/tmp/online-update-preflight-paths
+          rm -rf "$root"
+          mkdir -p "$root"
+          cp infra/update/online-update-manifest.example.json "$root/manifest.json"
+          ln -s "$root/manifest.json" "$root/link.json"
+          set +e
+          python3 infra/update/preflight-online-update.py --manifest "$root/link.json" --current-version 1.0.0 >/tmp/path.out 2>/tmp/path.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'regular non-symlink file' /tmp/path.err
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/online-update-preflight-paths/manifest.json')
+          data=json.loads(p.read_text())
+          data['releaseNotes']['url']='http://example.invalid/release'
+          p.write_text(json.dumps(data)+'\n')
+          PY
+          set +e
+          python3 infra/update/preflight-online-update.py --manifest "$root/manifest.json" --current-version 1.0.0 >/tmp/url.out 2>/tmp/url.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'absolute HTTPS URL' /tmp/url.err
+
+      - name: Verify preflight implementation has no update side effects
+        run: |
+          python3 -m py_compile infra/update/preflight-online-update.py
+          python3 - <<'PY'
+          from pathlib import Path
+          script=Path('infra/update/preflight-online-update.py').read_text()
+          active='\n'.join(line for line in script.splitlines() if not line.lstrip().startswith('#'))
+          forbidden=(
+              'subprocess', 'os.system', 'docker pull', 'docker compose',
+              'create-club-backup', 'verify-club-backup', 'unlink(', 'remove(',
+              'write_text(', 'write_bytes(', 'open(',
+          )
+          for token in forbidden:
+              assert token not in active, token
+          PY
