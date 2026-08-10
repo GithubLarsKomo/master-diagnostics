@@ -1,0 +1,148 @@
+name: Online Update Execution Journal Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/online-update-execution-journal-contract.yml'
+      - 'infra/update/**'
+      - 'docs/online-update-execution-journal.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/online-update-execution-journal-contract.yml'
+      - 'infra/update/**'
+      - 'docs/online-update-execution-journal.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare authentic signed execution plan
+        run: |
+          root=/tmp/online-update-journal
+          rm -rf "$root"
+          mkdir -p "$root/plan" "$root/journal"
+          python3 - <<'PY'
+          import base64, importlib.util, json
+          from pathlib import Path
+          root=Path('/tmp/online-update-journal')
+          for name, byte in [('plan.key',91),('journal.key',92)]:
+              root.joinpath(name).write_text(base64.b64encode(bytes([byte])*32).decode()+'\n')
+          spec=importlib.util.spec_from_file_location('plan',Path('infra/update/persist-online-update-execution-plan.py'))
+          plan=importlib.util.module_from_spec(spec); spec.loader.exec_module(plan)
+          app='ghcr.io/githublarskomo/master-diagnostics-app@sha256:'+'2'*64
+          migrator='ghcr.io/githublarskomo/master-diagnostics-migrator@sha256:'+'3'*64
+          record=plan.validate_record({
+              'planVersion':1,'phase':'PLANNED','preparationSignature':'hmac-sha256:'+'4'*64,
+              'imageResolutionSignature':'hmac-sha256:'+'5'*64,'manifestFingerprint':'sha256:'+'6'*64,
+              'currentVersion':'1.0.0','targetVersion':'1.1.0',
+              'images':[{'role':'APP','reference':app,'resolvedDigest':'sha256:'+'2'*64},{'role':'MIGRATOR','reference':migrator,'resolvedDigest':'sha256:'+'3'*64}],
+              'preUpdateBackup':{'fileName':'masters-backup-20260810T080001000Z-12345678-1234-1234-1234-123456789abc.mdbak','sha256':'sha256:'+'7'*64,'createdAt':'2026-08-10T08:00:01.000Z','verified':True,'rollbackAnchor':True},
+              'executionOrder':['ACQUIRE_EXACT_IMAGES','STOP_APPLICATION_WRITERS','RUN_CONTROLLED_MIGRATIONS','START_APPLICATION','VERIFY_APPLICATION_HEALTH','COMPLETE_UPDATE'],
+              'migrationPolicy':'CONTROLLED_MIGRATIONS_BEFORE_APP_START','rollbackPolicy':'RESTORE_VERIFIED_PREUPDATE_BACKUP','rollbackTriggerPolicy':'ANY_POST_STOP_FAILURE_BEFORE_COMPLETION',
+              'healthPolicy':{'appHealthRequired':True,'databaseHealthRequired':True,'backgroundServicesRequired':True,'versionMustEqualTarget':True},
+              'executionJournalRequiredBeforeMutation':True,'rollbackReceiptRequiredAfterRollback':True,'completionReceiptRequiredAfterHealthcheck':True,
+              'imagePullAllowed':False,'migrationAllowed':False,'productionMutationAllowed':False,'updateExecuted':False,
+          })
+          key=base64.b64decode(root.joinpath('plan.key').read_text().strip())
+          envelope={'envelopeVersion':1,'record':record,'signature':plan.sign_record(key,record)}
+          root.joinpath('plan/online-update-execution-plan.json').write_text(json.dumps(envelope,indent=2)+'\n')
+          PY
+          chmod 600 "$root"/*.key "$root/plan/online-update-execution-plan.json"
+
+      - name: Persist and idempotently reuse pre-mutation journal
+        run: |
+          root=/tmp/online-update-journal
+          common=(
+            --plan "$root/plan/online-update-execution-plan.json"
+            --plan-key "$root/plan.key"
+            --target-dir "$root/journal"
+            --key-file "$root/journal.key"
+            --started-at '2026-08-10T08:30:00.000Z'
+          )
+          python3 infra/update/persist-online-update-execution-journal.py "${common[@]}" > "$root/first.json"
+          python3 infra/update/persist-online-update-execution-journal.py "${common[@]}" > "$root/second.json"
+          python3 - <<'PY'
+          import json,re
+          from pathlib import Path
+          root=Path('/tmp/online-update-journal')
+          first=json.loads(root.joinpath('first.json').read_text()); second=json.loads(root.joinpath('second.json').read_text())
+          assert first['mode']=='CLUB_ONLINE_UPDATE_EXECUTION_JOURNAL_V1'
+          assert first['status']=='PENDING_BEFORE_IMAGE_ACQUISITION_AND_MUTATION'
+          assert first['journalCreated'] is True and first['journalReused'] is False
+          assert second['journalCreated'] is False and second['journalReused'] is True
+          assert first['journalSignature']==second['journalSignature']
+          assert re.fullmatch(r'hmac-sha256:[0-9a-f]{64}',first['journalSignature'])
+          assert first['nextStep']=='ACQUIRE_EXACT_IMAGES'
+          assert first['imagePullAllowed'] is False and first['migrationAllowed'] is False
+          assert first['productionMutationAllowed'] is False and first['updateExecuted'] is False
+          path=root/'journal'/'online-update-execution-journal.json'; env=json.loads(path.read_text()); record=env['record']
+          assert record['phase']=='PENDING' and record['mutationState']=='NOT_STARTED'
+          assert record['completedSteps']==[]
+          assert record['imageAcquisitionStarted'] is False and record['productionMutationStarted'] is False
+          assert record['migrationStarted'] is False and record['rollbackStarted'] is False and record['completionRecorded'] is False
+          assert record['rollbackAnchor']['sha256']=='sha256:'+'7'*64
+          assert oct(path.stat().st_mode & 0o777)=='0o600'
+          assert oct(path.parent.stat().st_mode & 0o777)=='0o700'
+          PY
+
+      - name: Reject start-time drift, plan byte drift, and HMAC tampering
+        run: |
+          root=/tmp/online-update-journal
+          set +e
+          python3 infra/update/persist-online-update-execution-journal.py \
+            --plan "$root/plan/online-update-execution-plan.json" --plan-key "$root/plan.key" \
+            --target-dir "$root/journal" --key-file "$root/journal.key" --started-at '2026-08-10T08:31:00.000Z' \
+            >/tmp/time-drift.out 2>/tmp/time-drift.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'does not match the requested execution start' /tmp/time-drift.err
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/online-update-journal/plan/online-update-execution-plan.json')
+          d=json.loads(p.read_text()); p.write_text(json.dumps(d,separators=(',',':'))+'\n')
+          PY
+          set +e
+          python3 infra/update/persist-online-update-execution-journal.py \
+            --plan "$root/plan/online-update-execution-plan.json" --plan-key "$root/plan.key" \
+            --target-dir "$root/journal" --key-file "$root/journal.key" --started-at '2026-08-10T08:30:00.000Z' \
+            >/tmp/byte-drift.out 2>/tmp/byte-drift.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'does not match the requested execution start' /tmp/byte-drift.err
+
+          cp "$root/journal/online-update-execution-journal.json" "$root/tampered-journal.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/online-update-journal/tampered-journal.json'); d=json.loads(p.read_text()); d['record']['targetVersion']='9.9.9'; p.write_text(json.dumps(d)+'\n')
+          PY
+          python3 - <<'PY'
+          import base64,importlib.util,json
+          from pathlib import Path
+          spec=importlib.util.spec_from_file_location('j',Path('infra/update/persist-online-update-execution-journal.py')); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          key=base64.b64decode(Path('/tmp/online-update-journal/journal.key').read_text().strip()); value=json.loads(Path('/tmp/online-update-journal/tampered-journal.json').read_text())
+          try: m.verify_envelope(value,key)
+          except Exception: pass
+          else: raise AssertionError('tampered journal unexpectedly verified')
+          PY
+
+      - name: Verify journal writer is strictly pre-mutation
+        run: |
+          python3 -m py_compile infra/update/persist-online-update-execution-journal.py
+          python3 - <<'PY'
+          from pathlib import Path
+          script=Path('infra/update/persist-online-update-execution-journal.py').read_text()
+          for token in ('subprocess','docker pull','docker compose','docker manifest','requests.','urllib.request','migrationAllowed": True','productionMutationAllowed": True','updateExecuted": True'):
+              assert token not in script, token
+          assert 'mutationState": "NOT_STARTED"' in script
+          assert 'imageAcquisitionStarted": False' in script
+          assert 'productionMutationStarted": False' in script
+          assert 'executionPlanEnvelopeSha256' in script
+          PY
