@@ -25,9 +25,9 @@ Eine Attestation darf auf der vorgesehenen Club-Installation nur erzeugt werden,
 
 Der Writer erzwingt die Byte-Bindung selbst: Er erhält das konkrete `.mdbak`, berechnet dessen SHA-256 erneut und übergibt Bundle-Name und Fingerprint an den Readiness-Checker. Er übernimmt **keinen** Bundle-Hash blind aus dem Drill-Report.
 
-## Signaturdomäne
+## Host-Konfiguration
 
-Die Attestation verwendet einen separaten 32-Byte-HMAC-Schlüssel und die Domain:
+Die Manual-Attestation verwendet einen separaten 32-Byte-HMAC-Schlüssel und die Domain:
 
 ```text
 masters:backup-privacy-manual-attestation:v1
@@ -35,7 +35,61 @@ masters:backup-privacy-manual-attestation:v1
 
 Der Schlüssel soll getrennt vom RTO-Drill-Key verwaltet werden.
 
-## Writer
+Einmalig auf dem Host:
+
+```bash
+openssl rand -base64 32 | sudo tee /etc/master-diagnostics/backup-privacy-manual-attestation.key >/dev/null
+sudo chmod 600 /etc/master-diagnostics/backup-privacy-manual-attestation.key
+sudo install -d -m 700 /var/lib/master-diagnostics/backup-privacy-attestations
+```
+
+Die Club-Konfiguration enthält dazu:
+
+```dotenv
+BACKUP_PRIVACY_MANUAL_ATTESTATION_HOST_DIR=/var/lib/master-diagnostics/backup-privacy-attestations
+BACKUP_PRIVACY_MANUAL_ATTESTATION_KEY_FILE=/etc/master-diagnostics/backup-privacy-manual-attestation.key
+```
+
+## Empfohlener Host-Befehl
+
+Nach realem `COMPLETED`-Drill und erfolgreicher unabhängiger Drill-Report-Verifikation ist der kanonische Operator-Einstieg:
+
+```bash
+bash infra/backup/attest-club-backup-privacy-activation.sh \
+  drill-<32-hex> \
+  masters-backup-<timestamp>-<uuid>.mdbak \
+  <technische-operator-id> \
+  --acknowledge-operational-responsibility
+```
+
+Der Wrapper nimmt absichtlich **keine** frei wählbaren Dateipfade, Fingerprints, Attestation-ID oder Zeitstempel entgegen. Er:
+
+1. lädt die reale Club-Konfiguration aus `.env`,
+2. verlangt weiterhin `PRIVACY_BACKUP_STATE=DISABLED`,
+3. löst Drill-Report und Backup-Bundle nur innerhalb der konfigurierten Host-Roots auf,
+4. verwendet den konfigurierten Drill- und Attestation-Key,
+5. erzeugt kryptografisch zufällig `attestation-<32 hex>`,
+6. erzeugt den kanonischen UTC-Zeitstempel selbst,
+7. ruft den byte-bindenden Writer mit explizitem Operator-Acknowledgement auf,
+8. verifiziert die persistierte Attestation anschließend in einem **separaten Prozess** erneut,
+9. gibt nur bei Erfolg `MANUAL_ATTESTATION_VERIFIED` aus.
+
+Er verändert weder `.env` noch das Backup-Bundle noch Docker-/Compose-State.
+
+Eine erfolgreiche Ausgabe enthält unter anderem:
+
+```text
+status=MANUAL_ATTESTATION_VERIFIED
+privacyBackupActivationAllowed=true
+runtimeConfigurationChanged=false
+automaticActivationPerformed=false
+```
+
+`privacyBackupActivationAllowed=true` bedeutet hier ausschließlich, dass eine gültige manuelle Freigabe für den **späteren separaten** Activation-Plan vorliegt. Der Wrapper selbst aktiviert nichts.
+
+## Direkter Writer für Diagnose/Entwicklung
+
+Der Python-Writer bleibt als niedrigerer Baustein verfügbar:
 
 ```bash
 PRIVACY_BACKUP_STATE=DISABLED \
@@ -52,6 +106,8 @@ python3 infra/backup/write-backup-privacy-manual-attestation.py \
   --attested-at 2026-08-09T12:00:00.000Z \
   --acknowledge-operational-responsibility
 ```
+
+Für den realen Club-Betrieb ist der Host-Wrapper vorzuziehen, weil er Pfad-, ID-, Zeit- und Key-Parameter aus der Operator-Eingabe entfernt.
 
 `--acknowledge-operational-responsibility` ist absichtlich zwingend. Ohne diesen expliziten Schalter wird keine Attestation erzeugt.
 
@@ -96,7 +152,7 @@ PRIVACY_BACKUP_BOUNDED_RETENTION_CONFIGURED=true
 PRIVACY_BACKUP_RESTORE_RECONCILIATION=true
 ```
 
-Diese Werte sind **nur Zielzustand innerhalb der Attestation**. Der Writer schreibt sie nicht in die Laufzeitkonfiguration.
+Diese Werte sind **nur Zielzustand innerhalb der Attestation**. Writer und Host-Wrapper schreiben sie nicht in die Laufzeitkonfiguration.
 
 ## Dateisicherheit und Retry
 
@@ -104,8 +160,9 @@ Diese Werte sind **nur Zielzustand innerhalb der Attestation**. Der Writer schre
 - Attestation-Datei: `0600`
 - keine Symlink-Datei als Schlüssel oder Backup-Bundle
 - kanonischer Dateiname `attestation-<32-hex>.json`
-- bestehende identische Attestation wird idempotent wiederverwendet
+- direkter Writer kann eine identische Attestation-ID idempotent wiederverwenden
 - derselbe Attestation-Identifier mit abweichendem Inhalt blockiert fail-closed
+- der Host-Wrapper erzeugt bei jedem bewusst bestätigten Aufruf eine neue zufällige Attestation-ID
 
 Ein fehlendes, ersetztes oder unter anderem Namen übergebenes Backup-Bundle kann die Readiness nicht passieren.
 
@@ -142,24 +199,37 @@ Damit ist die Bedeutung eindeutig: Die manuelle Freigabe ist kryptografisch vorh
 
 Keine Attestation entsteht, wenn unter anderem:
 
+- das explizite Operator-Acknowledgement fehlt,
+- Drill-ID, Bundle-Name oder technische Attestor-ID ungültig sind,
 - der Drill-Report oder dessen HMAC ungültig ist,
 - Report und aktuelles Backup-Bundle nicht denselben Namen/Fingerprint binden,
 - die praktische Restore-Evidence nicht kanonisch verifiziert ist,
 - Readiness nicht `READY_FOR_MANUAL_ATTESTATION` ergibt,
 - der reale Backup-Capability-Zustand bereits `ENABLED` ist,
 - die Policy-Zielkonfiguration abweicht,
-- das Operator-Acknowledgement fehlt,
 - eine Attestation-ID bereits mit anderem Inhalt existiert.
 
 Der Verifier blockiert jede Inhalts-, Fingerprint- oder HMAC-Manipulation.
 
 ## CI-Grenze
 
-Der `Backup Privacy Manual Attestation Contract` erzeugt synthetische, aber echt HMAC-signierte Drill-Evidence **und echte Test-Bundle-Bytes**. Er prüft, dass der Writer die Bundle-Datei selbst hasht und eine veränderte Datei nicht zur Attestation führen kann.
+Der `Backup Privacy Manual Attestation Contract` prüft weiterhin Writer und Verifier direkt.
 
-Die nachgelagerten Activation-Plan-, Execution-Evidence- und Executor-Contracts verwenden dieselbe byte-gebundene Fixture-Kette. Dadurch bleibt die stärkere Readiness-Grenze über alle späteren Artefakte erhalten.
+Der zusätzliche `Backup Privacy Manual Attestation Host Contract` baut eine Club-ähnliche `.env`-Fixture mit echten Test-Bundle-Bytes und signiertem RTO-Report. Er prüft:
 
-Das ist weiterhin **keine reale Betriebsfreigabe** und ersetzt weder den Host-Drill noch die spätere Operator-Attestation.
+- den Vier-Argument-Operator-Befehl,
+- automatische Attestation-ID und Zeit,
+- sofortige unabhängige Verifikation,
+- `0700`/`0600`-Evidence-Rechte,
+- bytegenau unveränderte `.env`- und Backup-Datei,
+- fehlendes Acknowledgement,
+- vorzeitiges `PRIVACY_BACKUP_STATE=ENABLED`,
+- nach dem Drill veränderte Backup-Bytes,
+- die Abwesenheit direkter Docker-/Compose-/Runtime-Mutationsprimitiven.
+
+Die nachgelagerten Activation-Plan-, Execution-Evidence- und Executor-Contracts verwenden dieselbe byte-gebundene Evidence-Kette.
+
+Das ist weiterhin **keine reale Betriebsfreigabe** und ersetzt weder den Host-Drill noch eine spätere reale Operator-Attestation.
 
 ## Nächster Schritt
 

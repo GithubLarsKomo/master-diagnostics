@@ -1,0 +1,220 @@
+name: Backup Privacy Manual Attestation Host Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-manual-attestation-host-contract.yml'
+      - 'infra/backup/attest-club-backup-privacy-activation.sh'
+      - 'infra/backup/write-backup-privacy-manual-attestation.py'
+      - 'infra/backup/check-backup-privacy-manual-attestation.py'
+      - 'infra/backup/check-backup-privacy-activation-readiness.py'
+      - 'infra/backup/check-restore-rto-drill-report.py'
+      - 'infra/backup/write-restore-rto-drill-report.py'
+      - 'docs/backup-privacy-manual-attestation.md'
+      - '.env.example'
+      - 'TASKS.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-manual-attestation-host-contract.yml'
+      - 'infra/backup/attest-club-backup-privacy-activation.sh'
+      - 'infra/backup/write-backup-privacy-manual-attestation.py'
+      - 'infra/backup/check-backup-privacy-manual-attestation.py'
+      - 'infra/backup/check-backup-privacy-activation-readiness.py'
+      - 'infra/backup/check-restore-rto-drill-report.py'
+      - 'infra/backup/write-restore-rto-drill-report.py'
+      - 'docs/backup-privacy-manual-attestation.md'
+      - '.env.example'
+      - 'TASKS.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify wrapper syntax and read-only boundary
+        run: |
+          bash -n infra/backup/attest-club-backup-privacy-activation.sh
+          python3 -m py_compile \
+            infra/backup/write-backup-privacy-manual-attestation.py \
+            infra/backup/check-backup-privacy-manual-attestation.py \
+            infra/backup/check-backup-privacy-activation-readiness.py \
+            infra/backup/check-restore-rto-drill-report.py
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('infra/backup/attest-club-backup-privacy-activation.sh').read_text()
+          for required in (
+              '--acknowledge-operational-responsibility',
+              'BACKUP_PRIVACY_MANUAL_ATTESTATION_HOST_DIR',
+              'BACKUP_PRIVACY_MANUAL_ATTESTATION_KEY_FILE',
+              'check-backup-privacy-activation-readiness.py',
+              'check-restore-rto-drill-report.py',
+              'check-backup-privacy-manual-attestation.py',
+              'PRIVACY_BACKUP_STATE:-}',
+          ):
+              assert required in text, required
+          for forbidden in (
+              'docker ', 'docker-compose', 'compose up', 'compose restart',
+              'sed -i', 'os.replace(', 'PRIVACY_BACKUP_STATE=ENABLED'
+          ):
+              assert forbidden not in text, forbidden
+          PY
+
+      - name: Prepare real-byte-bound host fixture
+        run: |
+          set -Eeuo pipefail
+          root=/tmp/manual-attestation-host-contract
+          repo="$root/repo"
+          backup="$root/backups"
+          reports="$root/reports"
+          attestations="$root/attestations"
+          rm -rf "$root"
+          mkdir -p "$repo/infra/backup" "$backup" "$reports"
+          chmod 700 "$reports"
+          for file in \
+            attest-club-backup-privacy-activation.sh \
+            write-backup-privacy-manual-attestation.py \
+            check-backup-privacy-manual-attestation.py \
+            check-backup-privacy-activation-readiness.py \
+            check-restore-rto-drill-report.py \
+            write-restore-rto-drill-report.py; do
+            cp "infra/backup/$file" "$repo/infra/backup/$file"
+          done
+
+          bundle=masters-backup-20260810T050000Z-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.mdbak
+          printf 'host-wrapper-bound-backup\n' >"$backup/$bundle"
+          bundle_fp="sha256:$(sha256sum "$backup/$bundle" | awk '{print $1}')"
+          printf '%s\n' "$bundle" >"$root/bundle-name"
+          cp "$backup/$bundle" "$root/original-bundle"
+
+          python3 - <<'PY'
+          import base64,json
+          from pathlib import Path
+          root=Path('/tmp/manual-attestation-host-contract')
+          root.joinpath('drill.key').write_text(base64.b64encode(bytes([83])*32).decode()+'\n')
+          root.joinpath('attestation.key').write_text(base64.b64encode(bytes([91])*32).decode()+'\n')
+          phases=[{'name':name,'status':'COMPLETED','durationSeconds':5,'exitCode':0} for name in (
+              'VERIFY_BACKUP','STAGE_RESTORE','PRIVACY_REPLAY','AUTHORIZE_PROMOTION',
+              'PREPARE_PROMOTION_PLAN','PREPARE_CANDIDATES','AUTHORIZE_SWITCH','EXECUTE_SWITCH')]
+          root.joinpath('phases.json').write_text(json.dumps(phases)+'\n')
+          PY
+          chmod 600 "$root/drill.key" "$root/attestation.key" "$root/phases.json"
+
+          python3 "$repo/infra/backup/write-restore-rto-drill-report.py" \
+            --output-dir "$reports" --key-file "$root/drill.key" \
+            --drill-id drill-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --bundle-name "$bundle" --bundle-sha256 "$bundle_fp" \
+            --staging-name restore-20260810T050100Z-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee \
+            --candidate-set-id restore-0123456789abcdefabcd \
+            --started-at 2026-08-10T05:00:00.000Z --completed-at 2026-08-10T05:01:00.000Z \
+            --duration-seconds 60 --status COMPLETED --terminal-phase EXECUTE_SWITCH \
+            --phases-file "$root/phases.json" >/dev/null
+
+          cat >"$repo/.env" <<EOF
+          BACKUP_HOST_DIR=$backup
+          RESTORE_RTO_DRILL_REPORT_HOST_DIR=$reports
+          RESTORE_RTO_DRILL_REPORT_KEY_FILE=$root/drill.key
+          BACKUP_PRIVACY_MANUAL_ATTESTATION_HOST_DIR=$attestations
+          BACKUP_PRIVACY_MANUAL_ATTESTATION_KEY_FILE=$root/attestation.key
+          PRIVACY_BACKUP_STATE=DISABLED
+          PRIVACY_NOTIFICATIONS_STATE=DISABLED
+          EOF
+          chmod 600 "$repo/.env"
+          cp "$repo/.env" "$root/original.env"
+
+      - name: Create and immediately verify one host manual attestation
+        run: |
+          set -Eeuo pipefail
+          root=/tmp/manual-attestation-host-contract
+          repo="$root/repo"
+          bundle="$(cat "$root/bundle-name")"
+          before_env="$(sha256sum "$repo/.env" | awk '{print $1}')"
+          before_bundle="$(sha256sum "$root/backups/$bundle" | awk '{print $1}')"
+          (cd "$repo" && bash infra/backup/attest-club-backup-privacy-activation.sh \
+            drill-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            "$bundle" ci-host-operator \
+            --acknowledge-operational-responsibility) >"$root/result.json"
+          after_env="$(sha256sum "$repo/.env" | awk '{print $1}')"
+          after_bundle="$(sha256sum "$root/backups/$bundle" | awk '{print $1}')"
+          test "$before_env" = "$after_env"
+          test "$before_bundle" = "$after_bundle"
+          cmp -s "$repo/.env" "$root/original.env"
+          cmp -s "$root/backups/$bundle" "$root/original-bundle"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('/tmp/manual-attestation-host-contract')
+          r=json.loads(root.joinpath('result.json').read_text())
+          assert r['mode']=='CLUB_BACKUP_PRIVACY_MANUAL_ATTESTATION', r
+          assert r['status']=='MANUAL_ATTESTATION_VERIFIED', r
+          assert r['attestationId'].startswith('attestation-')
+          assert r['drillId']=='drill-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+          assert r['attestorId']=='ci-host-operator'
+          assert r['privacyBackupActivationAllowed'] is True
+          assert r['runtimeConfigurationChanged'] is False
+          assert r['automaticActivationPerformed'] is False
+          path=Path(r['attestationPath'])
+          assert path.exists() and path.parent == root/'attestations'
+          assert (path.stat().st_mode & 0o777) == 0o600
+          root.joinpath('attestation-path').write_text(str(path))
+          PY
+          test "$(stat -c '%a' "$root/attestations")" = 700
+          python3 "$repo/infra/backup/check-backup-privacy-manual-attestation.py" \
+            --attestation "$(cat "$root/attestation-path")" \
+            --key-file "$root/attestation.key" >"$root/reverified.json"
+          grep -F '"status":"ATTESTATION_VERIFIED"' "$root/reverified.json"
+
+      - name: Require explicit acknowledgement and disabled state
+        run: |
+          set -Eeuo pipefail
+          root=/tmp/manual-attestation-host-contract
+          repo="$root/repo"
+          bundle="$(cat "$root/bundle-name")"
+          count_before="$(find "$root/attestations" -maxdepth 1 -name 'attestation-*.json' | wc -l)"
+          set +e
+          (cd "$repo" && bash infra/backup/attest-club-backup-privacy-activation.sh \
+            drill-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$bundle" ci-host-operator NO_ACK) \
+            >/tmp/manual-host-no-ack.out 2>/tmp/manual-host-no-ack.err
+          no_ack=$?
+          sed -i 's/PRIVACY_BACKUP_STATE=DISABLED/PRIVACY_BACKUP_STATE=ENABLED/' "$repo/.env"
+          (cd "$repo" && bash infra/backup/attest-club-backup-privacy-activation.sh \
+            drill-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$bundle" ci-host-operator \
+            --acknowledge-operational-responsibility) \
+            >/tmp/manual-host-enabled.out 2>/tmp/manual-host-enabled.err
+          enabled=$?
+          cp "$root/original.env" "$repo/.env"; chmod 600 "$repo/.env"
+          set -e
+          test "$no_ack" -eq 2
+          test "$enabled" -ne 0
+          grep -F 'Explicit operational responsibility acknowledgement is required.' /tmp/manual-host-no-ack.err
+          grep -F 'must remain DISABLED' /tmp/manual-host-enabled.err
+          count_after="$(find "$root/attestations" -maxdepth 1 -name 'attestation-*.json' | wc -l)"
+          test "$count_before" = "$count_after"
+
+      - name: Reject changed backup bytes before a second attestation
+        run: |
+          set -Eeuo pipefail
+          root=/tmp/manual-attestation-host-contract
+          repo="$root/repo"
+          bundle="$(cat "$root/bundle-name")"
+          printf 'changed-after-drill\n' >>"$root/backups/$bundle"
+          set +e
+          (cd "$repo" && bash infra/backup/attest-club-backup-privacy-activation.sh \
+            drill-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$bundle" ci-host-operator \
+            --acknowledge-operational-responsibility) \
+            >/tmp/manual-host-bundle.out 2>/tmp/manual-host-bundle.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -F 'READINESS_NOT_MET' /tmp/manual-host-bundle.err
+          cp "$root/original-bundle" "$root/backups/$bundle"
+
+      - name: Verify configuration and release gates remain nonterminal
+        run: |
+          grep -F 'BACKUP_PRIVACY_MANUAL_ATTESTATION_HOST_DIR=' .env.example
+          grep -F 'BACKUP_PRIVACY_MANUAL_ATTESTATION_KEY_FILE=' .env.example
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
