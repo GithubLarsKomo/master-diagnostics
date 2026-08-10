@@ -1,0 +1,223 @@
+name: Online Update Writer-Stop Executor Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/online-update-writer-stop-executor-contract.yml'
+      - 'infra/update/execute-online-update-writer-stop.py'
+      - 'infra/update/persist-online-update-writer-stop-intent.py'
+      - 'infra/update/assess-online-update-pre-stop.py'
+      - 'infra/update/persist-online-update-execution-event.py'
+      - 'docs/online-update-writer-stop-executor.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/online-update-writer-stop-executor-contract.yml'
+      - 'infra/update/execute-online-update-writer-stop.py'
+      - 'infra/update/persist-online-update-writer-stop-intent.py'
+      - 'infra/update/assess-online-update-pre-stop.py'
+      - 'infra/update/persist-online-update-execution-event.py'
+      - 'docs/online-update-writer-stop-executor.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare authentic intent and stateful fake Docker
+        run: |
+          set -euo pipefail
+          BASE=/tmp/writer-stop-executor-base
+          rm -rf "$BASE" /tmp/writer-stop-success /tmp/writer-stop-crash /tmp/writer-stop-failure
+          mkdir -p "$BASE/events" "$BASE/intent" "$BASE/bin"
+          printf 'services: {}\n' >"$BASE/compose.yml"
+          printf 'APP_HOST=localhost\n' >"$BASE/.env"
+          python3 - <<'PY'
+          import base64, importlib.util, json
+          from pathlib import Path
+          root=Path('/tmp/writer-stop-executor-base')
+          key=bytes([121])*32
+          root.joinpath('key').write_text(base64.b64encode(key).decode()+'\n')
+          root.joinpath('key').chmod(0o600)
+          def load(name,file):
+              spec=importlib.util.spec_from_file_location(name,Path('infra/update')/file)
+              mod=importlib.util.module_from_spec(spec); assert spec.loader; spec.loader.exec_module(mod); return mod
+          journal=load('journal','persist-online-update-execution-journal.py')
+          events=load('events','persist-online-update-execution-event.py')
+          record=journal.validate_record({
+            'journalVersion':1,'phase':'PENDING','startedAt':'2026-08-10T16:30:00.000Z',
+            'executionPlanSignature':'hmac-sha256:'+'1'*64,'executionPlanEnvelopeSha256':'sha256:'+'2'*64,
+            'manifestFingerprint':'sha256:'+'3'*64,'currentVersion':'1.0.0','targetVersion':'1.1.0',
+            'images':[
+              {'role':'APP','reference':'registry.test/app@sha256:'+'a'*64,'resolvedDigest':'sha256:'+'a'*64},
+              {'role':'MIGRATOR','reference':'registry.test/migrator@sha256:'+'b'*64,'resolvedDigest':'sha256:'+'b'*64}],
+            'rollbackAnchor':{'fileName':'pre.mdbak','sha256':'sha256:'+'4'*64,'createdAt':'2026-08-10T16:29:00.000Z','verified':True,'rollbackAnchor':True},
+            'executionOrder':['ACQUIRE_EXACT_IMAGES','STOP_APPLICATION_WRITERS','RUN_CONTROLLED_MIGRATIONS','START_APPLICATION','VERIFY_APPLICATION_HEALTH','COMPLETE_UPDATE'],
+            'nextStep':'ACQUIRE_EXACT_IMAGES','completedSteps':[],'mutationState':'NOT_STARTED',
+            'executionJournalRequiredBeforeMutation':True,'imageAcquisitionStarted':False,'productionMutationStarted':False,
+            'migrationStarted':False,'rollbackStarted':False,'completionRecorded':False,'imagePullAllowed':False,
+            'migrationAllowed':False,'productionMutationAllowed':False,'updateExecuted':False})
+          envelope={'envelopeVersion':1,'record':record,'signature':journal.sign_record(key,record)}
+          root.joinpath('journal.json').write_text(json.dumps(envelope,indent=2)+'\n')
+          events.persist_event(root/'events',key,envelope,'IMAGE_ACQUISITION_STARTED','2026-08-10T16:31:00.000Z')
+          events.persist_event(root/'events',key,envelope,'IMAGES_ACQUIRED','2026-08-10T16:32:00.000Z')
+          state={
+            'project':'clubtest','libsqlHealth':'healthy','stopLog':[],
+            'containers':{
+              'app':{'id':'1'*64,'imageId':'sha256:'+'e'*64,'configuredImage':'clubtest-app:current','startedAt':'2026-08-10T16:00:00.000000000Z','running':True},
+              'export-cleanup':{'id':'2'*64,'imageId':'sha256:'+'f'*64,'configuredImage':'clubtest-export-cleanup:current','startedAt':'2026-08-10T16:00:00.000000000Z','running':True},
+              'retention-scan':{'id':'3'*64,'imageId':'sha256:'+'9'*64,'configuredImage':'clubtest-retention-scan:current','startedAt':'2026-08-10T16:00:00.000000000Z','running':True},
+              'libsql':{'id':'5'*64,'imageId':'sha256:'+'8'*64,'configuredImage':'libsql:test','startedAt':'2026-08-10T15:59:00.000000000Z','running':True},
+            }}
+          root.joinpath('state.json').write_text(json.dumps(state,indent=2)+'\n')
+          PY
+          chmod 600 "$BASE/journal.json" "$BASE/compose.yml" "$BASE/.env" "$BASE/state.json"
+
+          cat >"$BASE/bin/docker" <<'PY'
+          #!/usr/bin/env python3
+          import json, os, signal, sys
+          from pathlib import Path
+          args=sys.argv[1:]
+          state_path=Path(os.environ['FAKE_DOCKER_STATE'])
+          state=json.loads(state_path.read_text())
+          refs={'registry.test/app@sha256:'+'a'*64:'c','registry.test/migrator@sha256:'+'b'*64:'d'}
+          def save(): state_path.write_text(json.dumps(state,indent=2)+'\n')
+          if args[:2]==['image','inspect'] and len(args)==3:
+              ref=args[2]
+              if ref not in refs: sys.exit(8)
+              print(json.dumps([{'Id':'sha256:'+refs[ref]*64,'RepoDigests':[ref]}])); sys.exit(0)
+          if args and args[0]=='compose' and 'config' in args:
+              print(json.dumps({'name':state['project'],'services':{
+                'app':{'restart':'unless-stopped','environment':{'DATABASE_URL':'http://libsql:8080'}},
+                'export-cleanup':{'restart':'unless-stopped','environment':{'DATABASE_URL':'http://libsql:8080'}},
+                'retention-scan':{'restart':'unless-stopped','environment':{'DATABASE_URL':'http://libsql:8080'}},
+                'migrate':{'restart':'no','environment':{'DATABASE_URL':'http://libsql:8080'}},
+                'libsql':{'restart':'unless-stopped','environment':{}},
+                'caddy':{'restart':'unless-stopped','environment':{}}}})); sys.exit(0)
+          if args and args[0]=='compose' and 'ps' in args and '-q' in args:
+              service=args[-1]; item=state['containers'].get(service)
+              if item and item['running']: print(item['id'])
+              sys.exit(0)
+          if args[:1]==['inspect'] and len(args)==2:
+              cid=args[1]
+              pair=next(((service,item) for service,item in state['containers'].items() if item['id']==cid),None)
+              if pair is None: sys.exit(6)
+              service,item=pair
+              s={'Running':item['running'],'Status':'running' if item['running'] else 'exited','StartedAt':item['startedAt']}
+              if service=='libsql': s['Health']={'Status':state['libsqlHealth']}
+              print(json.dumps([{'Id':cid,'Image':item['imageId'],'Config':{'Image':item['configuredImage'],'Labels':{'com.docker.compose.project':state['project'],'com.docker.compose.service':service}},'State':s}])); sys.exit(0)
+          if args[:1]==['stop'] and len(args)==2:
+              cid=args[1]
+              pair=next(((service,item) for service,item in state['containers'].items() if item['id']==cid),None)
+              if pair is None: sys.exit(6)
+              service,item=pair
+              if service=='libsql': print('refusing libsql stop',file=sys.stderr); sys.exit(9)
+              item['running']=False; state['stopLog'].append(cid); save()
+              crash=os.environ.get('FAKE_CRASH_AFTER_STOP_SERVICE')
+              sentinel=state_path.with_suffix('.crashed')
+              if crash==service and not sentinel.exists():
+                  sentinel.write_text(service+'\n')
+                  os.kill(os.getppid(), signal.SIGKILL)
+              print(cid); sys.exit(0)
+          print('unexpected fake docker invocation: '+' '.join(args),file=sys.stderr); sys.exit(99)
+          PY
+          chmod +x "$BASE/bin/docker"
+
+          export PATH="$BASE/bin:$PATH" FAKE_DOCKER_STATE="$BASE/state.json"
+          python3 infra/update/persist-online-update-writer-stop-intent.py \
+            --journal "$BASE/journal.json" --journal-key "$BASE/key" \
+            --events-dir "$BASE/events" --event-key "$BASE/key" \
+            --compose-file "$BASE/compose.yml" --env-file "$BASE/.env" \
+            --intent-dir "$BASE/intent" --intent-key "$BASE/key" \
+            --authorized-at 2026-08-10T16:33:00.000Z >"$BASE/intent-result.json"
+          cp -a "$BASE" /tmp/writer-stop-success
+          cp -a "$BASE" /tmp/writer-stop-crash
+          cp -a "$BASE" /tmp/writer-stop-failure
+
+      - name: Stop exact writers and reuse terminal writer-stop evidence
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/writer-stop-success
+          export PATH="$ROOT/bin:$PATH" FAKE_DOCKER_STATE="$ROOT/state.json"
+          common=(--journal "$ROOT/journal.json" --journal-key "$ROOT/key" --events-dir "$ROOT/events" --event-key "$ROOT/key" --intent "$ROOT/intent/online-update-writer-stop-intent.json" --intent-key "$ROOT/key" --compose-file "$ROOT/compose.yml" --env-file "$ROOT/.env")
+          python3 infra/update/execute-online-update-writer-stop.py "${common[@]}" >"$ROOT/first.json"
+          python3 infra/update/execute-online-update-writer-stop.py "${common[@]}" >"$ROOT/retry.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('/tmp/writer-stop-success')
+          first=json.loads(root.joinpath('first.json').read_text()); retry=json.loads(root.joinpath('retry.json').read_text()); state=json.loads(root.joinpath('state.json').read_text())
+          assert first['status']=='APPLICATION_WRITERS_STOPPED' and first['phase']=='WRITERS_STOPPED'
+          assert first['eventCreated'] is True and retry['eventReused'] is True
+          assert first['eventSignature']==retry['eventSignature']
+          assert first['libsql']['running'] is True and first['libsql']['healthy'] is True
+          assert state['stopLog']==['1'*64,'2'*64,'3'*64]
+          assert state['containers']['libsql']['running'] is True
+          for service in ('app','export-cleanup','retention-scan'): assert state['containers'][service]['running'] is False
+          assert root.joinpath('events/online-update-event-writer-stop-started.json').is_file()
+          assert root.joinpath('events/online-update-event-writers-stopped.json').is_file()
+          assert not root.joinpath('events/online-update-event-migration-started.json').exists()
+          PY
+
+      - name: Resume after real process crash following first writer stop
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/writer-stop-crash
+          export PATH="$ROOT/bin:$PATH" FAKE_DOCKER_STATE="$ROOT/state.json"
+          common=(--journal "$ROOT/journal.json" --journal-key "$ROOT/key" --events-dir "$ROOT/events" --event-key "$ROOT/key" --intent "$ROOT/intent/online-update-writer-stop-intent.json" --intent-key "$ROOT/key" --compose-file "$ROOT/compose.yml" --env-file "$ROOT/.env")
+          set +e
+          FAKE_CRASH_AFTER_STOP_SERVICE=app python3 infra/update/execute-online-update-writer-stop.py "${common[@]}" >"$ROOT/crash.out" 2>"$ROOT/crash.err"
+          code=$?
+          set -e
+          test "$code" -ne 0
+          test -f "$ROOT/events/online-update-event-writer-stop-started.json"
+          test ! -f "$ROOT/events/online-update-event-rollback-started.json"
+          python3 infra/update/execute-online-update-writer-stop.py "${common[@]}" >"$ROOT/recovered.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('/tmp/writer-stop-crash'); state=json.loads(root.joinpath('state.json').read_text()); result=json.loads(root.joinpath('recovered.json').read_text())
+          assert result['phase']=='WRITERS_STOPPED'
+          assert state['stopLog']==['1'*64,'2'*64,'3'*64]
+          assert root.joinpath('events/online-update-event-writers-stopped.json').is_file()
+          assert not root.joinpath('events/online-update-event-rollback-started.json').exists()
+          PY
+
+      - name: Enter durable rollback path when libSQL verification fails after writer mutation
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/writer-stop-failure
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/writer-stop-failure/state.json'); state=json.loads(p.read_text()); state['libsqlHealth']='unhealthy'; p.write_text(json.dumps(state,indent=2)+'\n')
+          PY
+          export PATH="$ROOT/bin:$PATH" FAKE_DOCKER_STATE="$ROOT/state.json"
+          set +e
+          python3 infra/update/execute-online-update-writer-stop.py \
+            --journal "$ROOT/journal.json" --journal-key "$ROOT/key" --events-dir "$ROOT/events" --event-key "$ROOT/key" \
+            --intent "$ROOT/intent/online-update-writer-stop-intent.json" --intent-key "$ROOT/key" \
+            --compose-file "$ROOT/compose.yml" --env-file "$ROOT/.env" >"$ROOT/failure.out" 2>"$ROOT/failure.err"
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'ROLLBACK_STARTED=' "$ROOT/failure.err"
+          test -f "$ROOT/events/online-update-event-writer-stop-started.json"
+          test -f "$ROOT/events/online-update-event-rollback-started.json"
+          test ! -f "$ROOT/events/online-update-event-writers-stopped.json"
+          test ! -f "$ROOT/events/online-update-event-rollback-completed.json"
+
+      - name: Verify bounded mutation surface and evidence ordering
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          source=Path('infra/update/execute-online-update-writer-stop.py').read_text()
+          assert 'fcntl.LOCK_EX' in source
+          assert 'WRITER_STOP_STARTED' in source and 'WRITERS_STOPPED' in source and 'ROLLBACK_STARTED' in source
+          assert source.index('"WRITER_STOP_STARTED"') < source.index('run_docker(["stop"')
+          assert 'verify_libsql_available' in source
+          assert 'docker' not in source.split('def run_docker',1)[0].lower()
+          for forbidden in ('docker pull','docker compose up','docker compose down','docker compose restart','docker volume','MIGRATION_STARTED','ROLLBACK_COMPLETED','backup:restore','restore-backup'):
+              assert forbidden not in source
+          PY
