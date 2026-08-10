@@ -11,10 +11,14 @@ evidence="${SCRIPT_DIR}/backup-privacy-activation-execution.py"
 plan_checker="${SCRIPT_DIR}/check-backup-privacy-activation-plan.py"
 planner="${SCRIPT_DIR}/prepare-backup-privacy-activation-plan.py"
 runtime_checker="${work}/runtime-checker.py"
+bundle_name=masters-backup-20260810T000000Z-55555555-5555-5555-5555-555555555555.mdbak
+bundle="${work}/${bundle_name}"
 
 rm -rf -- "${work}"
 mkdir -p "${work}/reports" "${work}/attestations"
 chmod 0700 "${work}/reports" "${work}/attestations"
+printf 'activation-executor-bound-backup\n' >"${bundle}"
+bundle_fp="sha256:$(sha256sum "${bundle}" | awk '{print $1}')"
 python3 - <<'PY'
 import base64,json
 from pathlib import Path
@@ -49,8 +53,7 @@ chmod 0600 "${key}" "${work}/phases.json" "${runtime_checker}"
 python3 "${SCRIPT_DIR}/write-restore-rto-drill-report.py" \
   --output-dir "${work}/reports" --key-file "${key}" \
   --drill-id drill-55555555555555555555555555555555 \
-  --bundle-name masters-backup-20260810T000000Z-55555555-5555-5555-5555-555555555555.mdbak \
-  --bundle-sha256 sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  --bundle-name "${bundle_name}" --bundle-sha256 "${bundle_fp}" \
   --staging-name restore-20260810T000100Z-66666666-6666-6666-6666-666666666666 \
   --candidate-set-id restore-0123456789abcdefabcd \
   --started-at 2026-08-10T00:00:00.000Z --completed-at 2026-08-10T00:02:00.000Z \
@@ -59,7 +62,7 @@ python3 "${SCRIPT_DIR}/write-restore-rto-drill-report.py" \
 PRIVACY_BACKUP_STATE=DISABLED python3 "${SCRIPT_DIR}/write-backup-privacy-manual-attestation.py" \
   --readiness-checker "${SCRIPT_DIR}/check-backup-privacy-activation-readiness.py" \
   --drill-report "${work}/reports/drill-55555555555555555555555555555555.json" \
-  --drill-key-file "${key}" --attestation-key-file "${key}" \
+  --drill-key-file "${key}" --backup-bundle "${bundle}" --attestation-key-file "${key}" \
   --output-dir "${work}/attestations" --attestation-id attestation-66666666666666666666666666666666 \
   --attestor-id ci-executor --attested-at 2026-08-10T00:05:00.000Z \
   --acknowledge-operational-responsibility >/dev/null
