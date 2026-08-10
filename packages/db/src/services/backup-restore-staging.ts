@@ -14,6 +14,10 @@ import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import { decryptBackupBundleToTar } from './backup-bundle';
 import {
+  createRestoreSourceProvenanceRecord,
+  persistSignedRestoreSourceProvenance,
+} from './backup-restore-source-provenance';
+import {
   verifyEncryptedBackupBundle,
   type VerifiedEncryptedBackupBundle,
 } from './backup-restore-verification';
@@ -44,6 +48,8 @@ export interface StagedEncryptedBackupRestore {
   readonly createdAt: string;
   readonly restoreReconciliationRequired: true;
   readonly sourceNames: readonly string[];
+  readonly sourceProvenancePath: string;
+  readonly sourceProvenanceSignature: `hmac-sha256:${string}`;
 }
 
 function timestampSegment(value: string): string {
@@ -97,6 +103,11 @@ async function copyAndVerifyEncryptedSnapshot(
 /**
  * Authenticates one encrypted backup snapshot and extracts it only into a new private staging
  * directory. The caller must not mount any production volume at stagingRoot.
+ *
+ * After extraction has been validated, a domain-separated HMAC provenance sidecar is persisted
+ * inside the private staging directory. It binds the staging identity to the exact encrypted
+ * bundle file name, SHA-256 and authenticated backup manifest. Downstream rollback evidence can
+ * therefore prove which encrypted backup actually produced a promoted restore.
  */
 export async function stageEncryptedBackupRestore(
   input: StageEncryptedBackupRestoreInput,
@@ -127,6 +138,18 @@ export async function stageEncryptedBackupRestore(
     ], { maxBuffer: 16 * 1024 * 1024 });
     await verifyStagedTopLevel(stagingPath);
 
+    const provenanceRecord = createRestoreSourceProvenanceRecord({
+      stagingName,
+      backupFileName: verified.fileName,
+      backupSha256: verified.sha256,
+      manifest: verified.manifest,
+    });
+    const provenance = await persistSignedRestoreSourceProvenance({
+      stagingPath,
+      keyFile: input.keyFile,
+      record: provenanceRecord,
+    });
+
     return Object.freeze({
       stagingName,
       stagingPath,
@@ -135,6 +158,8 @@ export async function stageEncryptedBackupRestore(
       createdAt: verified.manifest.createdAt,
       restoreReconciliationRequired: true,
       sourceNames: EXPECTED_SOURCE_NAMES,
+      sourceProvenancePath: provenance.path,
+      sourceProvenanceSignature: provenance.envelope.signature,
     });
   } catch (error) {
     if (stagingPath) await rm(stagingPath, { recursive: true, force: true });

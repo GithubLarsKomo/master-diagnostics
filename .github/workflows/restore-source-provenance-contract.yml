@@ -1,0 +1,80 @@
+name: Restore Source Provenance Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-source-provenance-contract.yml'
+      - 'packages/db/src/services/backup-restore-source-provenance.ts'
+      - 'packages/db/src/services/backup-restore-staging.ts'
+      - 'packages/db/src/stage-backup-restore.ts'
+      - 'packages/db/src/index.ts'
+      - 'packages/db/test/backup-restore-staging.test.ts'
+      - 'docs/restore-source-provenance.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-source-provenance-contract.yml'
+      - 'packages/db/src/services/backup-restore-source-provenance.ts'
+      - 'packages/db/src/services/backup-restore-staging.ts'
+      - 'packages/db/src/stage-backup-restore.ts'
+      - 'packages/db/src/index.ts'
+      - 'packages/db/test/backup-restore-staging.test.ts'
+      - 'docs/restore-source-provenance.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify staging provenance behavior
+        run: pnpm --filter @masters/db exec vitest run test/backup-restore-staging.test.ts
+
+      - name: Verify DB typecheck
+        run: pnpm --filter @masters/db typecheck
+
+      - name: Verify provenance trust boundary
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          core = Path('packages/db/src/services/backup-restore-source-provenance.ts').read_text()
+          staging = Path('packages/db/src/services/backup-restore-staging.ts').read_text()
+          cli = Path('packages/db/src/stage-backup-restore.ts').read_text()
+
+          assert "masters:backup-restore-source-provenance:v1\\n" in core
+          assert "restore-source-provenance.json" in core
+          assert "flag: 'wx'" in core
+          assert "mode: 0o600" in core
+          assert "timingSafeEqual" in core
+          assert "readBackupEncryptionKey" in core
+          assert "backupFileName" in core
+          assert "backupSha256" in core
+          assert "backupManifestFingerprint" in core
+          verify_call = "await verifyStagedTopLevel(stagingPath)"
+          persist_call = "await persistSignedRestoreSourceProvenance({"
+          assert verify_call in staging
+          assert persist_call in staging
+          assert staging.index(verify_call) < staging.index(persist_call)
+          assert "sourceProvenanceSignature" in cli
+          for token in (
+              'docker compose',
+              'docker stop',
+              'docker start',
+              'docker volume',
+              'RESTORE_PRIVATE_PROMOTION_SWITCH_EVENT_PHASE',
+              'online-update-event-',
+          ):
+              assert token not in core
+          PY

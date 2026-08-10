@@ -24,6 +24,8 @@ if (!bundlePath) {
       createdAt: staged.createdAt,
       restoreReconciliationRequired: staged.restoreReconciliationRequired,
       sources: staged.sourceNames,
+      sourceProvenancePath: staged.sourceProvenancePath,
+      sourceProvenanceSignature: staged.sourceProvenanceSignature,
     })}\n`);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown backup restore staging error';
