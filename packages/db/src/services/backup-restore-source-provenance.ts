@@ -11,6 +11,7 @@ const SIGNING_DOMAIN = 'masters:backup-restore-source-provenance:v1\n';
 const HMAC_PREFIX = 'hmac-sha256:';
 const HMAC_PATTERN = /^hmac-sha256:[0-9a-f]{64}$/;
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const RAW_SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const STAGING_NAME_PATTERN = /^restore-[0-9TZ]+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BUNDLE_NAME_PATTERN = /^masters-backup-[0-9TZ]+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.mdbak$/;
 
@@ -46,6 +47,12 @@ function canonicalJson(value: unknown): string {
 
 function sha256(value: string): `sha256:${string}` {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+}
+
+function normalizeBackupSha256(value: string): `sha256:${string}` {
+  if (SHA256_PATTERN.test(value)) return value as `sha256:${string}`;
+  if (RAW_SHA256_PATTERN.test(value)) return `sha256:${value}`;
+  throw new Error('Restore source provenance backup SHA-256 is invalid');
 }
 
 function payload(record: Readonly<RestoreSourceProvenanceRecord>): string {
@@ -84,7 +91,7 @@ export function createRestoreSourceProvenanceRecord(input: Readonly<{
     provenanceVersion: 1 as const,
     stagingName: input.stagingName,
     backupFileName: input.backupFileName,
-    backupSha256: input.backupSha256 as `sha256:${string}`,
+    backupSha256: normalizeBackupSha256(input.backupSha256),
     backupCreatedAt: input.manifest.createdAt,
     backupManifestFingerprint: sha256(canonicalJson(input.manifest)),
     bundleVersion: input.manifest.bundleVersion,
