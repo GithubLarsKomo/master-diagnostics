@@ -43,7 +43,6 @@ jobs:
       - name: Start isolated local registry and publish two distinct fixture manifests
         run: |
           docker run -d --name md-online-update-registry -p 5000:5000 registry:2.8.3
-          trap 'docker rm -f md-online-update-registry >/dev/null 2>&1 || true' EXIT
           for i in $(seq 1 30); do
             curl -fsS http://127.0.0.1:5000/v2/ >/dev/null && break
             sleep 1
