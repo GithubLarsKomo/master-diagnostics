@@ -75,6 +75,14 @@ Die Startreihenfolge ist fest definiert:
 
 Ein Upgrade von einem älteren Stand benötigt deshalb vor `up -d --build` mindestens die beiden expliziten `PRIVACY_*_STATE`-Deklarationen. Fehlen sie, ist ein blockierter App-Start das beabsichtigte Verhalten.
 
+## TLS-Betriebsmodus
+
+Der Repository-Standard ist Caddys automatisches öffentliches TLS für einen öffentlich auflösbaren `APP_HOST`. Für rein interne Club-Hostnamen ist `tls internal` eine bewusste alternative Betriebsvariante; sie erfordert die kontrollierte Verteilung von Caddys Root-CA an die Clients und besonderen Schutz der CA-Privatschlüssel.
+
+Der vollständige Betriebsvertrag einschließlich ACME-Voraussetzungen, interner CA, Client-Trust, Persistenz, Restore, Rotation und Verifikationsbefehlen steht in [`docs/caddy-tls.md`](./caddy-tls.md).
+
+Wichtig für beide Modi: `caddy-data` und `caddy-config` sind persistente Sicherheitsartefakte. Sie dürfen bei Updates oder Restore-Vorbereitung nicht mit `docker compose down -v` entfernt werden.
+
 ## Versionierte Infrastruktur-Images
 
 Der Club-Stack verwendet für externe Infrastruktur keine gleitenden `latest`-Tags. libSQL und Caddy werden in `infra/docker-compose.club.yml` auf explizite veröffentlichte Versionen gepinnt; CI prüft diese Invariante im kanonischen Compose-Output.
