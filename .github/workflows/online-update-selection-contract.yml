@@ -1,0 +1,153 @@
+name: Online Update Selection Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/online-update-selection-contract.yml'
+      - '.github/workflows/online-update-preflight-contract.yml'
+      - 'infra/update/**'
+      - 'docs/online-update-selection.md'
+      - 'docs/online-update-preflight.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/online-update-selection-contract.yml'
+      - '.github/workflows/online-update-preflight-contract.yml'
+      - 'infra/update/**'
+      - 'docs/online-update-selection.md'
+      - 'docs/online-update-preflight.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare selection fixture
+        run: |
+          root=/tmp/online-update-selection
+          rm -rf "$root"
+          mkdir -p "$root/evidence"
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          Path('/tmp/online-update-selection/update.key').write_text(base64.b64encode(bytes([83])*32).decode()+'\n')
+          PY
+          chmod 600 "$root/update.key"
+          cp infra/update/online-update-manifest.example.json "$root/manifest.json"
+
+      - name: Persist and idempotently reuse exact signed selection
+        run: |
+          root=/tmp/online-update-selection
+          python3 infra/update/persist-online-update-selection.py \
+            --manifest "$root/manifest.json" --current-version 1.0.0 \
+            --target-dir "$root/evidence" --key-file "$root/update.key" > "$root/first.json"
+          sleep 0.01
+          python3 infra/update/persist-online-update-selection.py \
+            --manifest "$root/manifest.json" --current-version 1.0.0 \
+            --target-dir "$root/evidence" --key-file "$root/update.key" > "$root/second.json"
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          root=Path('/tmp/online-update-selection')
+          first=json.loads(root.joinpath('first.json').read_text())
+          second=json.loads(root.joinpath('second.json').read_text())
+          assert first['mode']=='CLUB_ONLINE_UPDATE_SELECTION_V1'
+          assert first['status']=='SELECTED_FOR_VERIFIED_BACKUP'
+          assert first['selectionCreated'] is True and first['selectionReused'] is False
+          assert second['selectionCreated'] is False and second['selectionReused'] is True
+          assert first['selectedAt']==second['selectedAt']
+          assert first['selectionSignature']==second['selectionSignature']
+          assert re.fullmatch(r'hmac-sha256:[0-9a-f]{64}', first['selectionSignature'])
+          assert first['backupMustBeCreatedAfterSelectedAt'] is True
+          assert first['imagePullAllowed'] is False
+          assert first['migrationAllowed'] is False
+          assert first['productionMutationAllowed'] is False
+          assert first['updateExecuted'] is False
+          evidence=root/'evidence'/'online-update-selection.json'
+          assert evidence.is_file() and not evidence.is_symlink()
+          assert oct(evidence.stat().st_mode & 0o777)=='0o600'
+          assert oct((root/'evidence').stat().st_mode & 0o777)=='0o700'
+          envelope=json.loads(evidence.read_text())
+          assert envelope['record']['selectedAt']==first['selectedAt']
+          assert envelope['record']['manifestFingerprint']==first['manifestFingerprint']
+          assert [x['role'] for x in envelope['record']['images']]==['APP','MIGRATOR']
+          PY
+
+      - name: Reject HMAC tampering and changed manifest binding
+        run: |
+          root=/tmp/online-update-selection
+          cp "$root/evidence/online-update-selection.json" "$root/evidence/original.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/online-update-selection/evidence/online-update-selection.json')
+          data=json.loads(p.read_text())
+          data['record']['targetVersion']='9.9.9'
+          p.write_text(json.dumps(data,indent=2)+'\n')
+          PY
+          set +e
+          python3 infra/update/persist-online-update-selection.py \
+            --manifest "$root/manifest.json" --current-version 1.0.0 \
+            --target-dir "$root/evidence" --key-file "$root/update.key" >/tmp/tamper.out 2>/tmp/tamper.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'signature verification failed' /tmp/tamper.err
+          mv "$root/evidence/original.json" "$root/evidence/online-update-selection.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/online-update-selection/changed.json')
+          data=json.loads(Path('/tmp/online-update-selection/manifest.json').read_text())
+          data['releaseVersion']='1.2.0'
+          p.write_text(json.dumps(data)+'\n')
+          PY
+          set +e
+          python3 infra/update/persist-online-update-selection.py \
+            --manifest "$root/changed.json" --current-version 1.0.0 \
+            --target-dir "$root/evidence" --key-file "$root/update.key" >/tmp/conflict.out 2>/tmp/conflict.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'does not match current preflight' /tmp/conflict.err
+
+      - name: Reject unsafe key and evidence paths
+        run: |
+          root=/tmp/online-update-selection
+          ln -s "$root/update.key" "$root/key-link"
+          set +e
+          python3 infra/update/persist-online-update-selection.py \
+            --manifest "$root/manifest.json" --current-version 1.0.0 \
+            --target-dir "$root/other" --key-file "$root/key-link" >/tmp/key.out 2>/tmp/key.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'regular non-symlink file' /tmp/key.err
+          mkdir -p "$root/symlink-target"
+          ln -s "$root/symlink-target" "$root/evidence-link"
+          set +e
+          python3 infra/update/persist-online-update-selection.py \
+            --manifest "$root/manifest.json" --current-version 1.0.0 \
+            --target-dir "$root/evidence-link" --key-file "$root/update.key" >/tmp/dir.out 2>/tmp/dir.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'non-symlink directory' /tmp/dir.err
+
+      - name: Verify selection scope stops before backup or update mutation
+        run: |
+          python3 -m py_compile infra/update/preflight-online-update.py infra/update/persist-online-update-selection.py
+          python3 - <<'PY'
+          from pathlib import Path
+          script=Path('infra/update/persist-online-update-selection.py').read_text()
+          forbidden=(
+              'subprocess', 'docker pull', 'docker compose', 'create-club-backup.sh',
+              'verify-club-backup.sh', 'requests.', 'urllib.request',
+          )
+          for token in forbidden:
+              assert token not in script, token
+          assert 'imagePullAllowed": False' in script
+          assert 'migrationAllowed": False' in script
+          assert 'productionMutationAllowed": False' in script
+          PY
