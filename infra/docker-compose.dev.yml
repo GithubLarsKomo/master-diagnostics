@@ -9,7 +9,7 @@ services:
     volumes:
       - libsql-dev-data:/var/lib/sqld
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health"]
+      test: ["CMD-SHELL", "while read -r _ local _ state _; do case \"$${local}:$${state}\" in *:1F90:0A) exit 0;; esac; done < /proc/net/tcp; exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
