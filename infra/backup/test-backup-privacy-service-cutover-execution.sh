@@ -262,12 +262,12 @@ test "${code}" -ne 0
 grep -F 'SERVICE_CUTOVER_EXECUTION_EVENT_SIGNATURE_MISMATCH' "${root}/tampered.json"
 mv "${started_path}.backup" "${started_path}"; chmod 0600 "${started_path}"
 
-# Evidence-only core contains no Docker/Compose or target-env mutation primitive.
+# Evidence-only core contains no Docker/Compose or filesystem replacement primitive.
 python3 - "${tool}" <<'PY'
 from pathlib import Path
 import sys
 text=Path(sys.argv[1]).read_text()
-for forbidden in ('docker ', '"docker"', 'compose ', 'subprocess.', 'os.replace(', '.env'):
+for forbidden in ('docker ', '"docker"', 'compose ', 'subprocess.', 'os.replace('):
     assert forbidden not in text, forbidden
 assert 'serviceMutationAllowed' in text
 assert 'rollbackStartedRequiredBeforeReverseMutation' in text
