@@ -1,4 +1,4 @@
-# Backup Privacy Activation Readiness v2
+# Backup Privacy Activation Readiness v1 – kanonisch gehärtet
 
 ## Zweck
 
@@ -102,6 +102,8 @@ practicalRestoreEvidenceVerified=true
 automaticActivationPerformed=false
 privacyBackupActivationAllowed=false
 ```
+
+Das Ausgabeformat bleibt absichtlich `readinessVersion=1`, damit die bereits signierte Manual-Attestation-/Activation-Kette nicht wegen einer reinen Verifikationshärtung ein neues Schema benötigt.
 
 Als **Zielkonfiguration**, nicht als automatisch gesetzte Konfiguration, wird ausgegeben:
 
