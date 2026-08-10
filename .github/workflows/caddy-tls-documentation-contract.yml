@@ -44,7 +44,7 @@ jobs:
           cp .env.example .env
           sed -i 's/diagnostics.example.org/localhost/g' .env
           sed -i 's/replace-with-at-least-32-random-bytes/ci-only-secret-with-at-least-32-characters/' .env
-          docker compose --env-file .env -f infra/docker-compose.club.yml config --format json >/tmp/club-compose.json
+          docker compose --profile backup --env-file .env -f infra/docker-compose.club.yml config --format json >/tmp/club-compose.json
           python3 - <<'PY'
           import json
           from pathlib import Path
