@@ -1,0 +1,91 @@
+name: Club Fresh Install Smoke
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/club-fresh-install-smoke.yml'
+      - 'infra/ci/smoke-club-fresh-install.sh'
+      - 'infra/docker-compose.club.yml'
+      - 'infra/caddy/**'
+      - 'apps/web/**'
+      - 'packages/**'
+      - '.env.example'
+      - 'docs/deployment-club.md'
+      - 'TASKS.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/club-fresh-install-smoke.yml'
+      - 'infra/ci/smoke-club-fresh-install.sh'
+      - 'infra/docker-compose.club.yml'
+      - 'infra/caddy/**'
+      - 'apps/web/**'
+      - 'packages/**'
+      - '.env.example'
+      - 'docs/deployment-club.md'
+      - 'TASKS.md'
+
+jobs:
+  fresh-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify smoke harness safety boundary
+        run: |
+          bash -n infra/ci/smoke-club-fresh-install.sh
+          python3 - <<'PY'
+          from pathlib import Path
+
+          script=Path('infra/ci/smoke-club-fresh-install.sh').read_text()
+          for required in (
+              'docker compose',
+              'up -d --build',
+              'migrate 120',
+              'privacy-check 120',
+              'https://localhost/api/health',
+              'down -v --remove-orphans',
+              'PRIVACY_BACKUP_STATE=DISABLED',
+              'PRIVACY_NOTIFICATIONS_STATE=DISABLED',
+          ):
+              assert required in script, required
+          for forbidden in (
+              'PRIVACY_BACKUP_STATE=ENABLED',
+              '--profile backup',
+              'run-club-restore-rto-drill.sh',
+              'execute-backup-privacy',
+          ):
+              assert forbidden not in script, forbidden
+          PY
+
+      - name: Execute from-empty-volume Club deployment
+        env:
+          MASTER_DIAGNOSTICS_FRESH_INSTALL_PROJECT: mdfresh${{ github.run_id }}${{ github.run_attempt }}
+        run: bash infra/ci/smoke-club-fresh-install.sh | tee /tmp/club-fresh-install.json
+
+      - name: Verify structured result and cleanup
+        env:
+          MASTER_DIAGNOSTICS_FRESH_INSTALL_PROJECT: mdfresh${{ github.run_id }}${{ github.run_attempt }}
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          rows=[line for line in Path('/tmp/club-fresh-install.json').read_text().splitlines() if line.strip().startswith('{')]
+          assert rows, 'fresh-install smoke emitted no structured result'
+          result=json.loads(rows[-1])
+          assert result == {
+              'mode':'CLUB_FRESH_INSTALL_SMOKE',
+              'status':'HEALTHY',
+              'project':result['project'],
+              'migrationCompleted':True,
+              'privacyPreflightCompleted':True,
+              'appHealthy':True,
+              'caddyTlsHealthy':True,
+              'maintenanceRunning':True,
+              'freshPersistentVolumes':6,
+          }
+          PY
+          test ! -e .env
+          test -z "$(docker ps -aq --filter label=com.docker.compose.project="$MASTER_DIAGNOSTICS_FRESH_INSTALL_PROJECT")"
+          test -z "$(docker volume ls -q --filter label=com.docker.compose.project="$MASTER_DIAGNOSTICS_FRESH_INSTALL_PROJECT")"
