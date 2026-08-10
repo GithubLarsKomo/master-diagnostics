@@ -94,7 +94,7 @@ describe('isolated backup restore staging', () => {
     expect(provenance.record).toMatchObject({
       stagingName: staged.stagingName,
       backupFileName: created.fileName,
-      backupSha256: created.sha256,
+      backupSha256: `sha256:${created.sha256}`,
       backupCreatedAt: created.createdAt,
       bundleVersion: 1,
       consistency: 'CLEANLY_STOPPED_VOLUMES',
