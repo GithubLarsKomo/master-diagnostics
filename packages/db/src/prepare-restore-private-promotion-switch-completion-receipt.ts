@@ -1,5 +1,6 @@
 import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
+import { readVerifiedRestoreSourceProvenance } from './services/backup-restore-source-provenance';
 import { readAuthenticatedRestorePrivatePromotionSwitchIntent } from './services/restore-private-promotion-switch-authentication';
 import {
   ensureSignedRestorePrivatePromotionSwitchCompletionReceipt,
@@ -28,18 +29,22 @@ async function main(): Promise<void> {
   const journalFile = requireAbsolutePath('RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_FILE');
   const executionDir = requireAbsolutePath('RESTORE_PRIVATE_PROMOTION_SWITCH_EXECUTION_DIR');
   const healthcheckFile = requireAbsolutePath('RESTORE_PRIVATE_PROMOTION_POST_SWITCH_HEALTHCHECK_FILE');
+  const sourceProvenanceFile = requireAbsolutePath('RESTORE_SOURCE_PROVENANCE_FILE');
+  const backupKeyFile = requireAbsolutePath('BACKUP_KEY_FILE');
   const keyFile = requireAbsolutePath('RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE');
 
   const intent = await readAuthenticatedRestorePrivatePromotionSwitchIntent(intentFile, keyFile);
   const journal = await readVerifiedRestorePrivatePromotionSwitchJournal(journalFile, keyFile, intent);
   const events = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(executionDir, keyFile, journal);
   const healthcheck = await readHealthcheck(healthcheckFile);
+  const provenance = await readVerifiedRestoreSourceProvenance(sourceProvenanceFile, backupKeyFile);
   const result = await ensureSignedRestorePrivatePromotionSwitchCompletionReceipt(
     executionDir,
     keyFile,
     journal,
     events,
     healthcheck,
+    provenance,
     new Date().toISOString(),
   );
 
@@ -51,6 +56,12 @@ async function main(): Promise<void> {
     receiptPath: result.path,
     receiptSignature: result.envelope.signature,
     candidateSetId: result.envelope.record.candidateSetId,
+    sourceProvenanceSignature: result.envelope.record.sourceProvenanceSignature,
+    sourceStagingName: result.envelope.record.sourceStagingName,
+    sourceBackupFileName: result.envelope.record.sourceBackupFileName,
+    sourceBackupSha256: result.envelope.record.sourceBackupSha256,
+    sourceBackupCreatedAt: result.envelope.record.sourceBackupCreatedAt,
+    sourceBackupManifestFingerprint: result.envelope.record.sourceBackupManifestFingerprint,
     postSwitchHealthcheckFingerprint: result.envelope.record.postSwitchHealthcheckFingerprint,
     promotionExecuted: result.envelope.record.promotionExecuted,
   })}\n`);
