@@ -1,0 +1,70 @@
+name: Backup Privacy Service Cutover Preflight Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backup-privacy-service-cutover-preflight-contract.yml'
+      - 'infra/backup/backup-privacy-service-cutover-preflight.py'
+      - 'infra/backup/test-backup-privacy-service-cutover-preflight.sh'
+      - 'infra/backup/backup-privacy-service-cutover-execution.py'
+      - 'infra/backup/test-backup-privacy-service-cutover-execution.sh'
+      - 'docs/backup-privacy-service-cutover-preflight.md'
+      - '.env.example'
+      - 'TASKS.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-privacy-service-cutover-preflight-contract.yml'
+      - 'infra/backup/backup-privacy-service-cutover-preflight.py'
+      - 'infra/backup/test-backup-privacy-service-cutover-preflight.sh'
+      - 'infra/backup/backup-privacy-service-cutover-execution.py'
+      - 'infra/backup/test-backup-privacy-service-cutover-execution.sh'
+      - 'docs/backup-privacy-service-cutover-preflight.md'
+      - '.env.example'
+      - 'TASKS.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify syntax and evidence-only boundary
+        run: |
+          python3 -m py_compile infra/backup/backup-privacy-service-cutover-preflight.py
+          bash -n infra/backup/test-backup-privacy-service-cutover-preflight.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('infra/backup/backup-privacy-service-cutover-preflight.py').read_text()
+          assert 'masters:backup-privacy-service-cutover-preflight:v1' in text
+          assert 'CUTOVER_STARTED' in text
+          assert 'preflightVerifiedBeforeMutation' in text
+          assert 'targetMutationAuthorized' in text
+          assert 'serviceMutationObserved' in text
+          for forbidden in ('"docker"', 'docker compose', 'subprocess.', 'os.replace(', 'force-recreate'):
+              assert forbidden not in text, forbidden
+          PY
+
+      - name: Verify signed pre-mutation proof and retry semantics
+        run: bash infra/backup/test-backup-privacy-service-cutover-preflight.sh
+
+      - name: Verify documentation and real gates remain open
+        run: |
+          grep -F 'masters:backup-privacy-service-cutover-preflight:v1' docs/backup-privacy-service-cutover-preflight.md
+          grep -F 'CUTOVER_STARTED persisted' docs/backup-privacy-service-cutover-preflight.md
+          grep -F 'privacy-check success' docs/backup-privacy-service-cutover-preflight.md
+          grep -F 'erst nach der ersten Service-Mutation' docs/backup-privacy-service-cutover-preflight.md >/dev/null 2>&1 && exit 1 || true
+          grep -F 'PRIVACY_BACKUP_STATE=DISABLED' .env.example
+          grep -F -- '- [ ] Restore-Drill und RTO-Test' TASKS.md
+          grep -F -- '- [ ] Backup und Restore praktisch getestet wurden' TASKS.md
