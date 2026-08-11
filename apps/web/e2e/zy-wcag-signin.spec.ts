@@ -58,6 +58,12 @@ test('WCAG core audit covers sign-in after Club bootstrap', async ({ page }) => 
   await auditSignIn(page);
 
   await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByLabel('E-Mail', { exact: true }).fill(adminEmail);
+  await page.getByLabel('Passwort', { exact: true }).fill('falsches-passwort');
+  await page.getByRole('button', { name: 'Anmelden' }).click();
+  await expect(page).toHaveURL(/\/sign-in$/);
+  await expect(page.locator('#sign-in-error[role="alert"]')).toHaveText('E-Mail-Adresse oder Passwort ist falsch.');
+
   await signIn(page);
   await expect(page.getByRole('heading', { name: 'Masters Diagnostics' })).toBeVisible();
 });
