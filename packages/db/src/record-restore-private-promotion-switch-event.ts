@@ -1,6 +1,10 @@
 import { isAbsolute, join } from 'node:path';
 import { readAuthenticatedRestorePrivatePromotionSwitchIntent } from './services/restore-private-promotion-switch-authentication';
 import {
+  RESTORE_PRIVATE_PROMOTION_SOURCE_PROVENANCE_BINDING_FILE_NAME,
+  readVerifiedRestorePrivatePromotionSourceProvenanceBinding,
+} from './services/restore-private-promotion-source-provenance-binding';
+import {
   RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_FILE_NAME,
   readVerifiedRestorePrivatePromotionSwitchCompletionReceipt,
 } from './services/restore-private-promotion-switch-completion-receipt';
@@ -49,11 +53,17 @@ async function main(): Promise<void> {
   let completionReceiptVerified = false;
   if (phase === 'COMPLETED') {
     const events = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(executionDir, keyFile, journal);
+    const sourceBinding = await readVerifiedRestorePrivatePromotionSourceProvenanceBinding(
+      join(executionDir, RESTORE_PRIVATE_PROMOTION_SOURCE_PROVENANCE_BINDING_FILE_NAME),
+      keyFile,
+      intent,
+    );
     await readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(
       join(executionDir, RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_FILE_NAME),
       keyFile,
       journal,
       events,
+      sourceBinding,
     );
     completionReceiptVerified = true;
   }

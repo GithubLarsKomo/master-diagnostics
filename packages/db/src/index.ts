@@ -44,6 +44,7 @@ export * from './services/restore-private-promotion-candidate-plan';
 export * from './services/restore-private-promotion-candidate-tree';
 export * from './services/restore-private-promotion-switch-intent';
 export * from './services/restore-private-promotion-switch-authentication';
+export * from './services/restore-private-promotion-source-provenance-binding';
 export * from './services/restore-private-promotion-switch-journal';
 export * from './services/restore-private-promotion-switch-execution';
 export * from './services/restore-private-promotion-switch-completion-receipt';

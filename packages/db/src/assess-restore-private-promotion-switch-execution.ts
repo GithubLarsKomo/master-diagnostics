@@ -1,6 +1,10 @@
 import { isAbsolute, join } from 'node:path';
 import { readAuthenticatedRestorePrivatePromotionSwitchIntent } from './services/restore-private-promotion-switch-authentication';
 import {
+  RESTORE_PRIVATE_PROMOTION_SOURCE_PROVENANCE_BINDING_FILE_NAME,
+  readVerifiedRestorePrivatePromotionSourceProvenanceBinding,
+} from './services/restore-private-promotion-source-provenance-binding';
+import {
   RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_FILE_NAME,
   readVerifiedRestorePrivatePromotionSwitchCompletionReceipt,
 } from './services/restore-private-promotion-switch-completion-receipt';
@@ -50,12 +54,20 @@ async function main(): Promise<void> {
   const assessment = assessRestorePrivatePromotionSwitchExecution(journal, events, currentVolumes);
 
   let completionReceiptVerified = false;
+  let sourceProvenanceBindingVerified = false;
   if (assessment.status === 'COMPLETED') {
+    const sourceBinding = await readVerifiedRestorePrivatePromotionSourceProvenanceBinding(
+      join(executionDir, RESTORE_PRIVATE_PROMOTION_SOURCE_PROVENANCE_BINDING_FILE_NAME),
+      keyFile,
+      intent,
+    );
+    sourceProvenanceBindingVerified = true;
     await readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(
       join(executionDir, RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_FILE_NAME),
       keyFile,
       journal,
       events,
+      sourceBinding,
     );
     completionReceiptVerified = true;
   }
@@ -66,6 +78,7 @@ async function main(): Promise<void> {
     switchIntentAuthenticated: true,
     journalVerified: true,
     eventCount: events.length,
+    sourceProvenanceBindingVerified,
     completionReceiptVerified,
   })}\n`);
 }

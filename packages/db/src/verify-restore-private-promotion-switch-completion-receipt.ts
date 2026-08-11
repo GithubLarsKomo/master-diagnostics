@@ -1,6 +1,10 @@
 import { join } from 'node:path';
 import { readAuthenticatedRestorePrivatePromotionSwitchIntent } from './services/restore-private-promotion-switch-authentication';
 import {
+  RESTORE_PRIVATE_PROMOTION_SOURCE_PROVENANCE_BINDING_FILE_NAME,
+  readVerifiedRestorePrivatePromotionSourceProvenanceBinding,
+} from './services/restore-private-promotion-source-provenance-binding';
+import {
   readVerifiedRestorePrivatePromotionSwitchCompletionReceipt,
   RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_FILE_NAME,
 } from './services/restore-private-promotion-switch-completion-receipt';
@@ -24,6 +28,11 @@ async function main(): Promise<void> {
   const receiptFile = join(executionDir, RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_FILE_NAME);
 
   const intent = await readAuthenticatedRestorePrivatePromotionSwitchIntent(intentFile, keyFile);
+  const sourceBinding = await readVerifiedRestorePrivatePromotionSourceProvenanceBinding(
+    join(executionDir, RESTORE_PRIVATE_PROMOTION_SOURCE_PROVENANCE_BINDING_FILE_NAME),
+    keyFile,
+    intent,
+  );
   const journal = await readVerifiedRestorePrivatePromotionSwitchJournal(journalFile, keyFile, intent);
   const events = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(executionDir, keyFile, journal);
   const receipt = await readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(
@@ -31,6 +40,7 @@ async function main(): Promise<void> {
     keyFile,
     journal,
     events,
+    sourceBinding,
   );
 
   process.stdout.write(`${JSON.stringify({
@@ -44,6 +54,14 @@ async function main(): Promise<void> {
     candidateSetId: receipt.record.candidateSetId,
     candidateSetFingerprint: receipt.record.candidateSetFingerprint,
     candidateSelectedEventSignature: receipt.record.candidateSelectedEventSignature,
+    sourceProvenanceBindingSignature: receipt.record.sourceProvenanceBindingSignature,
+    sourceProvenanceBindingFingerprint: receipt.record.sourceProvenanceBindingFingerprint,
+    sourceProvenanceSignature: receipt.record.sourceProvenanceSignature,
+    sourceStagingName: receipt.record.sourceStagingName,
+    sourceBackupFileName: receipt.record.sourceBackupFileName,
+    sourceBackupSha256: receipt.record.sourceBackupSha256,
+    sourceBackupCreatedAt: receipt.record.sourceBackupCreatedAt,
+    sourceBackupManifestFingerprint: receipt.record.sourceBackupManifestFingerprint,
     postSwitchHealthcheckFingerprint: receipt.record.postSwitchHealthcheckFingerprint,
     currentVolumeSet: receipt.record.currentVolumeSet,
     libsqlHealth: receipt.record.libsqlHealth,

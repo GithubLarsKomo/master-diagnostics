@@ -1,6 +1,10 @@
 import { lstat, readFile } from 'node:fs/promises';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { readAuthenticatedRestorePrivatePromotionSwitchIntent } from './services/restore-private-promotion-switch-authentication';
+import {
+  RESTORE_PRIVATE_PROMOTION_SOURCE_PROVENANCE_BINDING_FILE_NAME,
+  readVerifiedRestorePrivatePromotionSourceProvenanceBinding,
+} from './services/restore-private-promotion-source-provenance-binding';
 import {
   ensureSignedRestorePrivatePromotionSwitchCompletionReceipt,
   type RestorePrivatePromotionPostSwitchHealthcheck,
@@ -31,6 +35,11 @@ async function main(): Promise<void> {
   const keyFile = requireAbsolutePath('RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE');
 
   const intent = await readAuthenticatedRestorePrivatePromotionSwitchIntent(intentFile, keyFile);
+  const sourceBinding = await readVerifiedRestorePrivatePromotionSourceProvenanceBinding(
+    join(executionDir, RESTORE_PRIVATE_PROMOTION_SOURCE_PROVENANCE_BINDING_FILE_NAME),
+    keyFile,
+    intent,
+  );
   const journal = await readVerifiedRestorePrivatePromotionSwitchJournal(journalFile, keyFile, intent);
   const events = await readVerifiedRestorePrivatePromotionSwitchExecutionEvents(executionDir, keyFile, journal);
   const healthcheck = await readHealthcheck(healthcheckFile);
@@ -39,6 +48,7 @@ async function main(): Promise<void> {
     keyFile,
     journal,
     events,
+    sourceBinding,
     healthcheck,
     new Date().toISOString(),
   );
@@ -52,6 +62,10 @@ async function main(): Promise<void> {
     receiptSignature: result.envelope.signature,
     candidateSetId: result.envelope.record.candidateSetId,
     postSwitchHealthcheckFingerprint: result.envelope.record.postSwitchHealthcheckFingerprint,
+    sourceProvenanceBindingSignature: result.envelope.record.sourceProvenanceBindingSignature,
+    sourceBackupFileName: result.envelope.record.sourceBackupFileName,
+    sourceBackupSha256: result.envelope.record.sourceBackupSha256,
+    sourceBackupCreatedAt: result.envelope.record.sourceBackupCreatedAt,
     promotionExecuted: result.envelope.record.promotionExecuted,
   })}\n`);
 }

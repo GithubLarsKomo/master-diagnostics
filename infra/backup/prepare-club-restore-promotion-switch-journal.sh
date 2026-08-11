@@ -32,11 +32,14 @@ source "${ENV_FILE}"
 set +a
 
 replay_root="${RESTORE_PRIVACY_REPLAY_HOST_DIR:-/var/lib/master-diagnostics/restore-privacy-replay}"
+staging_root="${RESTORE_STAGING_HOST_DIR:-/var/lib/master-diagnostics/restore-staging}"
 journal_root="${RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_HOST_DIR:-/var/lib/master-diagnostics/restore-promotion-switch-journal}"
 promotion_key="${RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE:-/etc/master-diagnostics/restore-private-promotion.key}"
+backup_key="${BACKUP_KEY_FILE:-/etc/master-diagnostics/backup.key}"
 workspace="${replay_root}/${staging_name}"
 switch_dir="${workspace}/promotion/switch"
 switch_intent="${switch_dir}/promotion-switch-intent.json"
+source_provenance="${staging_root}/${staging_name}/restore-source-provenance.json"
 
 require_regular_file() {
   local path="$1"
@@ -59,9 +62,11 @@ require_non_symlink_dir() {
 require_non_symlink_dir "${workspace}" "Private restore workspace"
 require_non_symlink_dir "${switch_dir}" "Restore promotion switch directory"
 require_regular_file "${switch_intent}" "Signed restore promotion switch intent"
+require_regular_file "${source_provenance}" "Signed restore source provenance"
 require_regular_file "${promotion_key}" "Restore promotion key"
+require_regular_file "${backup_key}" "Backup encryption/provenance key"
 
-# Recompute the full candidate-set healthcheck immediately before durable journal creation.
+# Recompute the full candidate-set healthcheck immediately before durable evidence creation.
 tmp_dir="$(mktemp -d)"
 chmod 0700 "${tmp_dir}"
 cleanup() {
@@ -144,6 +149,15 @@ compose=(
   -f "${ROOT_DIR}/infra/docker-compose.club.yml"
   -f "${PROMOTION_COMPOSE_FILE}"
 )
+
+# Bind the verified encrypted-backup provenance to this exact authenticated switch intent before
+# the PENDING switch journal exists. Both artifacts live in the same durable candidate-set directory.
+"${compose[@]}" --profile backup build backup-restore-promotion-source-provenance-bind >&2
+"${compose[@]}" --profile backup run --rm --no-deps \
+  -v "${source_provenance}:/restore-source-provenance.json:ro" \
+  -v "${switch_intent}:/promotion-switch-intent.json:ro" \
+  backup-restore-promotion-source-provenance-bind >&2
+require_regular_file "${journal_dir}/promotion-source-provenance-binding.json" "Durable promotion source-provenance binding"
 
 "${compose[@]}" --profile backup build backup-restore-promotion-switch-journal >&2
 "${compose[@]}" --profile backup run --rm --no-deps \
