@@ -134,6 +134,11 @@ async function auditTextContrast(page: Page) {
     const findings: string[] = [];
     candidates.forEach((element) => {
       if (element.closest('[aria-hidden="true"]')) return;
+      // Native option popups are rendered by the browser/OS. Chromium exposes
+      // computed option colors without a reliable representation of the painted
+      // popup background, so pairing them here creates false contrast findings.
+      // The closed select control remains part of this audit.
+      if (element instanceof HTMLOptionElement) return;
       const style = getComputedStyle(element);
       if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) < 0.999) return;
       const foreground = parseRgb(style.color);
