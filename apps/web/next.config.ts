@@ -1,10 +1,14 @@
+import { fileURLToPath } from 'node:url';
 import type { NextConfig } from 'next';
+
+const workspaceRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 const nextConfig: NextConfig = {
   output: 'standalone',
-  outputFileTracingRoot: process.cwd().endsWith('/apps/web')
-    ? new URL('../..', import.meta.url).pathname
-    : process.cwd(),
+  outputFileTracingRoot: workspaceRoot,
+  turbopack: {
+    root: workspaceRoot,
+  },
   typedRoutes: true,
   allowedDevOrigins: ['127.0.0.1'],
 };
