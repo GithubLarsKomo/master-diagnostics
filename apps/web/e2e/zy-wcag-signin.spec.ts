@@ -3,6 +3,13 @@ import { expect, test, type Page } from '@playwright/test';
 const adminEmail = 'admin@example.test';
 const adminPassword = 'Correct-Horse-Battery-42';
 
+async function signIn(page: Page) {
+  await page.getByLabel('E-Mail', { exact: true }).fill(adminEmail);
+  await page.getByLabel('Passwort', { exact: true }).fill(adminPassword);
+  await page.getByRole('button', { name: 'Anmelden' }).click();
+  await page.waitForURL((url) => url.pathname === '/');
+}
+
 async function auditSignIn(page: Page) {
   await expect(page.locator('main')).toHaveCount(1);
   await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
@@ -38,7 +45,12 @@ async function auditSignIn(page: Page) {
 }
 
 test('WCAG core audit covers sign-in after Club bootstrap', async ({ page }) => {
+  // Each Playwright test gets a fresh browser context, so authenticate with the
+  // admin created by the earlier bootstrap smoke before exercising logout.
   await page.goto('/');
+  await expect(page).toHaveURL(/\/sign-in$/);
+  await signIn(page);
+
   await expect(page.getByRole('button', { name: 'Abmelden' })).toBeVisible();
   await page.getByRole('button', { name: 'Abmelden' }).click();
   await page.waitForURL((url) => url.pathname === '/sign-in');
@@ -46,9 +58,6 @@ test('WCAG core audit covers sign-in after Club bootstrap', async ({ page }) => 
   await auditSignIn(page);
 
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByLabel('E-Mail', { exact: true }).fill(adminEmail);
-  await page.getByLabel('Passwort', { exact: true }).fill(adminPassword);
-  await page.getByRole('button', { name: 'Anmelden' }).click();
-  await page.waitForURL((url) => url.pathname === '/');
+  await signIn(page);
   await expect(page.getByRole('heading', { name: 'Masters Diagnostics' })).toBeVisible();
 });
