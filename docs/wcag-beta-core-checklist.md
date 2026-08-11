@@ -2,15 +2,18 @@
 
 Status: **Gate offen**
 
-Diese Checkliste ergänzt den automatisierten Browser-Contract `apps/web/e2e/zz-wcag-core.spec.ts`. Ein grüner automatisierter Lauf allein schließt das Release-Gate nicht.
+Diese Checkliste ergänzt die automatisierten Browser-Contracts unter `apps/web/e2e/`. Ein grüner automatisierter Lauf allein schließt das Release-Gate nicht.
 
 ## Automatisierte Evidence
 
-Der Browser-Contract prüft auf den stabil erreichbaren Club-Beta-Oberflächen:
+Die Browser-Contracts prüfen auf dem realen Club-E2E-Lebenszyklus und den stabil erreichbaren Club-Beta-Oberflächen:
 
+- uninitialisiertes Club-Setup vor Bootstrap (`/setup`),
+- Sign-in nach kontrolliertem Logout (`/sign-in`),
+- Trainer-Startseite, Athletenliste, Testliste und vorhandene Testdetail-/Review-Oberfläche,
 - programmatische Namen für sichtbare Buttons, Links und Formcontrols,
 - genau ein `main`-Landmark und genau eine H1,
-- keine Übersprünge in der Heading-Hierarchie,
+- keine Übersprünge in der Heading-Hierarchie auf den geschützten Kernoberflächen,
 - keine doppelten DOM-IDs,
 - keine positiven `tabindex`-Werte,
 - kein `img` ohne `alt`-Attribut,
@@ -18,7 +21,7 @@ Der Browser-Contract prüft auf den stabil erreichbaren Club-Beta-Oberflächen:
 - Keyboard-Fokus bewegt sich über mehrere Bedienelemente,
 - mindestens ein sichtbarer Browser-/CSS-Fokusindikator,
 - kein seitenweiter horizontaler Overflow bei 320 CSS px,
-- Trainer-Startseite, Athletenliste, Testliste und vorhandene Testdetail-/Review-Oberfläche.
+- WCAG 1.4.12 Text Spacing mit 1.5 line-height, 2em paragraph spacing, 0.12em letter spacing und 0.16em word spacing ohne seitenweiten Overflow oder abgeschnittenen Text in `overflow:hidden/clip`-Containern.
 
 ## Manuelle Pflichtprüfung vor Gate-Schluss
 
@@ -50,9 +53,10 @@ Die folgenden Punkte sind für den realen Trainer-Kernpfad manuell in einem aktu
    - Zustände/Informationen werden nicht ausschließlich über Farbunterschiede vermittelt.
 8. **Zoom/Reflow**
    - Browserzoom 200 % ohne Informations-/Funktionsverlust,
-   - Reflow bei 400 % bzw. äquivalent 320 CSS px ohne zweidimensionales Scrollen, ausgenommen fachlich notwendige Datentabellen.
+   - automatisierter 320-CSS-px-Reflow ist grün; manuell verbleibt die Gegenprüfung bei 400 % inklusive fachlich notwendiger Datentabellen.
 9. **Textabstände**
-   - WCAG-Text-Spacing-Override (1.5 line-height, 2x paragraph spacing, 0.12em letter spacing, 0.16em word spacing) ohne Verlust/Überlagerung.
+   - automatisierter WCAG-1.4.12-Text-Spacing-Contract ist grün,
+   - manuelle visuelle Gegenprüfung bestätigt keinen Informationsverlust und keine Überlagerung im vollständigen Trainerpfad.
 10. **Statusmeldungen**
    - Offline/Sync, Validierung, Speichern, Report-Erzeugung und Fehlerzustände werden ohne Fokusverschiebung assistiv erkennbar.
 
@@ -78,6 +82,6 @@ Vor Schließen des Release-Gates hier ergänzen:
 
 ## Gate-Regel
 
-`TASKS.md` darf erst auf `[x] WCAG-2.2-AA-Kernprüfungen bestehen` gesetzt werden, wenn der automatisierte Browser-Contract auf aktuellem `main` grün ist und alle manuellen Pflichtpunkte oben mit `PASS` oder einer explizit begründeten, nicht beta-kritischen Ausnahme dokumentiert wurden.
+`TASKS.md` darf erst auf `[x] WCAG-2.2-AA-Kernprüfungen bestehen` gesetzt werden, wenn die automatisierten Browser-Contracts auf aktuellem `main` grün sind und alle manuellen Pflichtpunkte oben mit `PASS` oder einer explizit begründeten, nicht beta-kritischen Ausnahme dokumentiert wurden.
 
 Related: #276
