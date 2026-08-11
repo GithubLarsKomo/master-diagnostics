@@ -28,7 +28,7 @@ jobs:
           import base64, importlib.util, json
           from pathlib import Path
           root=Path('/tmp/online-update-events')
-          for name, byte in [('journal.key',101),('event.key',102)]:
+          for name, byte in [('journal.key',101),('event.key',102),('rollback-receipt.key',103)]:
               root.joinpath(name).write_text(base64.b64encode(bytes([byte])*32).decode()+'\n')
           spec=importlib.util.spec_from_file_location('journal',Path('infra/update/persist-online-update-execution-journal.py'))
           journal=importlib.util.module_from_spec(spec); spec.loader.exec_module(journal)
@@ -86,7 +86,7 @@ jobs:
           assert all(oct(p.stat().st_mode & 0o777)=='0o600' for p in (root/'success/events').glob('*.json'))
           PY
 
-      - name: Verify pre-mutation abort and post-stop rollback are distinct
+      - name: Verify pre-mutation abort and receipt-gated post-stop rollback
         run: |
           root=/tmp/online-update-events
           for phase in IMAGE_ACQUISITION_STARTED IMAGES_ACQUIRED ABORTED_BEFORE_PRODUCTION_MUTATION; do
@@ -101,19 +101,114 @@ jobs:
           assert r['productionMutationStarted'] is False and r['updateExecuted'] is False
           PY
 
-          phases=(IMAGE_ACQUISITION_STARTED IMAGES_ACQUIRED WRITER_STOP_STARTED WRITERS_STOPPED MIGRATION_STARTED ROLLBACK_STARTED ROLLBACK_COMPLETED)
+          phases=(IMAGE_ACQUISITION_STARTED IMAGES_ACQUIRED WRITER_STOP_STARTED WRITERS_STOPPED MIGRATION_STARTED ROLLBACK_STARTED)
           i=0
           for phase in "${phases[@]}"; do
             i=$((i+1)); printf -v second '%02d' "$i"
             python3 infra/update/persist-online-update-execution-event.py --journal "$root/rollback/online-update-execution-journal.json" --journal-key "$root/journal.key" --target-dir "$root/rollback/events" --key-file "$root/event.key" --phase "$phase" --recorded-at "2026-08-10T09:02:${second}.000Z" > "$root/rollback-${i}.json"
           done
+
+          set +e
+          python3 infra/update/persist-online-update-execution-event.py \
+            --journal "$root/rollback/online-update-execution-journal.json" --journal-key "$root/journal.key" \
+            --target-dir "$root/rollback/events" --key-file "$root/event.key" \
+            --phase ROLLBACK_COMPLETED --recorded-at '2026-08-10T09:02:08.000Z' \
+            >/tmp/rollback-no-receipt.out 2>/tmp/rollback-no-receipt.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'requires --rollback-receipt and --rollback-receipt-key' /tmp/rollback-no-receipt.err
+
+          python3 - <<'PY'
+          import base64, importlib.util, json
+          from pathlib import Path
+          root=Path('/tmp/online-update-events')
+
+          def load(name,path):
+              spec=importlib.util.spec_from_file_location(name,Path(path)); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+          journal_mod=load('journal','infra/update/persist-online-update-execution-journal.py')
+          event_mod=load('events','infra/update/persist-online-update-execution-event.py')
+          receipt_mod=load('receipt','infra/update/persist-online-update-rollback-receipt.py')
+          journal=journal_mod.verify_envelope(
+              json.loads(root.joinpath('rollback/online-update-execution-journal.json').read_text()),
+              base64.b64decode(root.joinpath('journal.key').read_text().strip()),
+          )
+          events=event_mod.read_events(
+              root/'rollback/events',
+              base64.b64decode(root.joinpath('event.key').read_text().strip()),
+              journal,
+          )
+          assert events[-1]['record']['phase']=='ROLLBACK_STARTED'
+          anchor=journal['record']['rollbackAnchor']
+          h=lambda c:'hmac-sha256:'+c*64
+          s=lambda c:'sha256:'+c*64
+          restore=receipt_mod.validate_restore_verification({
+              'mode':'RESTORE_PROMOTION_SWITCH_COMPLETION_RECEIPT_VERIFICATION','status':'VERIFIED','receiptVersion':1,
+              'receiptSignature':h('3'),'completedAt':'2026-08-10T09:02:06.000Z','journalFingerprint':s('b'),'journalSignature':h('4'),
+              'candidateSetId':'restore-0123456789abcdefabcd','candidateSetFingerprint':s('c'),'candidateSelectedEventSignature':h('5'),
+              'sourceProvenanceBindingSignature':h('6'),'sourceProvenanceBindingFingerprint':s('d'),'sourceProvenanceSignature':h('7'),
+              'sourceStagingName':'restore-20260810T080001Z-12345678-1234-1234-1234-123456789abc',
+              'sourceBackupFileName':anchor['fileName'],'sourceBackupSha256':anchor['sha256'],'sourceBackupCreatedAt':anchor['createdAt'],
+              'sourceBackupManifestFingerprint':s('e'),'postSwitchHealthcheckFingerprint':s('f'),'currentVolumeSet':[],
+              'libsqlHealth':'healthy','appHealth':'healthy','exportCleanupRunning':True,'retentionScanRunning':True,
+              'caddyPreserved':True,'rollbackVolumesRetained':True,'productionMutationCompleted':True,'promotionExecuted':True,
+          })
+          record=receipt_mod.create_record(journal,events[-1],restore,'2026-08-10T09:02:07.000Z')
+          key=receipt_mod.read_key(root/'rollback-receipt.key')
+          receipt_dir=root/'rollback/receipt'
+          path,created,envelope=receipt_mod.persist(receipt_dir,key,record)
+          assert created is True
+
+          wrong=dict(record)
+          wrong['rollbackStartedEventSignature']=h('9')
+          wrong['receiptFingerprint']=receipt_mod.fingerprint_record(wrong)
+          wrong_envelope={'envelopeVersion':1,'record':wrong,'signature':receipt_mod.sign_record(key,wrong)}
+          wrong_dir=root/'rollback/wrong-receipt'; wrong_dir.mkdir(mode=0o700)
+          wrong_path=wrong_dir/'online-update-rollback-receipt.json'
+          wrong_path.write_text(json.dumps(wrong_envelope,indent=2)+'\n'); wrong_path.chmod(0o600)
+          PY
+
+          set +e
+          python3 infra/update/persist-online-update-execution-event.py \
+            --journal "$root/rollback/online-update-execution-journal.json" --journal-key "$root/journal.key" \
+            --target-dir "$root/rollback/events" --key-file "$root/event.key" \
+            --phase ROLLBACK_COMPLETED --recorded-at '2026-08-10T09:02:08.000Z' \
+            --rollback-receipt "$root/rollback/wrong-receipt/online-update-rollback-receipt.json" \
+            --rollback-receipt-key "$root/rollback-receipt.key" \
+            >/tmp/rollback-wrong-receipt.out 2>/tmp/rollback-wrong-receipt.err
+          code=$?
+          set -e
+          test "$code" -ne 0
+          grep -q 'not bound to the current ROLLBACK_STARTED event' /tmp/rollback-wrong-receipt.err
+
+          python3 infra/update/persist-online-update-execution-event.py \
+            --journal "$root/rollback/online-update-execution-journal.json" --journal-key "$root/journal.key" \
+            --target-dir "$root/rollback/events" --key-file "$root/event.key" \
+            --phase ROLLBACK_COMPLETED --recorded-at '2026-08-10T09:02:08.000Z' \
+            --rollback-receipt "$root/rollback/receipt/online-update-rollback-receipt.json" \
+            --rollback-receipt-key "$root/rollback-receipt.key" \
+            > "$root/rollback-7.json"
+
+          python3 infra/update/persist-online-update-execution-event.py \
+            --journal "$root/rollback/online-update-execution-journal.json" --journal-key "$root/journal.key" \
+            --target-dir "$root/rollback/events" --key-file "$root/event.key" \
+            --phase ROLLBACK_COMPLETED --recorded-at '2026-08-10T09:02:09.000Z' \
+            --rollback-receipt "$root/rollback/receipt/online-update-rollback-receipt.json" \
+            --rollback-receipt-key "$root/rollback-receipt.key" \
+            > "$root/rollback-7-retry.json"
+
           python3 - <<'PY'
           import json
           from pathlib import Path
-          r=json.loads(Path('/tmp/online-update-events/rollback-7.json').read_text())
+          root=Path('/tmp/online-update-events')
+          r=json.loads(root.joinpath('rollback-7.json').read_text())
+          retry=json.loads(root.joinpath('rollback-7-retry.json').read_text())
           assert r['phase']=='ROLLBACK_COMPLETED' and r['terminal'] is True
           assert r['productionMutationStarted'] is True and r['migrationStarted'] is True
           assert r['updateExecuted'] is False and r['nextAllowedPhases']==[]
+          assert r['eventCreated'] is True
+          assert retry['eventCreated'] is False and retry['eventReused'] is True
+          assert retry['eventSignature']==r['eventSignature']
           PY
 
       - name: Reject illegal rollback, timestamp reversal, and tampering
@@ -160,4 +255,7 @@ jobs:
               assert phase in script
           assert 'previousEventSignature' in script
           assert 'updateExecuted": phase == "COMPLETED"' in script
+          assert '--rollback-receipt' in script
+          assert '--rollback-receipt-key' in script
+          assert 'verify_rollback_completion_receipt' in script
           PY
