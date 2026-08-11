@@ -2,6 +2,9 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto
 import { chmod, link, lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, isAbsolute, join } from 'node:path';
 import type {
+  SignedRestorePrivatePromotionSourceProvenanceBindingEnvelope,
+} from './restore-private-promotion-source-provenance-binding';
+import type {
   SignedRestorePrivatePromotionSwitchExecutionEventEnvelope,
 } from './restore-private-promotion-switch-execution';
 import type { SignedRestorePrivatePromotionSwitchJournalEnvelope } from './restore-private-promotion-switch-journal';
@@ -48,6 +51,14 @@ export interface RestorePrivatePromotionSwitchCompletionReceiptRecord {
   readonly candidateSetId: string;
   readonly candidateSetFingerprint: `sha256:${string}`;
   readonly candidateSelectedEventSignature: `hmac-sha256:${string}`;
+  readonly sourceProvenanceBindingSignature: `hmac-sha256:${string}`;
+  readonly sourceProvenanceBindingFingerprint: `sha256:${string}`;
+  readonly sourceProvenanceSignature: `hmac-sha256:${string}`;
+  readonly sourceStagingName: string;
+  readonly sourceBackupFileName: string;
+  readonly sourceBackupSha256: `sha256:${string}`;
+  readonly sourceBackupCreatedAt: string;
+  readonly sourceBackupManifestFingerprint: `sha256:${string}`;
   readonly postSwitchHealthcheckVersion: 1;
   readonly postSwitchHealthcheckFingerprint: `sha256:${string}`;
   readonly currentVolumeSet: 'CANDIDATE';
@@ -169,10 +180,35 @@ function requireCandidateSelectedEvent(
   return candidateSelected;
 }
 
+function verifySourceBinding(
+  binding: Readonly<SignedRestorePrivatePromotionSourceProvenanceBindingEnvelope>,
+  journal: Readonly<SignedRestorePrivatePromotionSwitchJournalEnvelope>,
+): void {
+  if (binding.envelopeVersion !== 1) throw new Error('Restore promotion source-provenance binding envelope is invalid');
+  assertHmac(binding.signature, 'Restore promotion source-provenance binding signature');
+  const record = binding.record;
+  assertHmac(record.sourceProvenanceSignature, 'Restore source provenance signature');
+  assertSha256(record.bindingFingerprint, 'Restore promotion source-provenance binding fingerprint');
+  assertSha256(record.backupSha256, 'Restore source backup SHA-256');
+  assertSha256(record.backupManifestFingerprint, 'Restore source backup manifest fingerprint');
+  assertTimestamp(record.backupCreatedAt, 'Restore source backup createdAt');
+  if (
+    record.planFingerprint !== journal.record.planFingerprint
+    || record.candidateSetId !== journal.record.candidateSetId
+    || record.candidateSetFingerprint !== journal.record.candidateSetFingerprint
+  ) {
+    throw new Error('Restore promotion source-provenance binding does not match durable switch journal');
+  }
+  if (record.productionMutationAllowed !== false || record.promotionExecuted !== false) {
+    throw new Error('Restore promotion source-provenance binding crossed the production mutation boundary');
+  }
+}
+
 function validateRecord(
   record: Readonly<RestorePrivatePromotionSwitchCompletionReceiptRecord>,
   journal: Readonly<SignedRestorePrivatePromotionSwitchJournalEnvelope>,
   candidateSelected: Readonly<SignedRestorePrivatePromotionSwitchExecutionEventEnvelope>,
+  binding: Readonly<SignedRestorePrivatePromotionSourceProvenanceBindingEnvelope>,
 ): void {
   if (record.receiptVersion !== 1 || record.status !== 'PROMOTED') {
     throw new Error('Restore promotion completion receipt version or status is invalid');
@@ -185,6 +221,12 @@ function validateRecord(
   assertHmac(record.journalSignature, 'Completion receipt journal signature');
   assertSha256(record.candidateSetFingerprint, 'Completion receipt candidate-set fingerprint');
   assertHmac(record.candidateSelectedEventSignature, 'Completion receipt candidate-selected event signature');
+  assertHmac(record.sourceProvenanceBindingSignature, 'Completion receipt source-provenance binding signature');
+  assertSha256(record.sourceProvenanceBindingFingerprint, 'Completion receipt source-provenance binding fingerprint');
+  assertHmac(record.sourceProvenanceSignature, 'Completion receipt source provenance signature');
+  assertSha256(record.sourceBackupSha256, 'Completion receipt source backup SHA-256');
+  assertSha256(record.sourceBackupManifestFingerprint, 'Completion receipt source backup manifest fingerprint');
+  assertTimestamp(record.sourceBackupCreatedAt, 'Completion receipt source backup createdAt');
   assertSha256(record.postSwitchHealthcheckFingerprint, 'Completion receipt healthcheck fingerprint');
   if (
     record.journalFingerprint !== journal.record.journalFingerprint
@@ -194,6 +236,18 @@ function validateRecord(
     || record.candidateSelectedEventSignature !== candidateSelected.signature
   ) {
     throw new Error('Restore promotion completion receipt does not match durable switch evidence');
+  }
+  if (
+    record.sourceProvenanceBindingSignature !== binding.signature
+    || record.sourceProvenanceBindingFingerprint !== binding.record.bindingFingerprint
+    || record.sourceProvenanceSignature !== binding.record.sourceProvenanceSignature
+    || record.sourceStagingName !== binding.record.stagingName
+    || record.sourceBackupFileName !== binding.record.backupFileName
+    || record.sourceBackupSha256 !== binding.record.backupSha256
+    || record.sourceBackupCreatedAt !== binding.record.backupCreatedAt
+    || record.sourceBackupManifestFingerprint !== binding.record.backupManifestFingerprint
+  ) {
+    throw new Error('Restore promotion completion receipt does not match source-provenance binding');
   }
   if (
     record.postSwitchHealthcheckVersion !== 1
@@ -240,12 +294,15 @@ function signRecord(key: Buffer, record: Readonly<RestorePrivatePromotionSwitchC
 export function createRestorePrivatePromotionSwitchCompletionReceiptRecord(
   journal: Readonly<SignedRestorePrivatePromotionSwitchJournalEnvelope>,
   events: readonly Readonly<SignedRestorePrivatePromotionSwitchExecutionEventEnvelope>[],
+  sourceBinding: Readonly<SignedRestorePrivatePromotionSourceProvenanceBindingEnvelope>,
   healthcheck: Readonly<RestorePrivatePromotionPostSwitchHealthcheck>,
   completedAt: string,
 ): Readonly<RestorePrivatePromotionSwitchCompletionReceiptRecord> {
   const candidateSelected = requireCandidateSelectedEvent(events, false);
+  verifySourceBinding(sourceBinding, journal);
   verifyHealthcheck(healthcheck, journal);
   assertTimestamp(completedAt, 'Restore promotion completion receipt completedAt');
+  const source = sourceBinding.record;
   const record = Object.freeze({
     receiptVersion: 1 as const,
     status: 'PROMOTED' as const,
@@ -255,6 +312,14 @@ export function createRestorePrivatePromotionSwitchCompletionReceiptRecord(
     candidateSetId: journal.record.candidateSetId,
     candidateSetFingerprint: journal.record.candidateSetFingerprint,
     candidateSelectedEventSignature: candidateSelected.signature,
+    sourceProvenanceBindingSignature: sourceBinding.signature,
+    sourceProvenanceBindingFingerprint: source.bindingFingerprint,
+    sourceProvenanceSignature: source.sourceProvenanceSignature,
+    sourceStagingName: source.stagingName,
+    sourceBackupFileName: source.backupFileName,
+    sourceBackupSha256: source.backupSha256,
+    sourceBackupCreatedAt: source.backupCreatedAt,
+    sourceBackupManifestFingerprint: source.backupManifestFingerprint,
     postSwitchHealthcheckVersion: 1 as const,
     postSwitchHealthcheckFingerprint: sha256(JSON.stringify(normalizedHealthcheckBody(healthcheck))),
     currentVolumeSet: 'CANDIDATE' as const,
@@ -268,7 +333,7 @@ export function createRestorePrivatePromotionSwitchCompletionReceiptRecord(
     productionMutationCompleted: true as const,
     promotionExecuted: true as const,
   });
-  validateRecord(record, journal, candidateSelected);
+  validateRecord(record, journal, candidateSelected, sourceBinding);
   return record;
 }
 
@@ -277,19 +342,21 @@ export async function readVerifiedRestorePrivatePromotionSwitchCompletionReceipt
   keyFile: string,
   journal: Readonly<SignedRestorePrivatePromotionSwitchJournalEnvelope>,
   events: readonly Readonly<SignedRestorePrivatePromotionSwitchExecutionEventEnvelope>[],
+  sourceBinding: Readonly<SignedRestorePrivatePromotionSourceProvenanceBindingEnvelope>,
 ): Promise<Readonly<SignedRestorePrivatePromotionSwitchCompletionReceiptEnvelope>> {
   if (!isAbsolute(filePath)) throw new Error('Restore promotion completion receipt path must be absolute');
   if (basename(filePath) !== RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_FILE_NAME) {
     throw new Error('Restore promotion completion receipt file name is invalid');
   }
   const candidateSelected = requireCandidateSelectedEvent(events, true);
+  verifySourceBinding(sourceBinding, journal);
   const stat = await lstat(filePath);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Restore promotion completion receipt must be a regular file');
   const parsed = JSON.parse(await readFile(filePath, 'utf8')) as Partial<SignedRestorePrivatePromotionSwitchCompletionReceiptEnvelope>;
   if (parsed.envelopeVersion !== 1 || !parsed.record || typeof parsed.signature !== 'string') {
     throw new Error('Restore promotion completion receipt envelope is invalid');
   }
-  validateRecord(parsed.record, journal, candidateSelected);
+  validateRecord(parsed.record, journal, candidateSelected, sourceBinding);
   if (!HMAC_SHA256_SIGNATURE.test(parsed.signature)) throw new Error('Restore promotion completion receipt signature is invalid');
   const key = await readSigningKey(keyFile);
   const expected = signRecord(key, parsed.record);
@@ -306,6 +373,7 @@ export async function ensureSignedRestorePrivatePromotionSwitchCompletionReceipt
   keyFile: string,
   journal: Readonly<SignedRestorePrivatePromotionSwitchJournalEnvelope>,
   events: readonly Readonly<SignedRestorePrivatePromotionSwitchExecutionEventEnvelope>[],
+  sourceBinding: Readonly<SignedRestorePrivatePromotionSourceProvenanceBindingEnvelope>,
   healthcheck: Readonly<RestorePrivatePromotionPostSwitchHealthcheck>,
   completedAt: string,
 ): Promise<Readonly<{ path: string; created: boolean; envelope: SignedRestorePrivatePromotionSwitchCompletionReceiptEnvelope }>> {
@@ -314,12 +382,24 @@ export async function ensureSignedRestorePrivatePromotionSwitchCompletionReceipt
   await chmod(targetDir, 0o700);
   const finalPath = join(targetDir, RESTORE_PRIVATE_PROMOTION_SWITCH_COMPLETION_RECEIPT_FILE_NAME);
   try {
-    const existing = await readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(finalPath, keyFile, journal, events);
+    const existing = await readVerifiedRestorePrivatePromotionSwitchCompletionReceipt(
+      finalPath,
+      keyFile,
+      journal,
+      events,
+      sourceBinding,
+    );
     return Object.freeze({ path: finalPath, created: false, envelope: existing });
   } catch (error) {
     if ((error as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') throw error;
   }
-  const record = createRestorePrivatePromotionSwitchCompletionReceiptRecord(journal, events, healthcheck, completedAt);
+  const record = createRestorePrivatePromotionSwitchCompletionReceiptRecord(
+    journal,
+    events,
+    sourceBinding,
+    healthcheck,
+    completedAt,
+  );
   const key = await readSigningKey(keyFile);
   const envelope = Object.freeze({ envelopeVersion: 1 as const, record, signature: signRecord(key, record) });
   const serialized = `${JSON.stringify(envelope, null, 2)}\n`;
