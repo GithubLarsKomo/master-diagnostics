@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { db } from '../src/lib/db';
 
 const adminEmail = 'admin@example.test';
 const adminPassword = 'Correct-Horse-Battery-42';
@@ -17,6 +18,16 @@ async function signInIfNeeded(page: Page) {
   await expect(
     page.getByRole('heading', { name: 'Masters Diagnostics' }),
   ).toBeVisible();
+}
+
+async function releasedTestId(): Promise<string> {
+  const result = await db.$client.execute({
+    sql: `SELECT id FROM tests WHERE status = 'RELEASED' ORDER BY released_at DESC LIMIT 1`,
+    args: [],
+  });
+  const id = result.rows[0]?.id;
+  if (typeof id !== 'string' || !id) throw new Error('No RELEASED E2E test fixture found');
+  return id;
 }
 
 async function axeAudit(page: Page, path: string) {
@@ -42,8 +53,10 @@ async function axeAudit(page: Page, path: string) {
 
 test('axe WCAG AA audit covers stable Club beta surfaces', async ({ page }) => {
   await signInIfNeeded(page);
+  const testId = await releasedTestId();
 
   await axeAudit(page, '/');
   await axeAudit(page, '/athletes');
   await axeAudit(page, '/tests');
+  await axeAudit(page, `/tests/${testId}`);
 });
