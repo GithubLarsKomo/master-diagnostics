@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "repository": {
     "name": "GithubLarsKomo/master-diagnostics",
-    "headSha": "e82cb14c5318de140b5ee96b288aaba8840ddfe9"
+    "headSha": "278a1d5bebaa81e28973ee9b077120e702c33d64"
   },
   "betaDefinition": "Die erste Beta ist erreicht, wenn ein Trainer im lokalen Club-Modus einen Athleten verwalten, einen Laktattest planen und offline-sicher durchführen, Ergebnisse diagnostisch auswerten und vergleichen sowie einen freigegebenen deutsch- oder englischsprachigen Bericht mit dokumentiertem Setup und Recovery erzeugen kann, ohne dass ein explizites MVP-Release-Gate offen bleibt.",
   "readinessPercent": 96,
@@ -48,6 +48,7 @@
       "evidence": [
         "CI umfasst Lint, Typecheck, Unit, Build und Browser-E2E.",
         "Der automatisierte WCAG-Core-Browservertrag ist auf main gemergt und nach Behebung eines realen 320px-Reflow-Fehlers vollständig grün.",
+        "Ein regelbasierter Axe-Scan mit @axe-core/playwright prüft die stabilen Club-Beta-Oberflächen /, /athletes und /tests gegen WCAG 2 A/AA, WCAG 2.1 A/AA und WCAG 2.2 AA; PR #288 war in Voll-CI, Fresh-Install und Restore-Evidence-Contract vollständig grün.",
         "Der Restore-Drill-Evidence-Gate-Slice wurde mit vollständiger CI grün verifiziert und auf main gemergt.",
         "Algorithmus-, Tenant-/Rollen-, Export-/Import- und Betriebsverträge sind umfangreich automatisiert."
       ],
@@ -61,7 +62,8 @@
         "Browserbasierter Club-Setup-Assistent und Tenant-Admin-Bootstrap sind nachgewiesen.",
         "Eine frische Docker-Installation läuft in CI bis zum HTTPS-Healthcheck.",
         "Der zentrale Trainerpfad ist browserseitig implementiert; ein zusätzlicher UI-Prototyp ist nicht erforderlich.",
-        "Automatisierte WCAG-Core-Prüfungen decken Accessible Names, Landmark-/Heading-Struktur, Keyboard-Fokus, sichtbaren Fokus und 320-CSS-px-Reflow ab."
+        "Automatisierte WCAG-Core-Prüfungen decken Accessible Names, Landmark-/Heading-Struktur, Keyboard-Fokus, sichtbaren Fokus, 320-CSS-px-Reflow, Text Spacing, Textkontrast, statische Semantik und einen ergänzenden Axe-Regelscan ab.",
+        "Der Windows-sichere Turbopack-Workspace-Root ist verifiziert, sodass lokale Next-16-E2E-Läufe im Monorepo reproduzierbar starten."
       ],
       "gaps": [
         "Die dokumentierte manuelle WCAG-2.2-AA-Kernabnahme ist noch offen."
