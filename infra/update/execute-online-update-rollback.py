@@ -94,7 +94,11 @@ def parse_verified_report(
         verified = checker.verify_report(report_path, report_key, bundle_name, bundle_sha256)
     except (OSError, ValueError, json.JSONDecodeError):
         return None
-    if verified.get("drillStatus") != "COMPLETED" or verified.get("practicalRestoreEvidenceVerified") is not True:
+    if (
+        verified.get("drillStatus") != "COMPLETED"
+        or verified.get("privacyReconciliationIncluded") is not True
+        or verified.get("controlledPromotionIncluded") is not True
+    ):
         return None
     envelope = read_json(report_path, "Verified restore RTO drill report")
     record = envelope.get("record")
@@ -114,6 +118,7 @@ def parse_verified_report(
         "reportFingerprint": verified["reportFingerprint"],
         "stagingName": staging_name,
         "candidateSetId": candidate_set_id,
+        "rtoMet": verified.get("rtoMet") is True,
         "reused": True,
     }
 
@@ -355,6 +360,7 @@ def main() -> int:
             "rollbackBackupSha256": observed_sha,
             "restoreDrillId": restore["drillId"],
             "restoreReportFingerprint": restore["reportFingerprint"],
+            "restoreRtoMet": restore["rtoMet"],
             "restoreReused": restore["reused"],
             "receiptCreated": receipt_created,
             "receiptSignature": receipt["signature"],
