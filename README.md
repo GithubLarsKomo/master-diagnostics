@@ -2,7 +2,7 @@
 
 Trainerzentrierte PWA zur Planung, Durchführung und Auswertung wattbasierter Laktat-Stufentests auf BikeErg, RowErg und RP3.
 
-> Status: Repository-Grundgerüst. Die fachliche Grundlage steht in [`SPEC.md`](./SPEC.md).
+> Status: **Club-Beta-Kandidat.** Der zentrale Trainerpfad ist implementiert und durch Unit-, Build- und Browser-E2E-Evidence abgesichert. Die erste Beta bleibt fail-closed, bis die in [`beta-readiness.md`](./beta-readiness.md) dokumentierten Release-Gates vollständig nachgewiesen sind. Die fachliche Grundlage steht in [`SPEC.md`](./SPEC.md).
 
 ## Zielbild
 
@@ -53,15 +53,20 @@ pnpm test:e2e
 pnpm build
 ```
 
-## Erste Implementierungsziele
+## Stand des Club-Beta-Pfads
 
-1. lokalen Setup-Assistenten und Single-Tenant-Bootstrap implementieren
-2. Rollen- und Tenant-Isolation absichern
-3. Athleten- und Protokollverwaltung ergänzen
-4. timergeführten Offline-Testworkflow implementieren
-5. diagnostischen Fachkern anhand der Referenzdatensätze validieren
+Für den lokalen Club-Modus sind die zentralen vertikalen Fähigkeiten umgesetzt und verifiziert:
 
-Details: [`TASKS.md`](./TASKS.md) und [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+1. Setup-Assistent und Single-Tenant-Bootstrap mit Better Auth,
+2. Rollen- und Tenant-Isolation,
+3. Athleten-, Einwilligungs- und Protokollverwaltung,
+4. timergeführter Offline-Testworkflow mit Dexie-Persistenz, Wiederaufnahme und Sync-Retry,
+5. Qualitätsprüfung, diagnostischer Fachkern, Trainingszonen, Dashboards und Vergleich,
+6. deutsch- und englischsprachige Reports sowie Export-/Import-Roundtrip,
+7. produktives Docker-/TLS-/Backup-/Restore-Grundgerüst mit fail-closed Betriebsverträgen,
+8. automatisierter WCAG-Core-Browservertrag für stabile Club-Beta-Oberflächen.
+
+Der verbindliche Beta-Status und die verbleibenden harten Release-Gates stehen in [`beta-readiness.md`](./beta-readiness.md). Die detaillierte Roadmap und spätere Produktziele stehen in [`TASKS.md`](./TASKS.md) und [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ## Lizenz
 
