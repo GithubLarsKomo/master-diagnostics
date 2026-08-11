@@ -11,6 +11,7 @@ code { overflow-wrap: anywhere; }
 .setup-form input, .setup-form select { min-height: 2.75rem; padding: .55rem .7rem; font: inherit; }
 .setup-form button { min-height: 2.75rem; font: inherit; font-weight: 700; cursor: pointer; }
 .app-header { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
+.app-header > * { min-width: 0; }
 .app-header button { min-height: 2.75rem; padding-inline: 1rem; }
 
 .setup-form textarea { padding: .55rem .7rem; font: inherit; }
@@ -44,3 +45,9 @@ code { overflow-wrap: anywhere; }
 .review-row input, .review-row select, .review-row button { min-height: 2.75rem; padding: .45rem .55rem; font: inherit; }
 .review-row button { font-weight: 800; cursor: pointer; }
 .review-row small { display: block; margin-top: .3rem; }
+
+@media (max-width: 30rem) {
+  main { padding: 1rem; }
+  .app-header { flex-wrap: wrap; }
+  .grid { grid-template-columns: minmax(0, 1fr); }
+}
