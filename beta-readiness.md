@@ -1,7 +1,7 @@
 # Beta Readiness — master-diagnostics
 
 Stand: 2026-08-11  
-Head: `6cb7a10e038f1a93c19938c3b61a9e8b71bf1d1a`
+Head: `e82cb14c5318de140b5ee96b288aaba8840ddfe9`
 
 ## Beta-Definition
 
@@ -9,7 +9,7 @@ Die erste Beta ist erreicht, wenn ein Trainer im lokalen Club-Modus einen Athlet
 
 ## Ergebnis
 
-**94 % — noch nicht Beta.**
+**96 % — noch nicht Beta.**
 
 | Dimension | Punkte |
 |---|---:|
@@ -17,9 +17,9 @@ Die erste Beta ist erreicht, wenn ein Trainer im lokalen Club-Modus einen Athlet
 | Vertikaler End-to-End-Pfad | 20/20 |
 | Daten, Fehlerfälle und Wiederaufnahme | 14/15 |
 | Verifikation | 20/20 |
-| Bedienbarkeit und Deployment | 13/15 |
-| Beta-Betrieb und Anleitung | 7/10 |
-| **Gesamt** | **94/100** |
+| Bedienbarkeit und Deployment | 14/15 |
+| Beta-Betrieb und Anleitung | 8/10 |
+| **Gesamt** | **96/100** |
 
 ## Evidenz
 
@@ -30,11 +30,13 @@ Die erste Beta ist erreicht, wenn ein Trainer im lokalen Club-Modus einen Athlet
 - Eine frische Docker-Installation ist als eigener CI-Smoke-Test bis zum HTTPS-Healthcheck nachgewiesen.
 - CI umfasst Lint, Typecheck, Unit, Build, Browser-E2E und zahlreiche Betriebs-/Restore-Verträge.
 - Der Online-Update-Rollback ist mit signiertem Plan, verifizierter Restore-Promotion, Rollback Receipt und eigenem Executor-Contract fail-closed abgesichert.
+- Der automatisierte WCAG-Core-Browservertrag ist auf `main` gemergt und deckt Accessible Names, Main/H1-Struktur, Heading-Hierarchie, Keyboard-Fokus, sichtbaren Fokus sowie 320-CSS-px-Reflow auf stabilen Club-Beta-Oberflächen ab. Ein dabei entdeckter realer Reflow-Fehler auf der Trainer-Startseite wurde behoben und die vollständige CI danach grün verifiziert.
+- Für den praktischen Restore-Drill existiert jetzt ein reproduzierbares Host-Runbook plus ein fail-closed Evidence-Checker, der den signierten RTO-Report mit Host/Commit, Healthcheck, Trainer-Lesepfad, Datenstichprobe, Caddy-Zustand und Volume-Verlustprüfung verknüpft.
 
 ## Harte Beta-Blocker
 
-1. **WCAG-2.2-AA-Kernprüfungen** sind als explizites MVP-Release-Gate noch offen.
-2. **Backup und Restore praktisch getestet** ist als explizites MVP-Release-Gate noch offen. Die technische Restore-/Promotion-Kette ist stark automatisiert und verifiziert, ersetzt aber keinen dokumentierten realen Host-Drill.
+1. **WCAG-2.2-AA-Kernprüfungen** sind als explizites MVP-Release-Gate noch offen. Der automatisierte Kernnachweis ist grün; offen bleibt die dokumentierte manuelle Abnahme für kompletten Keyboardpfad, Screenreader-Semantik, Kontrast, 200/400-%-Zoom/Reflow, Text Spacing, Statusmeldungen, Diagramm-Alternative und Reportpfad.
+2. **Backup und Restore praktisch getestet** ist als explizites MVP-Release-Gate noch offen. Technischer Drill, signierter RTO-Report, unabhängige Verifikation und Operator-Evidence-Gate sind vorbereitet, ersetzen aber keinen dokumentierten realen Host-Drill.
 
 ## Beta-Follow-ups
 
@@ -50,10 +52,10 @@ Diese Punkte gehören nicht zum kleinsten definierten Club-Beta-Pfad und senken 
 
 ## UI-Prototyp
 
-**Nicht empfohlen.** Der zentrale Trainerpfad ist bereits browserseitig implementiert. Die verbleibenden Beta-Risiken liegen in Accessibility-Evidence und realer Betriebs-Recovery, nicht in ungeklärter Informationsarchitektur oder Interaktion.
+**Nicht empfohlen.** Der zentrale Trainerpfad ist bereits browserseitig implementiert. Die verbleibenden Beta-Risiken liegen in manueller Accessibility-Evidence und realer Betriebs-Recovery, nicht in ungeklärter Informationsarchitektur oder Interaktion.
 
 ## Nächste Schritte
 
-1. WCAG-2.2-AA-Kernprüfung für Setup, Login, Trainer-Startseite, Athletenverwaltung, Testplanung/-durchführung, Review und Reportpfad automatisieren und das Release-Gate nur bei grünem Nachweis schließen.
-2. Einen realen Club-Host-Restore-Drill mit einem verschlüsselten Backup durchführen, Privacy-Reconciliation, Healthcheck und kontrollierte Promotion nachweisen und die signierte RTO-/Restore-Evidence archivieren.
+1. Die manuelle WCAG-2.2-AA-Kernabnahme anhand `docs/wcag-beta-core-checklist.md` auf dem aktuellen `main` durchführen, Evidence archivieren und das Release-Gate nur bei vollständigem Bestehen schließen.
+2. Einen realen Club-Host-Restore-Drill anhand `docs/beta-restore-drill-runbook.md` durchführen und die finale Operator-Evidence mit `infra/backup/check-beta-restore-drill-evidence.py` fail-closed verifizieren.
 3. Nach Schließen beider Gates die Bewertung erneut auf 100 % ausführen und daraus das erste `beta-runbook.md` erzeugen.
