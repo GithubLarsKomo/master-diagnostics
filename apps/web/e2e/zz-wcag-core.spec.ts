@@ -65,6 +65,100 @@ async function auditStructure(page: Page) {
   }
 }
 
+async function auditStaticSemantics(page: Page) {
+  const failures = await page.evaluate(() => {
+    const findings: string[] = [];
+    const ids = new Map<string, number>();
+    document.querySelectorAll<HTMLElement>('[id]').forEach((element) => {
+      if (!element.id) return;
+      ids.set(element.id, (ids.get(element.id) ?? 0) + 1);
+    });
+    ids.forEach((count, id) => {
+      if (count > 1) findings.push(`duplicate-id:${id}:${count}`);
+    });
+
+    document.querySelectorAll<HTMLElement>('[tabindex]').forEach((element) => {
+      const value = Number(element.getAttribute('tabindex'));
+      if (Number.isFinite(value) && value > 0) findings.push(`positive-tabindex:${element.tagName.toLowerCase()}#${element.id || '-'}`);
+    });
+
+    document.querySelectorAll<HTMLImageElement>('img').forEach((image) => {
+      if (!image.hasAttribute('alt')) findings.push(`img-without-alt:${image.src || image.id || '-'}`);
+    });
+
+    return findings;
+  });
+  expect(failures, `Static semantic WCAG violations on ${page.url()}`).toEqual([]);
+}
+
+async function auditTextContrast(page: Page) {
+  const failures = await page.evaluate(() => {
+    type Rgb = [number, number, number];
+    const parseRgb = (value: string): Rgb | null => {
+      const match = value.match(/^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)(?:\s*,\s*(\d+(?:\.\d+)?))?\s*\)$/i);
+      if (!match) return null;
+      if (match[4] !== undefined && Number(match[4]) < 0.999) return null;
+      return [Number(match[1]), Number(match[2]), Number(match[3])];
+    };
+    const luminance = ([r, g, b]: Rgb) => {
+      const linear = [r, g, b].map((channel) => {
+        const normalized = channel / 255;
+        return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+    };
+    const contrast = (a: Rgb, b: Rgb) => {
+      const first = luminance(a);
+      const second = luminance(b);
+      return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+    };
+    const effectiveBackground = (element: HTMLElement): Rgb | null => {
+      let current: HTMLElement | null = element;
+      while (current) {
+        const background = parseRgb(getComputedStyle(current).backgroundColor);
+        if (background) return background;
+        current = current.parentElement;
+      }
+      return parseRgb(getComputedStyle(document.documentElement).backgroundColor) ?? [255, 255, 255];
+    };
+
+    const candidates = new Set<HTMLElement>();
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text;
+      if (!node.textContent?.trim()) continue;
+      const parent = node.parentElement;
+      if (parent) candidates.add(parent);
+    }
+
+    const findings: string[] = [];
+    candidates.forEach((element) => {
+      if (element.closest('[aria-hidden="true"]')) return;
+      // Native option popups are rendered by the browser/OS. Chromium exposes
+      // computed option colors without a reliable representation of the painted
+      // popup background, so pairing them here creates false contrast findings.
+      // The closed select control remains part of this audit.
+      if (element instanceof HTMLOptionElement) return;
+      const style = getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) < 0.999) return;
+      const foreground = parseRgb(style.color);
+      const background = effectiveBackground(element);
+      if (!foreground || !background) return;
+      const fontSize = Number.parseFloat(style.fontSize);
+      const fontWeight = Number.parseInt(style.fontWeight, 10) || 400;
+      const largeText = fontSize >= 24 || (fontSize >= 18.66 && fontWeight >= 700);
+      const minimum = largeText ? 3 : 4.5;
+      const ratio = contrast(foreground, background);
+      if (ratio + 0.01 < minimum) {
+        const text = element.textContent?.trim().replace(/\s+/g, ' ').slice(0, 60) ?? '';
+        findings.push(`${element.tagName.toLowerCase()}#${element.id || '-'}:${ratio.toFixed(2)}<${minimum}:${text}`);
+      }
+    });
+    return findings;
+  });
+  expect(failures, `Text contrast below WCAG AA threshold on ${page.url()}`).toEqual([]);
+}
+
 async function auditKeyboardAndFocus(page: Page) {
   await page.locator('body').click({ position: { x: 1, y: 1 } });
   const seen = new Set<string>();
@@ -101,6 +195,8 @@ async function auditPage(page: Page, path: string) {
   await expect(page).not.toHaveURL(/\/sign-in$/);
   await auditAccessibleNames(page);
   await auditStructure(page);
+  await auditStaticSemantics(page);
+  await auditTextContrast(page);
   await auditKeyboardAndFocus(page);
   await auditReflow(page);
 }
