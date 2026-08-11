@@ -59,6 +59,16 @@ def load_journal_module():
     return module
 
 
+def load_rollback_receipt_module():
+    path = Path(__file__).with_name("persist-online-update-rollback-receipt.py")
+    spec = importlib.util.spec_from_file_location("master_diagnostics_online_update_rollback_receipt", path)
+    if spec is None or spec.loader is None:
+        fail("Unable to load online update rollback-receipt verifier")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
@@ -250,6 +260,58 @@ def read_events(target_dir: Path, key: bytes, journal: dict[str, Any]) -> list[d
     return events
 
 
+def rollback_started_for_completion(events: list[dict[str, Any]]) -> dict[str, Any]:
+    if not events:
+        fail("ROLLBACK_COMPLETED requires existing ROLLBACK_STARTED evidence")
+    if events[-1]["record"]["phase"] == "ROLLBACK_STARTED":
+        return events[-1]
+    if (
+        events[-1]["record"]["phase"] == "ROLLBACK_COMPLETED"
+        and len(events) >= 2
+        and events[-2]["record"]["phase"] == "ROLLBACK_STARTED"
+    ):
+        return events[-2]
+    fail("ROLLBACK_COMPLETED requires ROLLBACK_STARTED as the current rollback boundary")
+
+
+def verify_rollback_completion_receipt(
+    receipt_path: Path,
+    receipt_key_path: Path,
+    journal: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    receipt_module = load_rollback_receipt_module()
+    receipt_key = receipt_module.read_key(receipt_key_path)
+    receipt = receipt_module.verify_envelope(
+        read_json(receipt_path, "Online update rollback receipt"),
+        receipt_key,
+    )
+    rollback_started = rollback_started_for_completion(events)
+    record = receipt["record"]
+    anchor = journal["record"]["rollbackAnchor"]
+    if record.get("onlineUpdateJournalSignature") != journal["signature"]:
+        fail("Online update rollback receipt is not bound to the supplied execution journal")
+    if record.get("rollbackStartedEventSignature") != rollback_started["signature"]:
+        fail("Online update rollback receipt is not bound to the current ROLLBACK_STARTED event")
+    if record.get("targetVersion") != journal["record"]["targetVersion"]:
+        fail("Online update rollback receipt target version does not match the execution journal")
+    if (
+        record.get("rollbackBackupFileName") != anchor["fileName"]
+        or record.get("rollbackBackupSha256") != anchor["sha256"]
+        or record.get("rollbackBackupCreatedAt") != anchor["createdAt"]
+    ):
+        fail("Online update rollback receipt does not match the journal rollback anchor")
+    if record.get("recordedAt") < rollback_started["record"]["recordedAt"]:
+        fail("Online update rollback receipt predates ROLLBACK_STARTED")
+    if record.get("restoreCompletedAt") > record.get("recordedAt"):
+        fail("Online update rollback receipt predates verified restore completion")
+    if record.get("rollbackReceiptRequiredBeforeRollbackCompleted") is not True:
+        fail("Online update rollback receipt does not authorize terminal rollback evidence")
+    if record.get("rollbackCompleted") is not False or record.get("updateExecuted") is not False:
+        fail("Online update rollback receipt has invalid pre-terminal state")
+    return receipt
+
+
 def create_record(journal: dict[str, Any], events: list[dict[str, Any]], phase: str, recorded_at: str) -> dict[str, Any]:
     if phase not in legal_next_phases(events):
         fail(f"Online update execution-event phase {phase} is not allowed after current evidence")
@@ -320,12 +382,26 @@ def main() -> int:
     parser.add_argument("--key-file", required=True, type=Path)
     parser.add_argument("--phase", required=True, choices=PHASES)
     parser.add_argument("--recorded-at", required=True)
+    parser.add_argument("--rollback-receipt", type=Path)
+    parser.add_argument("--rollback-receipt-key", type=Path)
     args = parser.parse_args()
     try:
         journal_module = load_journal_module()
         journal_key = journal_module.read_key(args.journal_key)
         journal = journal_module.verify_envelope(read_json(args.journal, "Online update execution journal"), journal_key)
         event_key = read_key(args.key_file)
+        events_before = read_events(args.target_dir, event_key, journal)
+        if args.phase == "ROLLBACK_COMPLETED":
+            if args.rollback_receipt is None or args.rollback_receipt_key is None:
+                fail("ROLLBACK_COMPLETED requires --rollback-receipt and --rollback-receipt-key")
+            verify_rollback_completion_receipt(
+                args.rollback_receipt,
+                args.rollback_receipt_key,
+                journal,
+                events_before,
+            )
+        elif args.rollback_receipt is not None or args.rollback_receipt_key is not None:
+            fail("Rollback-receipt arguments are only valid for ROLLBACK_COMPLETED")
         path, created, envelope, events = persist_event(args.target_dir, event_key, journal, args.phase, args.recorded_at)
         next_allowed = legal_next_phases(events)
     except (OSError, EventError, ValueError) as exc:
