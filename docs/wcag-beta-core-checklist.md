@@ -9,7 +9,7 @@ Diese Checkliste ergänzt die automatisierten Browser-Contracts unter `apps/web/
 Die Browser-Contracts prüfen auf dem realen Club-E2E-Lebenszyklus und den stabil erreichbaren Club-Beta-Oberflächen:
 
 - uninitialisiertes Club-Setup vor Bootstrap (`/setup`),
-- Sign-in nach kontrolliertem Logout (`/sign-in`),
+- Sign-in nach kontrolliertem Logout (`/sign-in`), einschließlich abgewiesener Zugangsdaten als verständlicher `role="alert"`-Fehlerzustand ohne Verlassen der Loginseite,
 - Trainer-Startseite, Athletenliste, Testliste und vorhandene Testdetail-/Review-Oberfläche,
 - programmatische Namen für sichtbare Buttons, Links und Formcontrols,
 - genau ein `main`-Landmark und genau eine H1,
@@ -30,7 +30,7 @@ Die folgenden Punkte sind für den realen Trainer-Kernpfad manuell in einem aktu
 1. **Setup und Sign-in**
    - vollständige Bedienung ausschließlich per Tastatur,
    - sichtbare Fokusreihenfolge logisch,
-   - Fehlermeldungen verständlich und am Feld/als Status erreichbar.
+   - automatisierter Sign-in-Fehlerzustand ist grün; manuell verbleibt die Gegenprüfung, dass die Fehlermeldung mit Screenreader verständlich und zum Formular passend angekündigt wird.
 2. **Trainer-Startseite und Navigation**
    - Landmark-/Heading-Struktur mit Screenreader-Schnellnavigation plausibel,
    - Fokus geht beim Seitenwechsel nicht verloren oder an eine unerwartete Stelle.
