@@ -1,7 +1,7 @@
 # Beta Readiness — master-diagnostics
 
-Stand: 2026-08-02  
-Head: `2d7b7a93842af4d0d8de121e78871908ff6301c9`
+Stand: 2026-08-11  
+Head: `6cb7a10e038f1a93c19938c3b61a9e8b71bf1d1a`
 
 ## Beta-Definition
 
@@ -9,47 +9,51 @@ Die erste Beta ist erreicht, wenn ein Trainer im lokalen Club-Modus einen Athlet
 
 ## Ergebnis
 
-**87 % — noch nicht Beta.**
+**94 % — noch nicht Beta.**
 
 | Dimension | Punkte |
 |---|---:|
 | Kernnutzen und Scope | 20/20 |
-| Vertikaler End-to-End-Pfad | 18/20 |
-| Daten, Fehlerfälle und Wiederaufnahme | 13/15 |
+| Vertikaler End-to-End-Pfad | 20/20 |
+| Daten, Fehlerfälle und Wiederaufnahme | 14/15 |
 | Verifikation | 20/20 |
-| Bedienbarkeit und Deployment | 10/15 |
-| Beta-Betrieb und Anleitung | 6/10 |
-| **Gesamt** | **87/100** |
+| Bedienbarkeit und Deployment | 13/15 |
+| Beta-Betrieb und Anleitung | 7/10 |
+| **Gesamt** | **94/100** |
 
 ## Evidenz
 
-- Athleten, Einwilligungen, Protokollplanung, Offline-Testdurchführung, Qualitätsmodell, Diagnostik und Trainingszonen sind abgeschlossen.
-- Browser-E2E belegt Live-Test, Dexie-Persistenz, Browser-Neustart und Sync-Retry ohne Datenverlust.
-- Mehrtestvergleich und Vergleichbarkeitsklassifikation sind umgesetzt und browserseitig nachgewiesen.
-- Berichtsversionen sind append-only und auf Datenbankebene gegen UPDATE/DELETE abgesichert.
-- Der zweisprachige Report-Dokumentkern und ein deterministischer DE/EN-PDF-Renderer sind gemergt; PR #97 war in CI Run #260 grün.
-- Tenant-/Rollen-Policy-Tests und Algorithmus-Referenztests sind als Release-Gates erfüllt.
+- Der Club-Beta-Kernpfad ist fachlich umgesetzt: Athleten, Einwilligungen, Protokollplanung, timergeführte Testdurchführung, Offline-Persistenz/Wiederaufnahme, Qualitätsmodell, Diagnostik, Trainingszonen, Dashboards, Vergleich und Reports.
+- Browser-E2E belegt Setup, Live-Test, Dexie-Persistenz, Browser-Neustart und Sync-Retry ohne Datenverlust.
+- Export-/Import-Roundtrip ist vollständig, inklusive Dry-Run, atomarem Import/Rollback und Roundtrip-Test.
+- Deutsch- und englischsprachige Berichte sind als Release-Gate freigegeben.
+- Eine frische Docker-Installation ist als eigener CI-Smoke-Test bis zum HTTPS-Healthcheck nachgewiesen.
+- CI umfasst Lint, Typecheck, Unit, Build, Browser-E2E und zahlreiche Betriebs-/Restore-Verträge.
+- Der Online-Update-Rollback ist mit signiertem Plan, verifizierter Restore-Promotion, Rollback Receipt und eigenem Executor-Contract fail-closed abgesichert.
 
 ## Harte Beta-Blocker
 
-1. WCAG-2.2-AA-Kernprüfungen sind noch offen.
-2. Der Export-/Import-Roundtrip ist noch nicht vollständig.
-3. Backup und Restore wurden noch nicht praktisch getestet.
-4. Deutsch- und englischsprachige Berichte sind als Release-Gate noch nicht freigegeben; der Renderer existiert, aber der vollständige Benutzer-/Downloadpfad fehlt noch.
+1. **WCAG-2.2-AA-Kernprüfungen** sind als explizites MVP-Release-Gate noch offen.
+2. **Backup und Restore praktisch getestet** ist als explizites MVP-Release-Gate noch offen. Die technische Restore-/Promotion-Kette ist stark automatisiert und verifiziert, ersetzt aber keinen dokumentierten realen Host-Drill.
 
-## Nicht als Beta-Blocker gewertet
+## Beta-Follow-ups
 
-- vollständiges Athleten-Dashboard,
-- Clerk-Adapter für SaaS,
-- Bluetooth-/PM5-/RP3-Funktionen,
-- spätere umfassende Datenschutz-, Export- und Betriebsfeatures außerhalb des kleinsten Beta-Scope.
+- vollständige Audit-Abdeckung der noch offenen Auth-, Freigabe-, Diagnostik-, Bluetooth- und Betriebsereignisse,
+- produktive Privacy-Capability-Attestation erst bei Aktivierung von Backup/Notifications,
+- Bluetooth-/PM5-/RP3-Beta,
+- Clerk-Adapter für einen späteren SaaS-Modus,
+- signierte Offline-Updatepakete,
+- Supportexport ohne Diagnostikdaten,
+- Lasttest für 10 parallele Tests.
+
+Diese Punkte gehören nicht zum kleinsten definierten Club-Beta-Pfad und senken daher den Beta-Readiness-Wert nicht als harte Blocker.
 
 ## UI-Prototyp
 
-**Derzeit nicht empfohlen.** Die verbleibenden Beta-Risiken sind überwiegend Betriebs-, Portabilitäts- und Release-Gates. Ein UI-Wegwerfprototyp würde diese Blocker aktuell nicht ausreichend reduzieren.
+**Nicht empfohlen.** Der zentrale Trainerpfad ist bereits browserseitig implementiert. Die verbleibenden Beta-Risiken liegen in Accessibility-Evidence und realer Betriebs-Recovery, nicht in ungeklärter Informationsarchitektur oder Interaktion.
 
 ## Nächste Schritte
 
-1. DE/EN-PDF-Renderer als tenant-sicheren Report-Download-/Persistenzpfad integrieren und das Bericht-Release-Gate schließen.
-2. Minimalen atomaren Export-/Import-Roundtrip für den Beta-Scope implementieren und verifizieren.
-3. Betriebs-Release-Slice aus produktivem Docker-Smoke, praktischem Backup/Restore-Drill und WCAG-2.2-AA-Kernprüfung abschließen.
+1. WCAG-2.2-AA-Kernprüfung für Setup, Login, Trainer-Startseite, Athletenverwaltung, Testplanung/-durchführung, Review und Reportpfad automatisieren und das Release-Gate nur bei grünem Nachweis schließen.
+2. Einen realen Club-Host-Restore-Drill mit einem verschlüsselten Backup durchführen, Privacy-Reconciliation, Healthcheck und kontrollierte Promotion nachweisen und die signierte RTO-/Restore-Evidence archivieren.
+3. Nach Schließen beider Gates die Bewertung erneut auf 100 % ausführen und daraus das erste `beta-runbook.md` erzeugen.
