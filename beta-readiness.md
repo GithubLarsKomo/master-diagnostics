@@ -1,7 +1,7 @@
 # Beta Readiness — master-diagnostics
 
 Stand: 2026-08-11  
-Head: `e82cb14c5318de140b5ee96b288aaba8840ddfe9`
+Head: `278a1d5bebaa81e28973ee9b077120e702c33d64`
 
 ## Beta-Definition
 
@@ -30,12 +30,14 @@ Die erste Beta ist erreicht, wenn ein Trainer im lokalen Club-Modus einen Athlet
 - Eine frische Docker-Installation ist als eigener CI-Smoke-Test bis zum HTTPS-Healthcheck nachgewiesen.
 - CI umfasst Lint, Typecheck, Unit, Build, Browser-E2E und zahlreiche Betriebs-/Restore-Verträge.
 - Der Online-Update-Rollback ist mit signiertem Plan, verifizierter Restore-Promotion, Rollback Receipt und eigenem Executor-Contract fail-closed abgesichert.
-- Der automatisierte WCAG-Core-Browservertrag ist auf `main` gemergt und deckt Accessible Names, Main/H1-Struktur, Heading-Hierarchie, Keyboard-Fokus, sichtbaren Fokus sowie 320-CSS-px-Reflow auf stabilen Club-Beta-Oberflächen ab. Ein dabei entdeckter realer Reflow-Fehler auf der Trainer-Startseite wurde behoben und die vollständige CI danach grün verifiziert.
+- Der automatisierte WCAG-Core-Browservertrag ist auf `main` gemergt und deckt Accessible Names, Main/H1-Struktur, Heading-Hierarchie, Keyboard-Fokus, sichtbaren Fokus, 320-CSS-px-Reflow, Text Spacing, Textkontrast und statische Semantik ab. Ein dabei entdeckter realer Reflow-Fehler auf der Trainer-Startseite wurde behoben und die vollständige CI danach grün verifiziert.
+- Ergänzend prüft jetzt `@axe-core/playwright` die stabilen Club-Beta-Oberflächen `/`, `/athletes` und `/tests` regelbasiert gegen WCAG 2 A/AA, WCAG 2.1 A/AA und WCAG 2.2 AA. PR #288 war in Voll-CI, Club Fresh Install Smoke und Beta Restore Evidence Contract vollständig grün.
+- Der lokale Windows-E2E-Pfad wurde dabei ebenfalls gehärtet: `turbopack.root` nutzt einen Windows-sicheren absoluten Workspace-Pfad via `fileURLToPath(...)`, sodass Next 16/Turbopack im Monorepo reproduzierbar startet.
 - Für den praktischen Restore-Drill existiert jetzt ein reproduzierbares Host-Runbook plus ein fail-closed Evidence-Checker, der den signierten RTO-Report mit Host/Commit, Healthcheck, Trainer-Lesepfad, Datenstichprobe, Caddy-Zustand und Volume-Verlustprüfung verknüpft.
 
 ## Harte Beta-Blocker
 
-1. **WCAG-2.2-AA-Kernprüfungen** sind als explizites MVP-Release-Gate noch offen. Der automatisierte Kernnachweis ist grün; offen bleibt die dokumentierte manuelle Abnahme für kompletten Keyboardpfad, Screenreader-Semantik, Kontrast, 200/400-%-Zoom/Reflow, Text Spacing, Statusmeldungen, Diagramm-Alternative und Reportpfad.
+1. **WCAG-2.2-AA-Kernprüfungen** sind als explizites MVP-Release-Gate noch offen. Der automatisierte Kernnachweis ist inzwischen deutlich stärker und umfasst eigene Browser-Contracts plus Axe; offen bleibt die dokumentierte manuelle Abnahme für kompletten Keyboardpfad, Screenreader-Semantik, visuelle Gegenprüfung, Zoom/Reflow in realer Nutzung, Diagramm-Alternative und den vollständigen assistiven Kernpfad.
 2. **Backup und Restore praktisch getestet** ist als explizites MVP-Release-Gate noch offen. Technischer Drill, signierter RTO-Report, unabhängige Verifikation und Operator-Evidence-Gate sind vorbereitet, ersetzen aber keinen dokumentierten realen Host-Drill.
 
 ## Beta-Follow-ups
