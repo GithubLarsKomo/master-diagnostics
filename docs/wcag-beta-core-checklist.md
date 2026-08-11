@@ -11,6 +11,10 @@ Der Browser-Contract prüft auf den stabil erreichbaren Club-Beta-Oberflächen:
 - programmatische Namen für sichtbare Buttons, Links und Formcontrols,
 - genau ein `main`-Landmark und genau eine H1,
 - keine Übersprünge in der Heading-Hierarchie,
+- keine doppelten DOM-IDs,
+- keine positiven `tabindex`-Werte,
+- kein `img` ohne `alt`-Attribut,
+- WCAG-AA-Textkontrast aus den tatsächlich berechneten Browserfarben: mindestens 4.5:1 für normalen Text und mindestens 3:1 für großen beziehungsweise ausreichend fetten Text,
 - Keyboard-Fokus bewegt sich über mehrere Bedienelemente,
 - mindestens ein sichtbarer Browser-/CSS-Fokusindikator,
 - kein seitenweiter horizontaler Overflow bei 320 CSS px,
@@ -40,10 +44,10 @@ Die folgenden Punkte sind für den realen Trainer-Kernpfad manuell in einem aktu
 6. **Ergebnis, Vergleich und Report**
    - Diagramme besitzen eine äquivalente textuelle/strukturierte Information,
    - Download-/Sprachwahl per Tastatur nutzbar.
-7. **Kontrast**
-   - normaler Text mindestens 4.5:1,
-   - großer Text mindestens 3:1,
-   - wesentliche UI-Komponenten und Fokusindikatoren mindestens 3:1 gegen angrenzende Farben.
+7. **Kontrast-Gegenprüfung**
+   - automatisierter Textkontrast ist auf aktuellem `main` grün,
+   - wesentliche nicht-textliche UI-Komponenten und Fokusindikatoren besitzen mindestens 3:1 gegen angrenzende Farben,
+   - Zustände/Informationen werden nicht ausschließlich über Farbunterschiede vermittelt.
 8. **Zoom/Reflow**
    - Browserzoom 200 % ohne Informations-/Funktionsverlust,
    - Reflow bei 400 % bzw. äquivalent 320 CSS px ohne zweidimensionales Scrollen, ausgenommen fachlich notwendige Datentabellen.
@@ -66,7 +70,7 @@ Vor Schließen des Release-Gates hier ergänzen:
 - Live-Test: `TBD`
 - Datenreview: `TBD`
 - Ergebnis/Vergleich/Report: `TBD`
-- Kontrast: `TBD`
+- Kontrast-Gegenprüfung: `TBD`
 - Zoom/Reflow: `TBD`
 - Textabstände: `TBD`
 - Statusmeldungen: `TBD`
