@@ -21,7 +21,10 @@ Die Browser-Contracts prüfen auf dem realen Club-E2E-Lebenszyklus und den stabi
 - Keyboard-Fokus bewegt sich über mehrere Bedienelemente,
 - mindestens ein sichtbarer Browser-/CSS-Fokusindikator,
 - kein seitenweiter horizontaler Overflow bei 320 CSS px,
-- WCAG 1.4.12 Text Spacing mit 1.5 line-height, 2em paragraph spacing, 0.12em letter spacing und 0.16em word spacing ohne seitenweiten Overflow oder abgeschnittenen Text in `overflow:hidden/clip`-Containern.
+- WCAG 1.4.12 Text Spacing mit 1.5 line-height, 2em paragraph spacing, 0.12em letter spacing und 0.16em word spacing ohne seitenweiten Overflow oder abgeschnittenen Text in `overflow:hidden/clip`-Containern,
+- freigegebener Test exponiert seinen Analyseexport-/Privacy-Zustand als `role="status"` oder `role="alert"`,
+- fehlgeschlagene PDF-Berichtserzeugung wird als `role="alert"` ausgegeben,
+- erfolgreiche PDF-Berichtserzeugung wird als `role="status"` samt zugänglichem Download-Link ausgegeben.
 
 ## Manuelle Pflichtprüfung vor Gate-Schluss
 
@@ -46,7 +49,8 @@ Die folgenden Punkte sind für den realen Trainer-Kernpfad manuell in einem aktu
    - Korrektur-, Ausschluss- und Fehlermeldungen ohne Farbwissen nutzbar.
 6. **Ergebnis, Vergleich und Report**
    - Diagramme besitzen eine äquivalente textuelle/strukturierte Information,
-   - Download-/Sprachwahl per Tastatur nutzbar.
+   - Download-/Sprachwahl per Tastatur nutzbar,
+   - automatisierte Report-`status`/`alert`-Semantik ist grün; manuell verbleibt die Screenreader-Gegenprüfung der Ankündigung ohne unerwartete Fokusverschiebung.
 7. **Kontrast-Gegenprüfung**
    - automatisierter Textkontrast ist auf aktuellem `main` grün,
    - wesentliche nicht-textliche UI-Komponenten und Fokusindikatoren besitzen mindestens 3:1 gegen angrenzende Farben,
@@ -58,7 +62,8 @@ Die folgenden Punkte sind für den realen Trainer-Kernpfad manuell in einem aktu
    - automatisierter WCAG-1.4.12-Text-Spacing-Contract ist grün,
    - manuelle visuelle Gegenprüfung bestätigt keinen Informationsverlust und keine Überlagerung im vollständigen Trainerpfad.
 10. **Statusmeldungen**
-   - Offline/Sync, Validierung, Speichern, Report-Erzeugung und Fehlerzustände werden ohne Fokusverschiebung assistiv erkennbar.
+   - Report-Erfolg/-Fehler und Analyseexport-/Privacy-Zustand sind automatisiert assistiv exponiert,
+   - manuell verbleibt insbesondere die reale Screenreader-Gegenprüfung von Offline/Sync, Validierung, Speichern, Live-Test-Warnungen und den automatisierten Reportzuständen ohne Fokusverschiebung.
 
 ## Evidence-Protokoll
 
