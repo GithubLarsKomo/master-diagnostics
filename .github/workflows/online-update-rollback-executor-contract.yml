@@ -1,0 +1,166 @@
+name: Online Update Rollback Executor Contract
+
+on:
+  pull_request:
+    paths:
+      - 'infra/update/execute-online-update-rollback.py'
+      - 'infra/update/persist-online-update-rollback-plan.py'
+      - 'infra/update/persist-online-update-rollback-receipt.py'
+      - 'infra/update/persist-online-update-execution-event.py'
+      - 'infra/backup/run-club-restore-rto-drill.sh'
+      - 'infra/backup/check-restore-rto-drill-report.py'
+      - '.github/workflows/online-update-rollback-executor-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rollback-executor-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python syntax
+        run: |
+          python3 -m py_compile \
+            infra/update/execute-online-update-rollback.py \
+            infra/update/persist-online-update-rollback-plan.py \
+            infra/update/persist-online-update-rollback-receipt.py \
+            infra/update/persist-online-update-execution-event.py \
+            infra/backup/check-restore-rto-drill-report.py
+
+      - name: Verify bounded orchestration surface
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('infra/update/execute-online-update-rollback.py').read_text()
+
+          required = [
+              'run-club-restore-rto-drill.sh',
+              'check-restore-rto-drill-report.py',
+              'persist-online-update-rollback-receipt.py',
+              'persist-online-update-execution-event.py',
+              'ROLLBACK_STARTED',
+              'ROLLBACK_COMPLETED',
+              'verify_rollback_completion_receipt',
+              'sha256_file(bundle_path)',
+              'fcntl.flock',
+          ]
+          for token in required:
+              assert token in source, token
+
+          # Restore/promotion mutation must stay delegated to the existing harness.
+          forbidden = [
+              'docker volume create',
+              'docker volume rm',
+              'docker compose up',
+              'docker compose down',
+              'docker compose stop',
+              'docker stop',
+              'rsync ',
+              'shutil.copytree',
+          ]
+          for token in forbidden:
+              assert token not in source, token
+
+          # The terminal event is reachable only after receipt creation/reuse and
+          # independent receipt verification in the executor source ordering.
+          receipt_pos = source.index('event_module.verify_rollback_completion_receipt(', source.index('if latest_phase != "ROLLBACK_STARTED"'))
+          terminal_pos = source.index('"--phase", "ROLLBACK_COMPLETED"', receipt_pos)
+          assert receipt_pos < terminal_pos
+
+          # The executor may call exactly one restore mutation entrypoint.
+          assert source.count('run(["bash", str(harness), bundle_name]') == 1
+          PY
+
+      - name: Verify restore evidence reuse semantics
+        run: |
+          python3 - <<'PY'
+          import importlib.util
+          import json
+          import tempfile
+          from pathlib import Path
+
+          path = Path('infra/update/execute-online-update-rollback.py').resolve()
+          spec = importlib.util.spec_from_file_location('rollback_executor', path)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+
+          bundle = 'masters-backup-20260811T100000Z-11111111-2222-3333-4444-555555555555.mdbak'
+          sha = 'sha256:' + 'a' * 64
+          rollback_started = '2026-08-11T10:00:00.000Z'
+
+          class Checker:
+              def __init__(self, values):
+                  self.values = values
+              def verify_report(self, *args):
+                  return dict(self.values)
+
+          base = {
+              'drillId': 'drill-' + '1' * 32,
+              'drillStatus': 'COMPLETED',
+              'reportFingerprint': 'sha256:' + 'b' * 64,
+              'bundleName': bundle,
+              'bundleFingerprint': sha,
+              'durationSeconds': 18000,
+              'rtoMet': False,
+              'privacyReconciliationIncluded': True,
+              'controlledPromotionIncluded': True,
+              'practicalRestoreEvidenceVerified': False,
+          }
+
+          with tempfile.TemporaryDirectory() as tmp:
+              root = Path(tmp)
+              report = root / ('drill-' + '1' * 32 + '.json')
+              report.write_text(json.dumps({
+                  'record': {
+                      'reportFingerprint': base['reportFingerprint'],
+                      'startedAt': '2026-08-11T10:01:00.000Z',
+                      'stagingName': 'restore-20260811T100100Z-11111111-2222-3333-4444-555555555555',
+                      'candidateSetId': 'restore-' + 'c' * 20,
+                  }
+              }))
+              key = root / 'key'
+              key.write_text('unused')
+
+              # A technically completed restore remains reusable even if RTO was missed.
+              result = module.parse_verified_report(report, Checker(base), key, bundle, sha, rollback_started)
+              assert result is not None
+              assert result['rtoMet'] is False
+
+              # Missing reconciliation or controlled promotion is never reusable.
+              bad = dict(base)
+              bad['privacyReconciliationIncluded'] = False
+              assert module.parse_verified_report(report, Checker(bad), key, bundle, sha, rollback_started) is None
+              bad = dict(base)
+              bad['controlledPromotionIncluded'] = False
+              assert module.parse_verified_report(report, Checker(bad), key, bundle, sha, rollback_started) is None
+
+              # Evidence predating ROLLBACK_STARTED cannot authorize retry reuse.
+              payload = json.loads(report.read_text())
+              payload['record']['startedAt'] = '2026-08-11T09:59:59.000Z'
+              report.write_text(json.dumps(payload))
+              assert module.parse_verified_report(report, Checker(base), key, bundle, sha, rollback_started) is None
+          PY
+
+      - name: Verify terminal evidence boundaries
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          executor = Path('infra/update/execute-online-update-rollback.py').read_text()
+          event_writer = Path('infra/update/persist-online-update-execution-event.py').read_text()
+          receipt_writer = Path('infra/update/persist-online-update-rollback-receipt.py').read_text()
+
+          assert 'ROLLBACK_COMPLETED requires --rollback-receipt and --rollback-receipt-key' in event_writer
+          assert 'rollbackReceiptRequiredBeforeRollbackCompleted' in receipt_writer
+          assert 'rollbackCompleted' in receipt_writer
+          assert 'updateExecuted' in receipt_writer
+
+          # No new restore signing domain or duplicated HMAC implementation in executor.
+          assert 'SIGNING_DOMAIN' not in executor
+          assert 'hmac.new' not in executor
+          assert 'hashlib.sha256' in executor  # backup byte fingerprint only
+          PY
