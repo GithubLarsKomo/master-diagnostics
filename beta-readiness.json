@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "repository": {
     "name": "GithubLarsKomo/master-diagnostics",
-    "headSha": "6cb7a10e038f1a93c19938c3b61a9e8b71bf1d1a"
+    "headSha": "e82cb14c5318de140b5ee96b288aaba8840ddfe9"
   },
   "betaDefinition": "Die erste Beta ist erreicht, wenn ein Trainer im lokalen Club-Modus einen Athleten verwalten, einen Laktattest planen und offline-sicher durchführen, Ergebnisse diagnostisch auswerten und vergleichen sowie einen freigegebenen deutsch- oder englischsprachigen Bericht mit dokumentiertem Setup und Recovery erzeugen kann, ohne dass ein explizites MVP-Release-Gate offen bleibt.",
-  "readinessPercent": 94,
+  "readinessPercent": 96,
   "betaReached": false,
   "dimensions": [
     {
@@ -34,7 +34,8 @@
       "evidence": [
         "Offline-Wiederaufnahme und idempotenter Sync-Retry sind verifiziert.",
         "Atomarer Import/Rollback, verschlüsselte Backups und eine fail-closed Restore-/Promotion-Kette sind implementiert.",
-        "Der Online-Update-Rollback besitzt signierten Plan, verifizierten Restore, Rollback Receipt und Terminalevent-Gate."
+        "Der Online-Update-Rollback besitzt signierten Plan, verifizierten Restore, Rollback Receipt und Terminalevent-Gate.",
+        "Ein Host-Runbook und ein fail-closed Evidence-Checker binden den praktischen Restore-Drill an signierte RTO-Evidence und reale Host-Beobachtungen."
       ],
       "gaps": [
         "Ein realer Backup/Restore-Drill auf einem Club-Host ist als Release-Gate noch nicht praktisch nachgewiesen."
@@ -46,7 +47,8 @@
       "score": 20,
       "evidence": [
         "CI umfasst Lint, Typecheck, Unit, Build und Browser-E2E.",
-        "Der zuletzt gemergte Online-Update-Rollback-Executor war inklusive eigenem Contract und Voll-CI grün.",
+        "Der automatisierte WCAG-Core-Browservertrag ist auf main gemergt und nach Behebung eines realen 320px-Reflow-Fehlers vollständig grün.",
+        "Der Restore-Drill-Evidence-Gate-Slice wurde mit vollständiger CI grün verifiziert und auf main gemergt.",
         "Algorithmus-, Tenant-/Rollen-, Export-/Import- und Betriebsverträge sind umfangreich automatisiert."
       ],
       "gaps": []
@@ -54,33 +56,34 @@
     {
       "name": "usability-deployment",
       "max": 15,
-      "score": 13,
+      "score": 14,
       "evidence": [
         "Browserbasierter Club-Setup-Assistent und Tenant-Admin-Bootstrap sind nachgewiesen.",
         "Eine frische Docker-Installation läuft in CI bis zum HTTPS-Healthcheck.",
-        "Der zentrale Trainerpfad ist browserseitig implementiert; ein zusätzlicher UI-Prototyp ist nicht erforderlich."
+        "Der zentrale Trainerpfad ist browserseitig implementiert; ein zusätzlicher UI-Prototyp ist nicht erforderlich.",
+        "Automatisierte WCAG-Core-Prüfungen decken Accessible Names, Landmark-/Heading-Struktur, Keyboard-Fokus, sichtbaren Fokus und 320-CSS-px-Reflow ab."
       ],
       "gaps": [
-        "WCAG-2.2-AA-Kernprüfungen sind als explizites Release-Gate noch offen.",
-        "Das README beschreibt den Reifegrad noch teilweise als Repository-Grundgerüst und ist für einen Beta-Betrieb zu aktualisieren."
+        "Die dokumentierte manuelle WCAG-2.2-AA-Kernabnahme ist noch offen."
       ]
     },
     {
       "name": "beta-operations",
       "max": 10,
-      "score": 7,
+      "score": 8,
       "evidence": [
         "Produktives Docker Compose, TLS-Dokumentation, tägliche verschlüsselte Backups und umfangreiche Restore-/Update-Sicherheitsverträge sind vorhanden.",
+        "Der praktische Restore-Drill besitzt jetzt ein reproduzierbares Host-Runbook und ein maschinenprüfbares Operator-Evidence-Gate.",
         "Explizite MVP-Release-Gates halten den Beta-Status fail-closed."
       ],
       "gaps": [
-        "Der praktische Backup/Restore-Drill fehlt.",
+        "Der praktische Backup/Restore-Drill auf einem realen Host fehlt weiterhin.",
         "Ein finales Beta-Runbook wird gemäß project-beta-readiness erst bei 100 Prozent erzeugt."
       ]
     }
   ],
   "hardBlockers": [
-    "WCAG-2.2-AA-Kernprüfungen bestehen noch nicht.",
+    "Die manuelle WCAG-2.2-AA-Kernabnahme ist noch nicht vollständig nachgewiesen.",
     "Backup und Restore wurden noch nicht praktisch auf einem Club-Host getestet."
   ],
   "betaFollowUps": [
@@ -93,11 +96,11 @@
   ],
   "uiPrototype": {
     "recommended": false,
-    "reason": "Der zentrale Trainerpfad ist bereits browserseitig implementiert; die verbleibenden Beta-Risiken betreffen Accessibility-Evidence und reale Betriebs-Recovery."
+    "reason": "Der zentrale Trainerpfad ist bereits browserseitig implementiert; die verbleibenden Beta-Risiken betreffen manuelle Accessibility-Evidence und reale Betriebs-Recovery."
   },
   "nextActions": [
-    "WCAG-2.2-AA-Kernprüfung für die zentralen Club-Beta-Seiten automatisieren und das Release-Gate nur mit grünem Nachweis schließen.",
-    "Einen realen verschlüsselten Backup/Restore-Drill auf einem Club-Host durchführen und Privacy-Reconciliation, Healthcheck, kontrollierte Promotion sowie RTO-Evidence dokumentieren.",
+    "Die manuelle WCAG-2.2-AA-Kernabnahme anhand docs/wcag-beta-core-checklist.md auf aktuellem main durchführen und Evidence archivieren.",
+    "Einen realen verschlüsselten Backup/Restore-Drill anhand docs/beta-restore-drill-runbook.md durchführen und die Operator-Evidence mit infra/backup/check-beta-restore-drill-evidence.py verifizieren.",
     "Nach Schließen beider Gates die Readiness erneut auf 100 Prozent bewerten und beta-runbook.md erzeugen."
   ]
 }
