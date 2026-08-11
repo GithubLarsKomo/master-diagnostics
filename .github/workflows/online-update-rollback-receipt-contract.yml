@@ -1,0 +1,93 @@
+name: Online Update Rollback Receipt Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/online-update-rollback-receipt-contract.yml'
+      - 'infra/update/persist-online-update-rollback-receipt.py'
+      - 'infra/update/test-online-update-rollback-receipt.py'
+      - 'infra/update/persist-online-update-execution-event.py'
+      - 'infra/update/persist-online-update-execution-journal.py'
+      - 'packages/db/**'
+      - 'docs/online-update-rollback-receipt.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/online-update-rollback-receipt-contract.yml'
+      - 'infra/update/persist-online-update-rollback-receipt.py'
+      - 'infra/update/test-online-update-rollback-receipt.py'
+      - 'infra/update/persist-online-update-execution-event.py'
+      - 'infra/update/persist-online-update-execution-journal.py'
+      - 'packages/db/**'
+      - 'docs/online-update-rollback-receipt.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify rollback receipt core
+        run: python3 infra/update/test-online-update-rollback-receipt.py
+
+      - name: Verify canonical restore completion verifier remains green
+        run: |
+          pnpm --filter @masters/db exec vitest run \
+            test/restore-private-promotion-switch-completion-receipt.test.ts \
+            test/restore-private-promotion-source-provenance-binding.test.ts
+
+      - name: Verify DB type contract
+        run: pnpm --filter @masters/db typecheck
+
+      - name: Verify evidence-only rollback receipt boundary
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          writer = Path('infra/update/persist-online-update-rollback-receipt.py').read_text()
+          active = '\n'.join(
+              line for line in writer.splitlines()
+              if not line.lstrip().startswith('#')
+          )
+
+          assert 'masters:club-online-update-rollback-receipt:v1' in writer
+          assert 'backup:restore-promotion-switch-completion-receipt-verify' in active
+          assert 'ROLLBACK_STARTED' in active
+          assert 'sourceBackupFileName' in active
+          assert 'sourceBackupSha256' in active
+          assert 'sourceBackupCreatedAt' in active
+          assert 'rollbackAnchor' in active
+          assert 'rollbackReceiptRequiredBeforeRollbackCompleted' in active
+          assert 'rollbackCompleted' in active
+          assert 'updateExecuted' in active
+
+          forbidden = (
+              'docker compose',
+              'docker volume',
+              'docker stop',
+              'docker start',
+              'docker cp',
+              'backup:stage',
+              'backup:restore-recovery-execute',
+              'backup:restore-promotion-switch-execute',
+              '--phase ROLLBACK_COMPLETED',
+          )
+          for token in forbidden:
+              assert token not in active
+
+          # Restore cryptography must remain delegated to the canonical read-only verifier.
+          assert 'RESTORE_PROMOTION_SWITCH_COMPLETION_RECEIPT_VERIFICATION' in active
+          assert 'masters:restore-private-promotion-switch-completion-receipt' not in active
+          assert 'masters:restore-private-promotion-source-provenance-binding' not in active
+          PY
