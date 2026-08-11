@@ -1,0 +1,109 @@
+name: Restore Promotion Source Provenance Binding Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restore-promotion-source-provenance-binding-contract.yml'
+      - 'packages/db/**'
+      - 'infra/backup/prepare-club-restore-promotion-switch-journal.sh'
+      - 'infra/docker-compose.restore-promotion.yml'
+      - 'docs/restore-private-promotion-source-provenance-binding.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-promotion-source-provenance-binding-contract.yml'
+      - 'packages/db/**'
+      - 'infra/backup/prepare-club-restore-promotion-switch-journal.sh'
+      - 'infra/docker-compose.restore-promotion.yml'
+      - 'docs/restore-private-promotion-source-provenance-binding.md'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify two-key source-provenance binding semantics
+        run: pnpm --filter @masters/db exec vitest run test/restore-private-promotion-source-provenance-binding.test.ts
+
+      - name: Verify isolated binding service
+        run: |
+          cp .env.example .env
+          sed -i 's/diagnostics.example.org/localhost/g' .env
+          sed -i 's/replace-with-at-least-32-random-bytes/ci-only-secret-with-at-least-32-characters/' .env
+          RESTORE_PRIVATE_PROMOTION_CANDIDATE_SET_ID=restore-0123456789abcdefabcd \
+            docker compose --profile backup \
+              -f infra/docker-compose.club.yml \
+              -f infra/docker-compose.restore-promotion.yml \
+              config --format json > /tmp/promotion-source-binding-compose.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          config = json.loads(Path('/tmp/promotion-source-binding-compose.json').read_text())
+          service = config['services']['backup-restore-promotion-source-provenance-bind']
+          assert service['command'][-1] == 'backup:restore-promotion-source-provenance-bind'
+          assert service.get('network_mode') == 'none'
+          assert not service.get('depends_on')
+          assert service['environment']['BACKUP_KEY_FILE'] == '/run/secrets/backup.key'
+          assert service['environment']['RESTORE_SOURCE_PROVENANCE_FILE'] == '/restore-source-provenance.json'
+          assert service['environment']['RESTORE_PRIVATE_PROMOTION_SWITCH_INTENT_FILE'] == '/promotion-switch-intent.json'
+          assert service['environment']['RESTORE_PRIVATE_PROMOTION_INTENT_KEY_FILE'] == '/run/secrets/restore-private-promotion.key'
+          assert service['environment']['RESTORE_PRIVATE_PROMOTION_SWITCH_JOURNAL_DIR'] == '/restore-promotion-switch-journal'
+          mounts = {item['target']: item for item in service.get('volumes', [])}
+          assert set(mounts) == {
+              '/run/secrets/backup.key',
+              '/run/secrets/restore-private-promotion.key',
+              '/restore-promotion-switch-journal',
+          }
+          assert mounts['/run/secrets/backup.key']['read_only'] is True
+          assert mounts['/run/secrets/restore-private-promotion.key']['read_only'] is True
+          assert mounts['/restore-promotion-switch-journal'].get('read_only') is not True
+          forbidden = {
+              '/var/run/docker.sock',
+              '/var/lib/sqld',
+              '/var/lib/masters/reports',
+              '/var/lib/masters/exports',
+              '/var/lib/masters/data-subject-delivery-packages',
+              '/candidate',
+              '/restore-replay',
+          }
+          assert forbidden.isdisjoint(mounts)
+          PY
+
+      - name: Verify binding precedes durable switch journal without production mutation
+        run: |
+          bash -n infra/backup/prepare-club-restore-promotion-switch-journal.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          script = Path('infra/backup/prepare-club-restore-promotion-switch-journal.sh').read_text()
+          active = '\n'.join(line for line in script.splitlines() if not line.lstrip().startswith('#'))
+          assert 'restore-source-provenance.json' in active
+          assert 'backup-restore-promotion-source-provenance-bind' in active
+          assert 'promotion-source-provenance-binding.json' in active
+          assert '${source_provenance}:/restore-source-provenance.json:ro' in active
+          assert '${switch_intent}:/promotion-switch-intent.json:ro' in active
+          healthcheck = active.index('bash "${CANDIDATE_HEALTHCHECK}"')
+          bind = active.index('backup-restore-promotion-source-provenance-bind')
+          require_binding = active.index('promotion-source-provenance-binding.json', bind)
+          journal = active.index('backup-restore-promotion-switch-journal', require_binding)
+          assert healthcheck < bind < require_binding < journal
+          for token in (
+              'docker volume create',
+              'docker volume rm',
+              'docker cp ',
+              'docker compose down',
+              'backup:restore-promotion-switch-execute',
+          ):
+              assert token not in active
+          PY
