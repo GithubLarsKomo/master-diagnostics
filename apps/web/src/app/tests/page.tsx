@@ -41,7 +41,9 @@ export default async function TestsPage() {
       label: `${template.name} · Version ${version.versionNumber}`,
     }))
   ));
-  const canPlan = athletes.length > 0 && protocolOptions.length > 0;
+  const eligibleAthletes = athletes.filter((athlete) => !athlete.consentBlockedAt);
+  const blockedAthleteCount = athletes.length - eligibleAthletes.length;
+  const canPlan = eligibleAthletes.length > 0 && protocolOptions.length > 0;
 
   return (
     <main>
@@ -66,14 +68,21 @@ export default async function TestsPage() {
 
       <section className="card">
         <h2>Test planen</h2>
+        {blockedAthleteCount > 0 && (
+          <p role="status">
+            {blockedAthleteCount === 1
+              ? '1 Athlet ist wegen einer Einwilligungs- oder Löschsperre nicht für neue Tests auswählbar.'
+              : `${blockedAthleteCount} Athleten sind wegen einer Einwilligungs- oder Löschsperre nicht für neue Tests auswählbar.`}
+          </p>
+        )}
         {!canPlan ? (
-          <p>Für die Planung werden mindestens ein Athlet und eine aktive Protokollversion benötigt.</p>
+          <p>Für die Planung werden mindestens ein freigegebener Athlet und eine aktive Protokollversion benötigt.</p>
         ) : (
           <form action={planTest} className="setup-form">
             <label>Athlet
               <select name="athleteId" required defaultValue="">
                 <option value="" disabled>Athlet auswählen</option>
-                {athletes.map((athlete) => (
+                {eligibleAthletes.map((athlete) => (
                   <option key={athlete.id} value={athlete.id}>
                     {athlete.firstName} {athlete.lastName}
                   </option>
