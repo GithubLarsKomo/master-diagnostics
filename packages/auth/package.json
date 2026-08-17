@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@masters/db": "workspace:*",
-    "better-auth": "^1.6.23"
+    "better-auth": "^1.6.28"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
