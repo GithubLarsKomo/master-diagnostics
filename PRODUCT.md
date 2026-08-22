@@ -52,7 +52,9 @@ Needs safe user/role administration, data lifecycle controls, exports and audita
 
 ## Shared platform boundary
 
-Hosted deployments converge on the shared private MariaDB 11.8 infrastructure defined in `docs/shared-db-infrastructure.md`. Masters Diagnostics owns its own database/schema and never couples directly to the Sport app's tables.
+The hosted platform standard is the private PostgreSQL 18.x infrastructure defined in `docs/shared-db-infrastructure.md`. Masters Diagnostics remains on its existing libSQL provider until its extensive backup, restore, privacy, offline and database-test guarantees have PostgreSQL-equivalent evidence. The migration must not weaken those controls merely to achieve provider uniformity.
+
+At convergence, Masters Diagnostics owns a dedicated `master_diagnostics` PostgreSQL database and least-privilege runtime role and never couples directly to Sport, Grilling or other product databases.
 
 ## Frontend authority
 
