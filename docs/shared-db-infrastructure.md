@@ -6,7 +6,7 @@
 
 ## Decision
 
-The canonical relational database platform for hosted applications is **PostgreSQL 18.x**. The initial production baseline is PostgreSQL **18.6**; patch releases may advance within major version 18 after normal backup and restore checks. PostgreSQL 19 beta releases are not production targets.
+The canonical relational database platform for hosted applications is **PostgreSQL 18.x**. The initial production baseline is PostgreSQL **18.6**; patch releases may advance within major version 18 after normal backup and restore checks. A future major-version upgrade is a deliberate infrastructure change with compatibility and restore validation; beta releases are not production targets.
 
 Applications share one managed PostgreSQL service/cluster and common operational controls, but **never share application credentials or application databases**. Each product owns its schema, migrations, data lifecycle and application-level privacy semantics.
 
