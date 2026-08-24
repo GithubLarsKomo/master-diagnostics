@@ -1,54 +1,76 @@
-import { drizzle } from 'drizzle-orm/pg-proxy';
-
-export type PostgresQueryMethod = 'all' | 'execute' | 'values' | 'get';
-
-export interface PostgresProxyResult {
-  rows: unknown[];
-}
-
-export type PostgresQueryExecutor = (
-  query: string,
-  params: unknown[],
-  method: PostgresQueryMethod,
-) => Promise<PostgresProxyResult>;
+import postgres, { type Sql } from 'postgres';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import type { Database } from '../client';
 
 export interface PostgresConnectionConfig {
   url: string;
   poolMax: number;
+  idleTimeoutSeconds: number;
+  connectTimeoutSeconds: number;
 }
 
 export function readPostgresConnectionConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): PostgresConnectionConfig {
   const url = env.DATABASE_URL?.trim();
-  if (!url) {
-    throw new Error('DATABASE_URL is required for PostgreSQL');
-  }
+  if (!url) throw new Error('DATABASE_URL is required for PostgreSQL');
 
   const parsed = new URL(url);
   if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') {
     throw new Error('PostgreSQL DATABASE_URL must use postgres:// or postgresql://');
   }
 
-  const rawPoolMax = env.DB_POOL_MAX?.trim() || '10';
-  const poolMax = Number.parseInt(rawPoolMax, 10);
-  if (!Number.isInteger(poolMax) || String(poolMax) !== rawPoolMax || poolMax < 1 || poolMax > 100) {
-    throw new Error('DB_POOL_MAX must be an integer between 1 and 100');
-  }
+  const parseBoundedInteger = (
+    value: string | undefined,
+    fallback: string,
+    name: string,
+    min: number,
+    max: number,
+  ): number => {
+    const raw = value?.trim() || fallback;
+    const parsedValue = Number.parseInt(raw, 10);
+    if (!Number.isInteger(parsedValue) || String(parsedValue) !== raw || parsedValue < min || parsedValue > max) {
+      throw new Error(`${name} must be an integer between ${min} and ${max}`);
+    }
+    return parsedValue;
+  };
 
-  return { url, poolMax };
+  return {
+    url,
+    poolMax: parseBoundedInteger(env.DB_POOL_MAX, '10', 'DB_POOL_MAX', 1, 100),
+    idleTimeoutSeconds: parseBoundedInteger(env.DB_IDLE_TIMEOUT_SECONDS, '20', 'DB_IDLE_TIMEOUT_SECONDS', 1, 600),
+    connectTimeoutSeconds: parseBoundedInteger(env.DB_CONNECT_TIMEOUT_SECONDS, '10', 'DB_CONNECT_TIMEOUT_SECONDS', 1, 120),
+  };
+}
+
+export interface ConcretePostgresDatabase {
+  db: Database;
+  sql: Sql;
+  close: () => Promise<void>;
 }
 
 /**
- * Creates a PostgreSQL Drizzle database over an injected executor.
+ * Concrete PostgreSQL runtime binding.
  *
- * The executor is intentionally injected in this migration phase. This keeps
- * @masters/db free of a second concrete network driver while the existing
- * libSQL runtime remains authoritative. The production PostgreSQL driver is
- * bound only at the cutover gate defined by ADR-0023.
+ * Existing application services remain typed against the canonical Database
+ * surface. During convergence, Drizzle's PostgreSQL dialect executes those
+ * service queries against the PostgreSQL schema mirror; CI exercises this
+ * compatibility boundary against PostgreSQL 18.x before any production cutover.
  */
-export function createPostgresDatabaseFromExecutor(executor: PostgresQueryExecutor) {
-  return drizzle(executor as Parameters<typeof drizzle>[0]);
-}
+export function createPostgresDatabase(
+  config: PostgresConnectionConfig = readPostgresConnectionConfig(),
+): ConcretePostgresDatabase {
+  const sql = postgres(config.url, {
+    max: config.poolMax,
+    idle_timeout: config.idleTimeoutSeconds,
+    connect_timeout: config.connectTimeoutSeconds,
+    prepare: true,
+  });
+  const pgDb = drizzle(sql);
 
-export type PostgresDatabase = ReturnType<typeof createPostgresDatabaseFromExecutor>;
+  return {
+    db: pgDb as unknown as Database,
+    sql,
+    close: () => sql.end({ timeout: 5 }),
+  };
+}
