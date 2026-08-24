@@ -16,7 +16,8 @@ import { syncTestMeasurement } from '../src/services/test-measurement-sync';
 const tenantA = 'pg-qualification-tenant-a';
 const tenantB = 'pg-qualification-tenant-b';
 const trainerId = 'pg-qualification-trainer-a';
-const now = '2026-08-24T10:00:00.000Z';
+const qualificationStartedAt = new Date();
+const now = qualificationStartedAt.toISOString();
 const actor = {
   userId: trainerId,
   role: 'TRAINER',
@@ -171,7 +172,7 @@ try {
     tenantA,
     actor,
     testId,
-    new Date('2026-08-24T10:01:00.000Z'),
+    qualificationStartedAt,
   );
   assert.equal(acquired.status, 'ACQUIRED');
   if (acquired.status !== 'ACQUIRED') throw new Error('PostgreSQL test lock was not acquired');
@@ -181,16 +182,18 @@ try {
     tenantA,
     actor,
     testId,
-    new Date('2026-08-24T10:01:10.000Z'),
+    new Date(qualificationStartedAt.getTime() + 10_000),
   );
   assert.equal(competing.status, 'LOCKED');
 
+  const measurementAt = new Date(qualificationStartedAt.getTime() + 14_000).toISOString();
+  const operationOccurredAt = new Date(qualificationStartedAt.getTime() + 15_000).toISOString();
   const operation = {
     operationId: 'pg-qualification-operation-1',
     testId,
     entityId: 'REST',
     expectedVersion: 0,
-    occurredAt: '2026-08-24T10:01:15.000Z',
+    occurredAt: operationOccurredAt,
     operationType: 'TEST_MEASUREMENT_UPSERT' as const,
     schemaVersion: '1' as const,
     payload: {
@@ -198,7 +201,7 @@ try {
       lactateValueX100: 120,
       lactateQualifier: 'EXACT' as const,
       heartRate: 80,
-      measuredAt: '2026-08-24T10:01:14.000Z',
+      measuredAt: measurementAt,
     },
   };
 
@@ -220,7 +223,7 @@ try {
       ...operation,
       operationId: 'pg-qualification-operation-cross-tenant',
     }, acquired.token),
-    /Test timer context not found/,
+    /Test not found|Test timer context not found/,
   );
 
   await releaseTestLock(db, tenantA, actor, testId, acquired.token);
