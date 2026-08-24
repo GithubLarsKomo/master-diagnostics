@@ -56,7 +56,7 @@ jobs:
           sudo apt-get install -y postgresql-client
       - name: Prepare representative PostgreSQL source
         run: |
-          rm -f "$SOURCE_DATABASE_URL"
+          rm -f /tmp/master-diagnostics-backup-source.db
           DATABASE_URL="$SOURCE_DATABASE_URL" pnpm --filter @masters/db db:migrate
           pnpm --filter @masters/db postgres:reconciliation:seed
           pnpm --filter @masters/db postgres:schema:generate
