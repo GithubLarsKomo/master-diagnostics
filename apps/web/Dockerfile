@@ -17,6 +17,9 @@ FROM deps AS migrator
 COPY . .
 CMD ["pnpm", "--filter", "@masters/db", "db:migrate"]
 
+FROM migrator AS postgres-ops
+RUN apk add --no-cache postgresql18-client
+
 FROM deps AS builder
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1 \
