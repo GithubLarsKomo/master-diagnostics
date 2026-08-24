@@ -26,16 +26,8 @@ services:
     environment:
       DB_ENGINE: postgres
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
-      POSTGRES_MIGRATIONS_DIR: migrations-postgres-ci
-    command:
-      - sh
-      - -ec
-      - |
-        cd /app/packages/db
-        node scripts/generate-postgres-schema.mjs
-        rm -rf migrations-postgres-ci
-        pnpm postgres:drizzle:generate
-        node scripts/apply-postgres-migrations.mjs
+      POSTGRES_MIGRATIONS_DIR: migrations-postgres
+    command: ["sh", "-ec", "cd /app/packages/db && node scripts/apply-postgres-migrations.mjs"]
     depends_on:
       postgres:
         condition: service_healthy
