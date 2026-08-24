@@ -18,6 +18,8 @@
     "postgres:drizzle:generate": "drizzle-kit generate --config drizzle.postgres.config.ts",
     "postgres:migrate": "node scripts/apply-postgres-migrations.mjs",
     "postgres:services:qualify": "tsx scripts/qualify-postgres-services.ts",
+    "postgres:reconciliation:seed": "tsx scripts/seed-reconciliation-source.ts",
+    "postgres:reconciliation:run": "tsx scripts/migrate-libsql-to-postgres.ts",
     "tenant-exports:cleanup": "tsx src/cleanup-tenant-exports.ts",
     "data-subject-delivery:cleanup": "tsx src/cleanup-data-subject-delivery-packages.ts",
     "privacy-capabilities:check": "tsx src/check-global-privacy-capabilities.ts",

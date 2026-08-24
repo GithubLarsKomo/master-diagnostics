@@ -1,0 +1,100 @@
+name: PostgreSQL Reconciliation
+
+on:
+  pull_request:
+    paths:
+      - 'packages/db/**'
+      - '.github/workflows/postgresql-reconciliation.yml'
+      - 'docs/postgresql-convergence.md'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/db/**'
+      - '.github/workflows/postgresql-reconciliation.yml'
+      - 'docs/postgresql-convergence.md'
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_DB: master_diagnostics
+          POSTGRES_USER: master_diagnostics_app
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U master_diagnostics_app -d master_diagnostics"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      DATABASE_URL: postgresql://master_diagnostics_app:ci-postgres-password@127.0.0.1:5432/master_diagnostics
+      SOURCE_DATABASE_URL: file:/tmp/master-diagnostics-source.db
+      RECONCILIATION_REPORT_PATH: /tmp/reconciliation.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+      - name: Create representative libSQL source
+        run: |
+          rm -f /tmp/master-diagnostics-source.db
+          DATABASE_URL="$SOURCE_DATABASE_URL" pnpm --filter @masters/db db:migrate
+          pnpm --filter @masters/db postgres:reconciliation:seed
+      - name: Prepare empty PostgreSQL target
+        run: |
+          pnpm --filter @masters/db postgres:schema:generate
+          rm -rf packages/db/migrations-postgres-ci
+          pnpm --filter @masters/db postgres:drizzle:generate
+          POSTGRES_MIGRATIONS_DIR=packages/db/migrations-postgres-ci node packages/db/scripts/apply-postgres-migrations.mjs
+      - name: Migrate and reconcile all canonical tables
+        run: |
+          RECONCILIATION_MODE=migrate pnpm --filter @masters/db postgres:reconciliation:run
+          jq -e '.status == "MATCH" and .tableCount == 46 and (.mismatches | length == 0)' /tmp/reconciliation.json
+          jq -e '.criticalTables.diagnosticResultSnapshots.matches == true' /tmp/reconciliation.json
+          jq -e '.criticalTables.reportVersions.matches == true' /tmp/reconciliation.json
+          jq -e '.criticalTables.interpretations.matches == true' /tmp/reconciliation.json
+          jq -e '.criticalTables.auditEvents.matches == true' /tmp/reconciliation.json
+      - name: Verify reconcile-only repeat is stable
+        run: |
+          RECONCILIATION_MODE=reconcile pnpm --filter @masters/db postgres:reconciliation:run
+          jq -e '.status == "MATCH"' /tmp/reconciliation.json
+      - name: Verify migration refuses non-empty target
+        run: |
+          set +e
+          RECONCILIATION_MODE=migrate pnpm --filter @masters/db postgres:reconciliation:run >/tmp/repeat.out 2>/tmp/repeat.err
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -q 'target table is not empty' /tmp/repeat.err
+      - name: Verify reconciliation fails closed on target drift
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "UPDATE report_versions SET content_hash='tampered' WHERE id='reconcile-report'"
+          set +e
+          RECONCILIATION_MODE=reconcile pnpm --filter @masters/db postgres:reconciliation:run >/tmp/drift.out 2>/tmp/drift.err
+          status=$?
+          set -e
+          test "$status" -eq 2
+          jq -e '.status == "MISMATCH" and (.mismatches | index("report_versions")) != null' /tmp/reconciliation.json
+      - name: Upload machine-readable reconciliation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgresql-reconciliation-report
+          path: /tmp/reconciliation.json
+          if-no-files-found: error
