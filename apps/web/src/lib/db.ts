@@ -1,5 +1,9 @@
-import { createDatabase } from '@masters/db';
+import { createRuntimeDatabase, type RuntimeDatabase } from '@masters/db';
 
-const globalForDb = globalThis as unknown as { mastersDb?: ReturnType<typeof createDatabase> };
-export const db = globalForDb.mastersDb ?? createDatabase();
-if (process.env.NODE_ENV !== 'production') globalForDb.mastersDb = db;
+const globalForDb = globalThis as unknown as { mastersRuntimeDb?: RuntimeDatabase };
+
+export const runtimeDb = globalForDb.mastersRuntimeDb ?? createRuntimeDatabase();
+export const db = runtimeDb.db;
+export const dbEngine = runtimeDb.engine;
+
+if (process.env.NODE_ENV !== 'production') globalForDb.mastersRuntimeDb = runtimeDb;
