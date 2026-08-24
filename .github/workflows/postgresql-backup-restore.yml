@@ -1,0 +1,124 @@
+name: PostgreSQL Backup Restore
+
+on:
+  pull_request:
+    paths:
+      - 'packages/db/**'
+      - '.github/workflows/postgresql-backup-restore.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/db/**'
+      - '.github/workflows/postgresql-backup-restore.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  backup-restore:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_DB: master_diagnostics
+          POSTGRES_USER: master_diagnostics_app
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U master_diagnostics_app -d master_diagnostics"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      DATABASE_URL: postgresql://master_diagnostics_app:ci-postgres-password@127.0.0.1:5432/master_diagnostics
+      SOURCE_POSTGRES_URL: postgresql://master_diagnostics_app:ci-postgres-password@127.0.0.1:5432/master_diagnostics
+      RESTORE_DATABASE_URL: postgresql://master_diagnostics_app:ci-postgres-password@127.0.0.1:5432/master_diagnostics_restore
+      SOURCE_DATABASE_URL: file:/tmp/master-diagnostics-backup-source.db
+      RECONCILIATION_REPORT_PATH: /tmp/source-reconciliation.json
+      POSTGRES_RESTORE_REPORT_PATH: /tmp/restore-reconciliation.json
+      BACKUP_KEY_FILE: /tmp/postgres-backup.key
+      POSTGRES_BACKUP_DIR: /tmp/postgres-backups
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install PostgreSQL 18 client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common ca-certificates curl
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/18/bin/pg_dump --version | grep -q '18\.'
+          /usr/lib/postgresql/18/bin/pg_restore --version | grep -q '18\.'
+      - name: Prepare representative PostgreSQL source
+        run: |
+          rm -f /tmp/master-diagnostics-backup-source.db
+          DATABASE_URL="$SOURCE_DATABASE_URL" pnpm --filter @masters/db db:migrate
+          pnpm --filter @masters/db postgres:reconciliation:seed
+          pnpm --filter @masters/db postgres:schema:generate
+          rm -rf packages/db/migrations-postgres-ci
+          pnpm --filter @masters/db postgres:drizzle:generate
+          POSTGRES_MIGRATIONS_DIR=packages/db/migrations-postgres-ci node packages/db/scripts/apply-postgres-migrations.mjs
+          RECONCILIATION_MODE=migrate pnpm --filter @masters/db postgres:reconciliation:run
+          jq -e '.status == "MATCH" and .tableCount == 46' "$RECONCILIATION_REPORT_PATH"
+      - name: Create encrypted PostgreSQL backup
+        run: |
+          mkdir -p "$POSTGRES_BACKUP_DIR"
+          head -c 32 /dev/urandom | base64 > "$BACKUP_KEY_FILE"
+          chmod 600 "$BACKUP_KEY_FILE"
+          pnpm --filter @masters/db postgres:backup:create | tee /tmp/backup-create.json
+          bundle="$(find "$POSTGRES_BACKUP_DIR" -maxdepth 1 -type f -name '*.pgbak' -print -quit)"
+          test -n "$bundle"
+          test -f "$bundle.sha256"
+          echo "POSTGRES_BACKUP_FILE=$bundle" >> "$GITHUB_ENV"
+          echo "POSTGRES_BACKUP_CHECKSUM_FILE=$bundle.sha256" >> "$GITHUB_ENV"
+      - name: Create isolated restore database
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE master_diagnostics_restore'
+      - name: Restore encrypted backup into isolated database
+        run: pnpm --filter @masters/db postgres:backup:restore | tee /tmp/backup-restore.json
+      - name: Reconcile restored database against source
+        run: |
+          pnpm --filter @masters/db postgres:restore:reconcile
+          jq -e '.status == "MATCH" and .tableCount == 46 and (.mismatches | length == 0)' "$POSTGRES_RESTORE_REPORT_PATH"
+          jq -e '.criticalTables.diagnosticResultSnapshots.matches == true' "$POSTGRES_RESTORE_REPORT_PATH"
+          jq -e '.criticalTables.reportVersions.matches == true' "$POSTGRES_RESTORE_REPORT_PATH"
+          jq -e '.criticalTables.interpretations.matches == true' "$POSTGRES_RESTORE_REPORT_PATH"
+          jq -e '.criticalTables.auditEvents.matches == true' "$POSTGRES_RESTORE_REPORT_PATH"
+      - name: Verify tamper detection fails closed
+        run: |
+          cp "$POSTGRES_BACKUP_FILE" /tmp/tampered.pgbak
+          printf 'x' >> /tmp/tampered.pgbak
+          set +e
+          POSTGRES_BACKUP_FILE=/tmp/tampered.pgbak POSTGRES_BACKUP_CHECKSUM_FILE="$POSTGRES_BACKUP_CHECKSUM_FILE" pnpm --filter @masters/db postgres:backup:restore >/tmp/tamper.out 2>/tmp/tamper.err
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -q 'checksum mismatch' /tmp/tamper.err
+      - name: Verify wrong encryption key fails closed
+        run: |
+          head -c 32 /dev/urandom | base64 > /tmp/wrong.key
+          set +e
+          BACKUP_KEY_FILE=/tmp/wrong.key pnpm --filter @masters/db postgres:backup:restore >/tmp/wrong-key.out 2>/tmp/wrong-key.err
+          status=$?
+          set -e
+          test "$status" -ne 0
+      - name: Upload backup restore evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgresql-backup-restore-evidence
+          path: |
+            /tmp/backup-create.json
+            /tmp/backup-restore.json
+            /tmp/source-reconciliation.json
+            /tmp/restore-reconciliation.json
+          if-no-files-found: error
