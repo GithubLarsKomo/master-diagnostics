@@ -1,0 +1,135 @@
+name: PostgreSQL Cutover Rehearsal
+
+on:
+  pull_request:
+    paths:
+      - 'packages/db/**'
+      - '.github/workflows/postgresql-cutover-rehearsal.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/db/**'
+      - '.github/workflows/postgresql-cutover-rehearsal.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  rehearsal:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_DB: master_diagnostics
+          POSTGRES_USER: master_diagnostics_app
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U master_diagnostics_app -d master_diagnostics"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      DATABASE_URL: postgresql://master_diagnostics_app:ci-postgres-password@127.0.0.1:5432/master_diagnostics
+      SOURCE_POSTGRES_URL: postgresql://master_diagnostics_app:ci-postgres-password@127.0.0.1:5432/master_diagnostics
+      RESTORE_DATABASE_URL: postgresql://master_diagnostics_app:ci-postgres-password@127.0.0.1:5432/master_diagnostics_restore
+      BACKUP_KEY_FILE: /tmp/postgres-cutover.key
+      POSTGRES_BACKUP_DIR: /tmp/postgres-cutover-backups
+      CUTOVER_WORK_DIR: /tmp/postgres-cutover-rehearsal
+      CUTOVER_SOURCE_DB: /tmp/postgres-cutover-rehearsal/legacy-sealed.db
+      CUTOVER_LEGACY_BACKUP: /tmp/postgres-cutover-rehearsal/legacy-final.db
+      SOURCE_RECONCILIATION_REPORT: /tmp/postgres-cutover-rehearsal/migration-reconciliation.json
+      POSTGRES_RESTORE_REPORT_PATH: /tmp/postgres-cutover-rehearsal/restore-reconciliation.json
+      CUTOVER_RECEIPT_PATH: /tmp/postgres-cutover-rehearsal/cutover-receipt.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install PostgreSQL 18 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-18
+          test "$(pg_dump --version | awk '{print $3}' | cut -d. -f1)" = "18"
+      - name: Build representative legacy database
+        run: |
+          mkdir -p "$CUTOVER_WORK_DIR"
+          export SOURCE_DATABASE_URL="file:$CUTOVER_WORK_DIR/legacy-live.db"
+          DATABASE_URL="$SOURCE_DATABASE_URL" pnpm --filter @masters/db db:migrate
+          pnpm --filter @masters/db postgres:reconciliation:seed
+      - name: Simulate write stop and seal cutover snapshot
+        run: |
+          cp "$CUTOVER_WORK_DIR/legacy-live.db" "$CUTOVER_SOURCE_DB"
+          chmod 444 "$CUTOVER_SOURCE_DB"
+          cp "$CUTOVER_SOURCE_DB" "$CUTOVER_LEGACY_BACKUP"
+          chmod 400 "$CUTOVER_LEGACY_BACKUP"
+          test "$(sha256sum "$CUTOVER_SOURCE_DB" | awk '{print $1}')" = "$(sha256sum "$CUTOVER_LEGACY_BACKUP" | awk '{print $1}')"
+          test $(( $(stat -c '%a' "$CUTOVER_SOURCE_DB") & 222 )) -eq 0
+      - name: Prepare empty PostgreSQL target
+        run: |
+          pnpm --filter @masters/db postgres:schema:generate
+          rm -rf packages/db/migrations-postgres-ci
+          pnpm --filter @masters/db postgres:drizzle:generate
+          POSTGRES_MIGRATIONS_DIR=packages/db/migrations-postgres-ci node packages/db/scripts/apply-postgres-migrations.mjs
+      - name: Migrate sealed legacy snapshot and reconcile
+        run: |
+          SOURCE_DATABASE_URL="file:$CUTOVER_SOURCE_DB" \
+          RECONCILIATION_REPORT_PATH="$SOURCE_RECONCILIATION_REPORT" \
+          RECONCILIATION_MODE=migrate \
+          pnpm --filter @masters/db postgres:reconciliation:run
+          jq -e '.status == "MATCH" and .tableCount == 46 and (.mismatches | length == 0)' "$SOURCE_RECONCILIATION_REPORT"
+      - name: Create first encrypted PostgreSQL backup
+        run: |
+          mkdir -p "$POSTGRES_BACKUP_DIR"
+          head -c 32 /dev/urandom | base64 > "$BACKUP_KEY_FILE"
+          chmod 600 "$BACKUP_KEY_FILE"
+          pnpm --filter @masters/db postgres:backup:create | tee "$CUTOVER_WORK_DIR/postgres-backup-create.json"
+          bundle="$(find "$POSTGRES_BACKUP_DIR" -maxdepth 1 -type f -name '*.pgbak' -print -quit)"
+          test -n "$bundle"
+          test -f "$bundle.sha256"
+          echo "POSTGRES_BACKUP_FILE=$bundle" >> "$GITHUB_ENV"
+          echo "POSTGRES_BACKUP_CHECKSUM_FILE=$bundle.sha256" >> "$GITHUB_ENV"
+      - name: Restore first PostgreSQL backup in isolation
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE master_diagnostics_restore'
+          pnpm --filter @masters/db postgres:backup:restore | tee "$CUTOVER_WORK_DIR/postgres-backup-restore.json"
+          pnpm --filter @masters/db postgres:restore:reconcile
+          jq -e '.status == "MATCH" and .tableCount == 46 and (.mismatches | length == 0)' "$POSTGRES_RESTORE_REPORT_PATH"
+      - name: Produce fail-closed cutover rehearsal receipt
+        run: |
+          pnpm --filter @masters/db exec tsx scripts/prepare-postgres-cutover-receipt.ts | tee "$CUTOVER_RECEIPT_PATH.stdout"
+          jq -e '.status == "READY_FOR_CUTOVER" and .rehearsalOnly == true and .productionSwitchPerformed == false and .dualWriteUsed == false' "$CUTOVER_RECEIPT_PATH"
+          jq -e '[.gates[]] | all' "$CUTOVER_RECEIPT_PATH"
+      - name: Verify receipt gate fails on legacy-backup drift
+        run: |
+          cp "$CUTOVER_LEGACY_BACKUP" "$CUTOVER_WORK_DIR/legacy-final-tampered.db"
+          chmod 600 "$CUTOVER_WORK_DIR/legacy-final-tampered.db"
+          printf x >> "$CUTOVER_WORK_DIR/legacy-final-tampered.db"
+          set +e
+          CUTOVER_LEGACY_BACKUP="$CUTOVER_WORK_DIR/legacy-final-tampered.db" pnpm --filter @masters/db exec tsx scripts/prepare-postgres-cutover-receipt.ts >/tmp/cutover-drift.out 2>/tmp/cutover-drift.err
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -q 'Final legacy backup does not match sealed cutover source' /tmp/cutover-drift.err
+      - name: Upload cutover rehearsal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgresql-cutover-rehearsal-evidence
+          path: |
+            /tmp/postgres-cutover-rehearsal/migration-reconciliation.json
+            /tmp/postgres-cutover-rehearsal/restore-reconciliation.json
+            /tmp/postgres-cutover-rehearsal/postgres-backup-create.json
+            /tmp/postgres-cutover-rehearsal/postgres-backup-restore.json
+            /tmp/postgres-cutover-rehearsal/cutover-receipt.json
+          if-no-files-found: error
