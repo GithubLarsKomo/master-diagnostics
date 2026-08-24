@@ -17,6 +17,11 @@ FROM deps AS migrator
 COPY . .
 CMD ["pnpm", "--filter", "@masters/db", "db:migrate"]
 
+FROM migrator AS postgres-ops
+RUN apk add --no-cache postgresql18-client \
+  && rm -f /usr/local/bin/pnpm /usr/local/bin/pnpx \
+  && npm install --global pnpm@10.15.0
+
 FROM deps AS builder
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1 \
