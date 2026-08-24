@@ -17,6 +17,7 @@
     "postgres:schema:generate": "node scripts/generate-postgres-schema.mjs",
     "postgres:drizzle:generate": "drizzle-kit generate --config drizzle.postgres.config.ts",
     "postgres:migrate": "node scripts/apply-postgres-migrations.mjs",
+    "postgres:services:qualify": "tsx scripts/qualify-postgres-services.ts",
     "tenant-exports:cleanup": "tsx src/cleanup-tenant-exports.ts",
     "data-subject-delivery:cleanup": "tsx src/cleanup-data-subject-delivery-packages.ts",
     "privacy-capabilities:check": "tsx src/check-global-privacy-capabilities.ts",
@@ -50,7 +51,8 @@
   "dependencies": {
     "@libsql/client": "^0.17.4",
     "@masters/domain": "workspace:*",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
