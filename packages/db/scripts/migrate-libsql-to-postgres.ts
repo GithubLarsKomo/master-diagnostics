@@ -76,9 +76,19 @@ function convertForTarget(column: TargetColumn, value: unknown): unknown {
 
 function normalizeTimestamp(value: unknown): string | null {
   if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value.toISOString();
   const parsed = Date.parse(String(value));
   if (!Number.isFinite(parsed)) return String(value);
   return new Date(parsed).toISOString();
+}
+
+function normalizeDate(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : text;
 }
 
 function normalizeJsonValue(value: unknown): unknown {
@@ -107,7 +117,7 @@ function normalizeForHash(column: TargetColumn, value: unknown): unknown {
     return String(value);
   }
   if (column.dataType.includes('timestamp')) return normalizeTimestamp(value);
-  if (column.dataType === 'date') return String(value).slice(0, 10);
+  if (column.dataType === 'date') return normalizeDate(value);
   if (
     column.dataType === 'smallint'
     || column.dataType === 'integer'
