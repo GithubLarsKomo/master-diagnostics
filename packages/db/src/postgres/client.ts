@@ -49,18 +49,42 @@ export interface ConcretePostgresDatabase {
   close: () => Promise<void>;
 }
 
+function serializeDateLike(value: unknown): string {
+  return value instanceof Date ? value.toISOString() : String(value);
+}
+
+function normalizeIsoTimestamp(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) {
+    throw new Error(`PostgreSQL returned an invalid timestamp: ${value}`);
+  }
+  return parsed.toISOString();
+}
+
 const preserveDateString = {
-  serialize: (value: unknown) => value instanceof Date ? value.toISOString() : String(value),
+  serialize: serializeDateLike,
+  parse: (value: string) => value,
+};
+
+const preserveTimestampString = {
+  serialize: serializeDateLike,
+  parse: normalizeIsoTimestamp,
+};
+
+const preserveJsonString = {
+  serialize: (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value),
   parse: (value: string) => value,
 };
 
 /**
  * Concrete PostgreSQL runtime binding.
  *
- * Existing application services remain typed against the canonical Database
- * surface. During convergence, Drizzle's PostgreSQL dialect executes those
- * service queries against the PostgreSQL schema mirror; CI exercises this
- * compatibility boundary against PostgreSQL 18.x before any production cutover.
+ * The canonical service layer was deliberately written around portable scalar
+ * values: ISO-8601 strings for date/time fields and JSON strings for serialized
+ * payload columns. PostgreSQL stores those fields natively as date/timestamptz
+ * and jsonb, so the driver normalizes the wire representation back to the same
+ * service contract. This keeps locking, idempotency and audit code independent
+ * of the physical database dialect during the convergence window.
  */
 export function createPostgresDatabase(
   config: PostgresConnectionConfig = readPostgresConnectionConfig(),
@@ -72,8 +96,9 @@ export function createPostgresDatabase(
     prepare: true,
     types: {
       mastersDate: { to: 1082, from: [1082], ...preserveDateString },
-      mastersTimestamp: { to: 1114, from: [1114], ...preserveDateString },
-      mastersTimestamptz: { to: 1184, from: [1184], ...preserveDateString },
+      mastersTimestamp: { to: 1114, from: [1114], ...preserveTimestampString },
+      mastersTimestamptz: { to: 1184, from: [1184], ...preserveTimestampString },
+      mastersJsonb: { to: 3802, from: [3802], ...preserveJsonString },
     },
   });
   const pgDb = drizzle(sql);
