@@ -1,0 +1,121 @@
+name: PostgreSQL Club Production Smoke
+
+on:
+  pull_request:
+    paths:
+      - 'infra/docker-compose.club.postgres.yml'
+      - 'infra/backup/create-club-postgres-backup.sh'
+      - 'infra/backup/install-club-postgres-backup-timer.sh'
+      - 'apps/web/Dockerfile'
+      - '.env.example'
+      - 'docs/postgresql-production-cutover-runbook.md'
+      - '.github/workflows/postgres-club-production-smoke.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/docker-compose.club.postgres.yml'
+      - 'infra/backup/create-club-postgres-backup.sh'
+      - 'infra/backup/install-club-postgres-backup-timer.sh'
+      - 'apps/web/Dockerfile'
+      - '.env.example'
+      - 'docs/postgresql-production-cutover-runbook.md'
+      - '.github/workflows/postgres-club-production-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-club:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare production-like environment
+        run: |
+          cat > .env <<'EOF'
+          DEPLOYMENT_MODE=club
+          AUTH_PROVIDER=better-auth
+          APP_HOST=localhost
+          NEXT_PUBLIC_APP_URL=http://localhost
+          BETTER_AUTH_URL=http://localhost
+          BETTER_AUTH_SECRET=ci-only-secret-at-least-32-random-bytes-123456
+          DB_ENGINE=postgres
+          POSTGRES_DB=master_diagnostics
+          POSTGRES_USER=master_diagnostics_app
+          POSTGRES_PASSWORD=ci-postgres-password
+          DATABASE_URL=postgresql://master_diagnostics_app:ci-postgres-password@postgres:5432/master_diagnostics
+          DB_POOL_MAX=10
+          DB_IDLE_TIMEOUT_SECONDS=20
+          DB_CONNECT_TIMEOUT_SECONDS=10
+          DATABASE_AUTH_TOKEN=
+          PRIVACY_BACKUP_STATE=DISABLED
+          PRIVACY_NOTIFICATIONS_STATE=DISABLED
+          BACKUP_HOST_DIR=/tmp/master-diagnostics-pg-backups
+          BACKUP_KEY_FILE=/tmp/master-diagnostics-pg-backup.key
+          BACKUP_RETENTION_COUNT=3
+          RESTORE_PRIVACY_EFFECT_JOURNAL_HOST_DIR=/tmp/md-privacy-journal
+          RESTORE_PRIVACY_EFFECT_JOURNAL_KEY_FILE=/tmp/md-privacy-journal.key
+          EOF
+          head -c 32 /dev/urandom | base64 > /tmp/master-diagnostics-pg-backup.key
+          head -c 32 /dev/urandom | base64 > /tmp/md-privacy-journal.key
+          chmod 600 /tmp/master-diagnostics-pg-backup.key /tmp/md-privacy-journal.key
+          mkdir -p /tmp/master-diagnostics-pg-backups /tmp/md-privacy-journal
+
+      - name: Verify fail-closed interpolation
+        run: |
+          cp .env /tmp/md-good.env
+          sed '/^POSTGRES_PASSWORD=/d' .env > /tmp/md-missing.env
+          set +e
+          docker compose --env-file /tmp/md-missing.env -f infra/docker-compose.club.postgres.yml config >/tmp/missing.out 2>/tmp/missing.err
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -q 'POSTGRES_PASSWORD is required' /tmp/missing.err
+
+      - name: Validate PostgreSQL production compose
+        run: |
+          docker compose --env-file .env -f infra/docker-compose.club.postgres.yml config >/tmp/postgres-club-compose.yml
+          grep -q 'postgres:18.6-alpine' /tmp/postgres-club-compose.yml
+          ! grep -q 'libsql-server' /tmp/postgres-club-compose.yml
+
+      - name: Build PostgreSQL operations and application images
+        run: |
+          docker compose --env-file .env -f infra/docker-compose.club.postgres.yml build migrate app
+          docker compose --env-file .env -f infra/docker-compose.club.postgres.yml run --rm --no-deps migrate sh -ec 'pg_dump --version | grep -q "18\."'
+
+      - name: Start empty PostgreSQL and apply migrations
+        run: |
+          docker compose --env-file .env -f infra/docker-compose.club.postgres.yml up -d postgres
+          docker compose --env-file .env -f infra/docker-compose.club.postgres.yml run --rm migrate
+          docker compose --env-file .env -f infra/docker-compose.club.postgres.yml run --rm privacy-check
+
+      - name: Start application on PostgreSQL
+        run: |
+          docker compose --env-file .env -f infra/docker-compose.club.postgres.yml up -d app
+          app_id="$(docker compose --env-file .env -f infra/docker-compose.club.postgres.yml ps -q app)"
+          for _ in $(seq 1 40); do
+            status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$app_id")"
+            [[ "$status" == healthy ]] && break
+            sleep 2
+          done
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$app_id")" = healthy
+          test -z "$(docker compose --env-file .env -f infra/docker-compose.club.postgres.yml ps -q 2>/dev/null | xargs -r docker inspect --format '{{.Name}} {{.Config.Image}}' | grep -i libsql || true)"
+
+      - name: Create first PostgreSQL backup through production compose
+        run: |
+          bash infra/backup/create-club-postgres-backup.sh | tee /tmp/postgres-club-backup.json
+          jq -e '.status == "BACKUP_OK" and .retained == 3' /tmp/postgres-club-backup.json
+          bundle="$(find /tmp/master-diagnostics-pg-backups -maxdepth 1 -name '*.pgbak' -print -quit)"
+          test -n "$bundle"
+          test -f "$bundle.sha256"
+
+      - name: Verify PostgreSQL backup timer rendering
+        run: |
+          out="$(mktemp -d)"
+          MASTER_DIAGNOSTICS_SYSTEMD_DIR="$out" MASTER_DIAGNOSTICS_SKIP_SYSTEMCTL=1 bash infra/backup/install-club-postgres-backup-timer.sh
+          grep -q 'create-club-postgres-backup.sh' "$out/master-diagnostics-postgres-backup.service"
+          grep -q 'OnCalendar=.*03:00:00' "$out/master-diagnostics-postgres-backup.timer"
+
+      - name: Cleanup
+        if: always()
+        run: docker compose --env-file .env -f infra/docker-compose.club.postgres.yml down -v --remove-orphans || true
