@@ -7,7 +7,7 @@ on:
       - 'infra/backup/create-club-postgres-backup.sh'
       - 'infra/backup/install-club-postgres-backup-timer.sh'
       - 'apps/web/Dockerfile'
-      - '.env.example'
+      - '.env.postgres.example'
       - 'docs/postgresql-production-cutover-runbook.md'
       - '.github/workflows/postgres-club-production-smoke.yml'
   push:
@@ -17,7 +17,7 @@ on:
       - 'infra/backup/create-club-postgres-backup.sh'
       - 'infra/backup/install-club-postgres-backup-timer.sh'
       - 'apps/web/Dockerfile'
-      - '.env.example'
+      - '.env.postgres.example'
       - 'docs/postgresql-production-cutover-runbook.md'
       - '.github/workflows/postgres-club-production-smoke.yml'
 
@@ -63,7 +63,6 @@ jobs:
 
       - name: Verify fail-closed interpolation
         run: |
-          cp .env /tmp/md-good.env
           sed '/^POSTGRES_PASSWORD=/d' .env > /tmp/md-missing.env
           set +e
           docker compose --env-file /tmp/md-missing.env -f infra/docker-compose.club.postgres.yml config >/tmp/missing.out 2>/tmp/missing.err
