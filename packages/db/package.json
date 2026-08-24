@@ -59,6 +59,9 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
   },
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./postgres": "./src/postgres/client.ts"
+  },
   "types": "./src/index.ts"
 }
