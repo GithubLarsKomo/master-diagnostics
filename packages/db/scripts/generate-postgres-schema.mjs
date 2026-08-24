@@ -28,7 +28,13 @@ const timestampNames = new Set([
   'source_db_committed_at', 'normalized_at', 'valid_from', 'valid_until',
 ]);
 
-export function text(name, config) {
+// This file is generated as a compatibility boundary while the canonical
+// schema is still expressed with sqlite-core. `any` is deliberate here: a
+// single wrapper can return different PostgreSQL column builders depending on
+// the canonical column name/mode, and retaining the union would make Drizzle's
+// fluent .default()/.references() types intersect incompatibly. The generated
+// schema is still validated by drizzle-kit and by a real PostgreSQL 18.x CI.
+export function text(name: string, config?: any): any {
   if (name === 'birth_date') return pgDate(name, { mode: 'string' });
   if (name.endsWith('_json')) return pgJsonb(name);
   if (name.endsWith('_at') || timestampNames.has(name)) {
@@ -37,7 +43,7 @@ export function text(name, config) {
   return pgText(name, config);
 }
 
-export function integer(name, config) {
+export function integer(name: string, config?: any): any {
   if (config?.mode === 'boolean') return pgBoolean(name);
   if (config?.mode === 'timestamp') {
     return pgTimestamp(name, { withTimezone: true, mode: 'date' });
