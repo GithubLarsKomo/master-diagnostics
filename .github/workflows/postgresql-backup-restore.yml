@@ -50,10 +50,15 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Install PostgreSQL client
+      - name: Install PostgreSQL 18 client
         run: |
           sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          sudo apt-get install -y postgresql-common ca-certificates curl
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/18/bin/pg_dump --version | grep -q '18\.'
+          /usr/lib/postgresql/18/bin/pg_restore --version | grep -q '18\.'
       - name: Prepare representative PostgreSQL source
         run: |
           rm -f /tmp/master-diagnostics-backup-source.db
