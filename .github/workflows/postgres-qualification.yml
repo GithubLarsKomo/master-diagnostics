@@ -1,0 +1,166 @@
+name: PostgreSQL Qualification
+
+on:
+  pull_request:
+    paths:
+      - 'packages/db/**'
+      - '.github/workflows/postgres-qualification.yml'
+      - 'docs/postgresql-convergence.md'
+      - 'docs/adr/0023-postgresql-platform-convergence.md'
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/db/**'
+      - '.github/workflows/postgres-qualification.yml'
+
+jobs:
+  postgres-18:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_DB: master_diagnostics
+          POSTGRES_USER: master_diagnostics_app
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U master_diagnostics_app -d master_diagnostics"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      DATABASE_URL: postgresql://master_diagnostics_app:ci-postgres-password@127.0.0.1:5432/master_diagnostics
+      DB_POOL_MAX: '10'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Verify PostgreSQL 18 server
+        run: |
+          version="$(psql "$DATABASE_URL" -Atc 'show server_version_num')"
+          test "${version%%????}" = "18"
+          psql "$DATABASE_URL" -Atc 'select version()'
+
+      - name: Generate deterministic PostgreSQL schema mirror
+        working-directory: packages/db
+        run: |
+          node scripts/generate-postgres-schema.mjs > /tmp/pg-schema-first.json
+          cp src/postgres/schema.generated/manifest.json /tmp/pg-schema-manifest-first.json
+          node scripts/generate-postgres-schema.mjs > /tmp/pg-schema-second.json
+          diff -u /tmp/pg-schema-manifest-first.json src/postgres/schema.generated/manifest.json
+          cat /tmp/pg-schema-second.json
+
+      - name: Typecheck PostgreSQL provider and generated schema
+        run: pnpm --filter @masters/db typecheck
+
+      - name: Run PostgreSQL provider tests
+        run: pnpm --filter @masters/db test -- postgres-client.test.ts
+
+      - name: Generate PostgreSQL Drizzle baseline
+        working-directory: packages/db
+        run: |
+          rm -rf migrations-postgres-ci
+          pnpm postgres:drizzle:generate
+          test -n "$(find migrations-postgres-ci -maxdepth 1 -name '*.sql' -print -quit)"
+          cat migrations-postgres-ci/*.sql > /tmp/postgres-baseline.sql
+          ! grep -Eiq 'AUTOINCREMENT|PRAGMA|WITHOUT ROWID' /tmp/postgres-baseline.sql
+          grep -Eiq 'timestamp.*with time zone' /tmp/postgres-baseline.sql
+          grep -Eiq 'boolean' /tmp/postgres-baseline.sql
+          grep -Eiq 'jsonb' /tmp/postgres-baseline.sql
+
+      - name: Apply checksummed migrations under advisory lock
+        working-directory: packages/db
+        run: |
+          node scripts/apply-postgres-migrations.mjs > /tmp/pg-migrate-first.json
+          node scripts/apply-postgres-migrations.mjs > /tmp/pg-migrate-second.json
+          cat /tmp/pg-migrate-first.json
+          cat /tmp/pg-migrate-second.json
+          migration_files="$(find migrations-postgres-ci -maxdepth 1 -name '*.sql' | wc -l)"
+          ledger_rows="$(psql "$DATABASE_URL" -Atc 'select count(*) from _masters_schema_migrations')"
+          test "$ledger_rows" = "$migration_files"
+
+      - name: Verify full table parity with canonical schema
+        working-directory: packages/db
+        run: |
+          psql "$DATABASE_URL" -Atc "select table_name from information_schema.tables where table_schema='public' and table_name <> '_masters_schema_migrations' order by table_name" > /tmp/pg-tables.txt
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const manifest = JSON.parse(readFileSync('src/postgres/schema.generated/manifest.json', 'utf8'));
+          const actual = readFileSync('/tmp/pg-tables.txt', 'utf8').trim().split('\n').filter(Boolean).sort();
+          const expected = [...manifest.tables].sort();
+          if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+            console.error({ expected, actual });
+            process.exit(1);
+          }
+          console.log(JSON.stringify({ tableCount: actual.length }));
+          NODE
+
+      - name: Verify transaction rollback and sync idempotency constraint
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TEMP TABLE qualification_transaction_probe(id integer primary key);
+          BEGIN;
+          INSERT INTO qualification_transaction_probe VALUES (1);
+          ROLLBACK;
+          DO $$
+          BEGIN
+            IF (SELECT count(*) FROM qualification_transaction_probe) <> 0 THEN
+              RAISE EXCEPTION 'transaction rollback failed';
+            END IF;
+          END $$;
+
+          INSERT INTO sync_operations(
+            id, tenant_id, operation_id, test_id, entity_id, expected_version,
+            occurred_at, operation_type, schema_version, payload_json, status,
+            created_at, updated_at
+          ) VALUES (
+            'qual-op-1', 'tenant-a', 'same-operation', 'test-a', 'stage-a', 1,
+            now(), 'STAGE_UPDATE', '1', '{}'::jsonb, 'APPLIED', now(), now()
+          );
+          SQL
+
+          if psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO sync_operations(
+            id, tenant_id, operation_id, test_id, entity_id, expected_version,
+            occurred_at, operation_type, schema_version, payload_json, status,
+            created_at, updated_at
+          ) VALUES (
+            'qual-op-2', 'tenant-b', 'same-operation', 'test-b', 'stage-b', 1,
+            now(), 'STAGE_UPDATE', '1', '{}'::jsonb, 'APPLIED', now(), now()
+          );
+          SQL
+          then
+            echo 'duplicate operation_id was accepted' >&2
+            exit 1
+          fi
+
+      - name: Verify checksum tamper detection
+        working-directory: packages/db
+        run: |
+          file="$(find migrations-postgres-ci -maxdepth 1 -name '*.sql' | sort | head -n 1)"
+          printf '\n-- tamper probe\n' >> "$file"
+          if node scripts/apply-postgres-migrations.mjs >/tmp/pg-tamper.out 2>/tmp/pg-tamper.err; then
+            echo 'tampered migration unexpectedly passed' >&2
+            exit 1
+          fi
+          grep -qi 'checksum mismatch' /tmp/pg-tamper.err
