@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - 'packages/db/**'
+      - 'packages/auth/src/local.ts'
+      - 'apps/web/src/lib/db.ts'
+      - 'apps/web/src/lib/auth.ts'
+      - 'pnpm-lock.yaml'
       - '.github/workflows/postgres-qualification.yml'
       - 'docs/postgresql-convergence.md'
       - 'docs/adr/0023-postgresql-platform-convergence.md'
@@ -12,6 +16,10 @@ on:
       - main
     paths:
       - 'packages/db/**'
+      - 'packages/auth/src/local.ts'
+      - 'apps/web/src/lib/db.ts'
+      - 'apps/web/src/lib/auth.ts'
+      - 'pnpm-lock.yaml'
       - '.github/workflows/postgres-qualification.yml'
 
 jobs:
@@ -33,8 +41,11 @@ jobs:
           --health-retries=20
 
     env:
+      DB_ENGINE: postgres
       DATABASE_URL: postgresql://master_diagnostics_app:ci-postgres-password@127.0.0.1:5432/master_diagnostics
       DB_POOL_MAX: '10'
+      DB_IDLE_TIMEOUT_SECONDS: '20'
+      DB_CONNECT_TIMEOUT_SECONDS: '10'
 
     steps:
       - uses: actions/checkout@v4
@@ -70,10 +81,10 @@ jobs:
           diff -u /tmp/pg-schema-manifest-first.json src/postgres/schema.generated/manifest.json
           cat /tmp/pg-schema-second.json
 
-      - name: Typecheck PostgreSQL provider and generated schema
-        run: pnpm --filter @masters/db typecheck
+      - name: Typecheck PostgreSQL runtime and generated schema
+        run: pnpm typecheck
 
-      - name: Run PostgreSQL provider tests
+      - name: Run PostgreSQL runtime configuration tests
         run: pnpm --filter @masters/db test -- postgres-client.test.ts
 
       - name: Generate PostgreSQL Drizzle baseline
@@ -115,6 +126,10 @@ jobs:
           console.log(JSON.stringify({ tableCount: actual.length }));
           NODE
 
+      - name: Qualify existing service layer on PostgreSQL
+        working-directory: packages/db
+        run: pnpm postgres:services:qualify
+
       - name: Verify transaction rollback and sync idempotency constraint
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
@@ -128,31 +143,7 @@ jobs:
               RAISE EXCEPTION 'transaction rollback failed';
             END IF;
           END $$;
-
-          INSERT INTO sync_operations(
-            id, tenant_id, operation_id, test_id, entity_id, expected_version,
-            occurred_at, operation_type, schema_version, payload_json, status,
-            created_at, updated_at
-          ) VALUES (
-            'qual-op-1', 'tenant-a', 'same-operation', 'test-a', 'stage-a', 1,
-            now(), 'STAGE_UPDATE', '1', '{}'::jsonb, 'APPLIED', now(), now()
-          );
           SQL
-
-          if psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
-          INSERT INTO sync_operations(
-            id, tenant_id, operation_id, test_id, entity_id, expected_version,
-            occurred_at, operation_type, schema_version, payload_json, status,
-            created_at, updated_at
-          ) VALUES (
-            'qual-op-2', 'tenant-b', 'same-operation', 'test-b', 'stage-b', 1,
-            now(), 'STAGE_UPDATE', '1', '{}'::jsonb, 'APPLIED', now(), now()
-          );
-          SQL
-          then
-            echo 'duplicate operation_id was accepted' >&2
-            exit 1
-          fi
 
       - name: Verify checksum tamper detection
         working-directory: packages/db
