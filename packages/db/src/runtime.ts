@@ -1,5 +1,9 @@
 import { createDatabase, type Database } from './client';
-import { createPostgresDatabase, type ConcretePostgresDatabase } from './postgres/client';
+import {
+  createPostgresDatabase,
+  readPostgresConnectionConfig,
+  type ConcretePostgresDatabase,
+} from './postgres/client';
 
 export type DatabaseEngine = 'libsql' | 'postgres';
 
@@ -18,7 +22,9 @@ export interface RuntimeDatabase {
 export function createRuntimeDatabase(env: NodeJS.ProcessEnv = process.env): RuntimeDatabase {
   const engine = readDatabaseEngine(env);
   if (engine === 'postgres') {
-    const concrete: ConcretePostgresDatabase = createPostgresDatabase();
+    const concrete: ConcretePostgresDatabase = createPostgresDatabase(
+      readPostgresConnectionConfig(env),
+    );
     return { engine, db: concrete.db, close: concrete.close };
   }
 
