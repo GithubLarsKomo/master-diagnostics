@@ -49,6 +49,11 @@ export interface ConcretePostgresDatabase {
   close: () => Promise<void>;
 }
 
+const preserveDateString = {
+  serialize: (value: unknown) => value instanceof Date ? value.toISOString() : String(value),
+  parse: (value: string) => value,
+};
+
 /**
  * Concrete PostgreSQL runtime binding.
  *
@@ -65,6 +70,11 @@ export function createPostgresDatabase(
     idle_timeout: config.idleTimeoutSeconds,
     connect_timeout: config.connectTimeoutSeconds,
     prepare: true,
+    types: {
+      mastersDate: { to: 1082, from: [1082], ...preserveDateString },
+      mastersTimestamp: { to: 1114, from: [1114], ...preserveDateString },
+      mastersTimestamptz: { to: 1184, from: [1184], ...preserveDateString },
+    },
   });
   const pgDb = drizzle(sql);
 
