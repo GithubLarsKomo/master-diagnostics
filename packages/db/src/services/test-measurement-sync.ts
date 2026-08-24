@@ -136,48 +136,48 @@ function parseStoredResult(value: string | null): TestMeasurementSyncResult {
   return JSON.parse(value) as TestMeasurementSyncResult;
 }
 
-function canonicalJson(value: unknown): string {
-  const normalize = (input: unknown): unknown => {
-    if (Array.isArray(input)) return input.map(normalize);
-    if (input && typeof input === 'object') {
-      return Object.fromEntries(
-        Object.entries(input as Record<string, unknown>)
-          .sort(([left], [right]) => left.localeCompare(right))
-          .map(([key, nested]) => [key, normalize(nested)]),
-      );
-    }
-    return input;
-  };
-  return JSON.stringify(normalize(value));
-}
-
-function sameJsonDocument(left: string, right: string): boolean {
-  try {
-    return canonicalJson(JSON.parse(left)) === canonicalJson(JSON.parse(right));
-  } catch {
-    return false;
-  }
-}
-
-function sameTimestamp(left: string, right: string): boolean {
-  const leftMs = Date.parse(left);
-  const rightMs = Date.parse(right);
-  return Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs === rightMs;
-}
-
 function sameStoredOperation(
   stored: typeof syncOperations.$inferSelect,
   operation: TestMeasurementSyncOperation,
   payloadJson: string,
 ): boolean {
+  const canonicalizeJson = (value: string): string | null => {
+    const sortValue = (input: unknown): unknown => {
+      if (Array.isArray(input)) return input.map(sortValue);
+      if (input && typeof input === 'object') {
+        return Object.fromEntries(
+          Object.entries(input as Record<string, unknown>)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, item]) => [key, sortValue(item)]),
+        );
+      }
+      return input;
+    };
+
+    try {
+      return JSON.stringify(sortValue(JSON.parse(value)));
+    } catch {
+      return null;
+    }
+  };
+
+  const storedOccurredAt = Date.parse(stored.occurredAt);
+  const operationOccurredAt = Date.parse(operation.occurredAt);
+  const timestampsMatch = Number.isFinite(storedOccurredAt)
+    && Number.isFinite(operationOccurredAt)
+    && storedOccurredAt === operationOccurredAt;
+  const storedPayload = canonicalizeJson(stored.payloadJson);
+  const operationPayload = canonicalizeJson(payloadJson);
+
   return (
     stored.testId === operation.testId
     && stored.entityId === operation.entityId
     && stored.expectedVersion === operation.expectedVersion
-    && sameTimestamp(stored.occurredAt, operation.occurredAt)
+    && timestampsMatch
     && stored.operationType === operation.operationType
     && stored.schemaVersion === operation.schemaVersion
-    && sameJsonDocument(stored.payloadJson, payloadJson)
+    && storedPayload !== null
+    && storedPayload === operationPayload
   );
 }
 
@@ -197,8 +197,6 @@ export async function syncTestMeasurement(
     actor,
     operation.testId,
   );
-  if (!timerPlan) throw new Error('Test timer context not found');
-
   const payloadJson = JSON.stringify(operation.payload);
 
   return db.transaction(async (tx) => {
@@ -271,13 +269,14 @@ export async function syncTestMeasurement(
           }).where(and(
             eq(restMeasurements.id, existing.id),
             eq(restMeasurements.tenantId, tenantId),
+            eq(restMeasurements.currentVersion, serverVersion),
           )).returning();
+          if (!updated) throw new Error('Rest measurement changed concurrently');
           after = updated;
-          entityDatabaseId = existing.id;
+          entityDatabaseId = updated.id;
         } else {
-          entityDatabaseId = crypto.randomUUID();
           const [inserted] = await tx.insert(restMeasurements).values({
-            id: entityDatabaseId,
+            id: crypto.randomUUID(),
             tenantId,
             testId: operation.testId,
             heartRate: operation.payload.heartRate,
@@ -288,43 +287,15 @@ export async function syncTestMeasurement(
             createdAt: now,
             updatedAt: now,
           }).returning();
+          if (!inserted) throw new Error('Rest measurement was not created');
           after = inserted;
+          entityDatabaseId = inserted.id;
         }
       } else {
-        after = existing;
+        after = existing ?? null;
         entityDatabaseId = existing?.id ?? operation.entityId;
       }
-    } else if (operation.payload.target.kind === 'STAGE') {
-      const stageNumber = operation.payload.target.stageNumber;
-      const [existing] = await tx
-        .select()
-        .from(testStages)
-        .where(and(
-          eq(testStages.tenantId, tenantId),
-          eq(testStages.testId, operation.testId),
-          eq(testStages.stageNumber, stageNumber),
-        ))
-        .limit(1);
-      if (!existing) throw new Error('Test stage not found for measurement synchronization');
-      serverVersion = existing.measurementVersion;
-      before = existing;
-      entityDatabaseId = existing.id;
-      if (serverVersion === operation.expectedVersion) {
-        const [updated] = await tx.update(testStages).set({
-          heartRate: operation.payload.heartRate,
-          lactateValueX100: operation.payload.lactateValueX100,
-          lactateQualifier: operation.payload.lactateQualifier,
-          measurementVersion: serverVersion + 1,
-          updatedAt: now,
-        }).where(and(
-          eq(testStages.id, existing.id),
-          eq(testStages.tenantId, tenantId),
-        )).returning();
-        after = updated;
-      } else {
-        after = existing;
-      }
-    } else {
+    } else if (operation.payload.target.kind === 'RECOVERY') {
       const [existing] = await tx
         .select()
         .from(recoveryMeasurements)
@@ -347,16 +318,17 @@ export async function syncTestMeasurement(
           }).where(and(
             eq(recoveryMeasurements.id, existing.id),
             eq(recoveryMeasurements.tenantId, tenantId),
+            eq(recoveryMeasurements.currentVersion, serverVersion),
           )).returning();
+          if (!updated) throw new Error('Recovery measurement changed concurrently');
           after = updated;
-          entityDatabaseId = existing.id;
+          entityDatabaseId = updated.id;
         } else {
-          entityDatabaseId = crypto.randomUUID();
           const [inserted] = await tx.insert(recoveryMeasurements).values({
-            id: entityDatabaseId,
+            id: crypto.randomUUID(),
             tenantId,
             testId: operation.testId,
-            secondsAfterLastStage: timerPlan.recoverySeconds,
+            targetOffsetSeconds: 300,
             heartRate: operation.payload.heartRate,
             lactateValueX100: operation.payload.lactateValueX100,
             lactateQualifier: operation.payload.lactateQualifier,
@@ -365,18 +337,103 @@ export async function syncTestMeasurement(
             createdAt: now,
             updatedAt: now,
           }).returning();
+          if (!inserted) throw new Error('Recovery measurement was not created');
           after = inserted;
+          entityDatabaseId = inserted.id;
         }
       } else {
-        after = existing;
+        after = existing ?? null;
+        entityDatabaseId = existing?.id ?? operation.entityId;
+      }
+    } else {
+      const stageNumber = operation.payload.target.stageNumber;
+      const stagePhase = timerPlan.phases.find(
+        (phase) => phase.kind === 'STAGE' && phase.stageNumber === stageNumber,
+      );
+      if (!stagePhase) throw new Error('Stage is not part of the immutable test plan');
+      const [existing] = await tx
+        .select()
+        .from(testStages)
+        .where(and(
+          eq(testStages.tenantId, tenantId),
+          eq(testStages.testId, operation.testId),
+          eq(testStages.stageNumber, stageNumber),
+        ))
+        .limit(1);
+      serverVersion = existing?.currentVersion ?? 0;
+      before = existing ?? null;
+      if (serverVersion === operation.expectedVersion) {
+        if (existing) {
+          const [updated] = await tx.update(testStages).set({
+            endHeartRate: operation.payload.heartRate,
+            lactateValueX100: operation.payload.lactateValueX100,
+            lactateQualifier: operation.payload.lactateQualifier,
+            lactateMeasuredAt: operation.payload.measuredAt,
+            currentVersion: serverVersion + 1,
+            updatedAt: now,
+          }).where(and(
+            eq(testStages.id, existing.id),
+            eq(testStages.tenantId, tenantId),
+            eq(testStages.currentVersion, serverVersion),
+          )).returning();
+          if (!updated) throw new Error('Stage measurement changed concurrently');
+          after = updated;
+          entityDatabaseId = updated.id;
+        } else {
+          const [inserted] = await tx.insert(testStages).values({
+            id: crypto.randomUUID(),
+            tenantId,
+            testId: operation.testId,
+            stageNumber,
+            targetWatts: stagePhase.targetWatts!,
+            plannedSeconds: stagePhase.durationSeconds,
+            endHeartRate: operation.payload.heartRate,
+            lactateValueX100: operation.payload.lactateValueX100,
+            lactateQualifier: operation.payload.lactateQualifier,
+            lactateMeasuredAt: operation.payload.measuredAt,
+            currentVersion: 1,
+            createdAt: now,
+            updatedAt: now,
+          }).returning();
+          if (!inserted) throw new Error('Stage measurement was not created');
+          after = inserted;
+          entityDatabaseId = inserted.id;
+        }
+      } else {
+        after = existing ?? null;
         entityDatabaseId = existing?.id ?? operation.entityId;
       }
     }
 
-    const result: TestMeasurementSyncResult = serverVersion === operation.expectedVersion
-      ? { status: 'APPLIED', newVersion: serverVersion + 1 }
-      : { status: 'CONFLICT', serverVersion, serverState: after };
+    if (serverVersion !== operation.expectedVersion) {
+      const result: TestMeasurementSyncResult = {
+        status: 'CONFLICT',
+        serverVersion,
+        serverState: after,
+      };
+      await tx.insert(syncOperations).values({
+        id: crypto.randomUUID(),
+        tenantId,
+        operationId: operation.operationId,
+        testId: operation.testId,
+        entityId: operation.entityId,
+        expectedVersion: operation.expectedVersion,
+        occurredAt: operation.occurredAt,
+        operationType: operation.operationType,
+        schemaVersion: operation.schemaVersion,
+        payloadJson,
+        status: 'CONFLICT',
+        resultJson: JSON.stringify(result),
+        createdAt: now,
+        updatedAt: now,
+      });
+      return result;
+    }
 
+    const result: TestMeasurementSyncResult = {
+      status: 'APPLIED',
+      newVersion: serverVersion + 1,
+    };
     await tx.insert(syncOperations).values({
       id: crypto.randomUUID(),
       tenantId,
@@ -384,27 +441,29 @@ export async function syncTestMeasurement(
       testId: operation.testId,
       entityId: operation.entityId,
       expectedVersion: operation.expectedVersion,
+      occurredAt: operation.occurredAt,
       operationType: operation.operationType,
       schemaVersion: operation.schemaVersion,
-      occurredAt: operation.occurredAt,
       payloadJson,
+      status: 'APPLIED',
       resultJson: JSON.stringify(result),
+      appliedAt: now,
       createdAt: now,
       updatedAt: now,
     });
-
     await appendAuditEvent(tx, {
       tenantId,
-      actor,
-      action: 'TEST_MEASUREMENT_SYNCED',
-      entityType: operation.payload.target.kind === 'STAGE' ? 'TEST_STAGE' : 'TEST_MEASUREMENT',
+      occurredAt: operation.occurredAt,
+      recordedAt: now,
+      ...auditActorFields(actor),
+      action: 'test.measurement.synced',
+      entityType: `test_measurement.${operation.payload.target.kind.toLowerCase()}`,
       entityId: entityDatabaseId,
-      operationId: operation.operationId,
+      source: 'OFFLINE_SYNC',
+      correlationId: operation.operationId,
       before,
-      after: { result, value: after },
-      createdAt: now,
+      after,
     });
-
     return result;
   });
 }
