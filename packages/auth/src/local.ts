@@ -1,10 +1,10 @@
-import type { Database } from '@masters/db';
+import type { Database, DatabaseEngine } from '@masters/db';
 import * as schema from '@masters/db';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { betterAuth } from 'better-auth/minimal';
 import { nextCookies } from 'better-auth/next-js';
 
-export function createLocalAuth(db: Database) {
+export function createLocalAuth(db: Database, databaseEngine: DatabaseEngine = 'libsql') {
   const secret = process.env.BETTER_AUTH_SECRET;
 
   if (!secret) {
@@ -21,7 +21,7 @@ export function createLocalAuth(db: Database) {
     secret,
 
     database: drizzleAdapter(db, {
-      provider: 'sqlite',
+      provider: databaseEngine === 'postgres' ? 'pg' : 'sqlite',
       schema,
     }),
 
