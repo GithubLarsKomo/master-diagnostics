@@ -55,12 +55,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install PostgreSQL 18 client
         run: |
-          sudo install -d /usr/share/postgresql-common/pgdg
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update
+          sudo apt-get install -y postgresql-common ca-certificates curl
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y postgresql-client-18
-          test "$(pg_dump --version | awk '{print $3}' | cut -d. -f1)" = "18"
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/18/bin/pg_dump --version | grep -q '18\.'
+          /usr/lib/postgresql/18/bin/pg_restore --version | grep -q '18\.'
       - name: Build representative legacy database
         run: |
           mkdir -p "$CUTOVER_WORK_DIR"
@@ -74,7 +75,7 @@ jobs:
           cp "$CUTOVER_SOURCE_DB" "$CUTOVER_LEGACY_BACKUP"
           chmod 400 "$CUTOVER_LEGACY_BACKUP"
           test "$(sha256sum "$CUTOVER_SOURCE_DB" | awk '{print $1}')" = "$(sha256sum "$CUTOVER_LEGACY_BACKUP" | awk '{print $1}')"
-          test $(( $(stat -c '%a' "$CUTOVER_SOURCE_DB") & 222 )) -eq 0
+          test "$(stat -c '%a' "$CUTOVER_SOURCE_DB")" = "444"
       - name: Prepare empty PostgreSQL target
         run: |
           pnpm --filter @masters/db postgres:schema:generate
