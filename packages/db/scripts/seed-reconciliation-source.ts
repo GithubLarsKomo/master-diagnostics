@@ -18,7 +18,6 @@ if (!sourceUrl) throw new Error('SOURCE_DATABASE_URL is required');
 const now = '2026-08-24T12:00:00.000Z';
 const tenantId = 'reconcile-tenant';
 const trainerId = 'reconcile-trainer';
-const athleteId = 'reconcile-athlete';
 const testId = 'reconcile-test';
 const interpretationId = 'reconcile-interpretation';
 const db = createDatabaseFromConfig({ url: sourceUrl });
@@ -38,13 +37,12 @@ await db.insert(users).values({
   updatedAt: now,
 });
 
-await createAthlete(db, tenantId, {
+const athlete = await createAthlete(db, tenantId, {
   userId: trainerId,
   role: 'TRAINER',
   authProvider: 'BETTER_AUTH',
   sessionId: 'reconcile-session',
 }, {
-  id: athleteId,
   firstName: 'Ada',
   lastName: 'Reconcile',
   birthDate: '1986-04-12',
@@ -55,6 +53,8 @@ await createAthlete(db, tenantId, {
   primaryDiscipline: 'Einer',
   trainingStatus: 'leistungsorientiert',
 });
+if (!athlete) throw new Error('Reconciliation athlete was not created');
+const athleteId = athlete.id;
 
 await db.insert(athleteSnapshots).values({
   id: 'reconcile-athlete-snapshot',
