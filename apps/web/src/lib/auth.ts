@@ -1,4 +1,4 @@
 import { createLocalAuth } from '@masters/auth';
-import { db } from './db';
+import { db, dbEngine } from './db';
 
-export const auth = createLocalAuth(db);
+export const auth = createLocalAuth(db, dbEngine);

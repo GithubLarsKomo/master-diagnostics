@@ -141,14 +141,43 @@ function sameStoredOperation(
   operation: TestMeasurementSyncOperation,
   payloadJson: string,
 ): boolean {
+  const canonicalizeJson = (value: string): string | null => {
+    const sortValue = (input: unknown): unknown => {
+      if (Array.isArray(input)) return input.map(sortValue);
+      if (input && typeof input === 'object') {
+        return Object.fromEntries(
+          Object.entries(input as Record<string, unknown>)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, item]) => [key, sortValue(item)]),
+        );
+      }
+      return input;
+    };
+
+    try {
+      return JSON.stringify(sortValue(JSON.parse(value)));
+    } catch {
+      return null;
+    }
+  };
+
+  const storedOccurredAt = Date.parse(stored.occurredAt);
+  const operationOccurredAt = Date.parse(operation.occurredAt);
+  const timestampsMatch = Number.isFinite(storedOccurredAt)
+    && Number.isFinite(operationOccurredAt)
+    && storedOccurredAt === operationOccurredAt;
+  const storedPayload = canonicalizeJson(stored.payloadJson);
+  const operationPayload = canonicalizeJson(payloadJson);
+
   return (
     stored.testId === operation.testId
     && stored.entityId === operation.entityId
     && stored.expectedVersion === operation.expectedVersion
-    && stored.occurredAt === operation.occurredAt
+    && timestampsMatch
     && stored.operationType === operation.operationType
     && stored.schemaVersion === operation.schemaVersion
-    && stored.payloadJson === payloadJson
+    && storedPayload !== null
+    && storedPayload === operationPayload
   );
 }
 
