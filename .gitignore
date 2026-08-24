@@ -15,6 +15,9 @@ test-results/
 backups/
 exports/
 .local-data/
+packages/db/src/postgres/schema.generated/
+packages/db/src/postgres/compat.ts
+packages/db/migrations-postgres-ci/
 
 # Local patch artifacts
 *.patch
