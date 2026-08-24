@@ -77,6 +77,7 @@ const preserveJsonString = {
 };
 
 function normalizeCanonicalResultValue(value: unknown, columnType: number | undefined): unknown {
+  if (value === null || value === undefined) return value;
   if (columnType === 1114 || columnType === 1184) {
     return normalizeIsoTimestamp(value);
   }
