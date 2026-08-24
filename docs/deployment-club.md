@@ -1,6 +1,29 @@
 # Autarker Club-Modus
 
-## Eigenschaften
+> **Providerstatus:** Der aktuell produktiv qualifizierte Club-Stack verwendet weiterhin libSQL. Gemäß ADR-0023 ist **PostgreSQL 18.x** die verbindliche Zielpersistenz. libSQL wird erst entfernt, wenn die PostgreSQL-Migrations-, Offline-, Backup-/Restore- und Privacy-Gates vollständig bestanden sind. Es gibt keinen Dual-Write-Betrieb.
+
+## Zielarchitektur
+
+Der endgültige Club-Stack bleibt vollständig autark, verwendet aber denselben Datenbankprovider wie der gehostete Plattformbetrieb:
+
+```text
+Caddy -> Next.js -> local PostgreSQL 18.x
+                -> persistent database volume
+Backup job -> encrypted local/NAS target
+```
+
+PostgreSQL wird nur im internen Compose-Netz veröffentlicht. Ein Club benötigt weiterhin weder Cloud-Auth noch Cloud-Datenbank, CDN, Telemetrie oder Online-Lizenzserver.
+
+Kanonischer Zielvertrag:
+
+```dotenv
+DATABASE_URL=postgresql://master_diagnostics_app:<runtime_secret>@postgres:5432/master_diagnostics
+DB_POOL_MAX=5
+```
+
+Die konkrete Umstellung des Club-Compose erfolgt erst nach dem Gate aus [`postgresql-convergence.md`](./postgresql-convergence.md). Bis dahin gelten die folgenden libSQL-Betriebsanweisungen unverändert als qualifizierter Übergangspfad.
+
+## Eigenschaften des aktuell qualifizierten Übergangsbetriebs
 
 - genau ein Tenant
 - Better Auth
@@ -21,7 +44,7 @@
 - eingehende Ports 80 und 443
 - mindestens 2 GB RAM für den ersten Testbetrieb
 
-## Erstes Deployment
+## Erstes Deployment im Übergangspfad
 
 ```bash
 git clone https://github.com/GithubLarsKomo/master-diagnostics.git
@@ -63,7 +86,7 @@ docker compose -f infra/docker-compose.club.yml up -d --build
 docker compose -f infra/docker-compose.club.yml ps
 ```
 
-Die Startreihenfolge ist fest definiert:
+Die aktuelle Startreihenfolge ist fest definiert:
 
 1. libSQL wird gestartet und muss gesund sein.
 2. Der einmalige `migrate`-Container spielt alle Migrationen ein.
@@ -75,6 +98,29 @@ Die Startreihenfolge ist fest definiert:
 
 Ein Upgrade von einem älteren Stand benötigt deshalb vor `up -d --build` mindestens die beiden expliziten `PRIVACY_*_STATE`-Deklarationen. Fehlen sie, ist ein blockierter App-Start das beabsichtigte Verhalten.
 
+## PostgreSQL-Cutover-Gate für den Club-Modus
+
+Der Compose-Service darf erst von libSQL auf PostgreSQL umgestellt werden, wenn mindestens folgende Evidenz im Repository/CI vorliegt:
+
+1. PostgreSQL-Drizzle-Schema und migrationsfähiger Provider ohne Änderung der Fachsemantik.
+2. Echte Integrationstests gegen PostgreSQL 18.x.
+3. Offline-Sync mit Idempotenz, `expected_version`, Konfliktbehandlung und atomarem Audit nachgewiesen.
+4. PostgreSQL-native Backup-/Restore-Werkzeuge mit verschlüsseltem Ziel und Restore-Drill.
+5. Privacy-Capability-Preflight, Retention und Export-/Anonymisierungsverträge requalifiziert.
+6. Repräsentative libSQL-Daten erfolgreich nach PostgreSQL migriert und reconciled.
+7. Fresh-install- und Upgrade-Smoke-Test des Club-Compose gegen PostgreSQL.
+
+Erst danach ändert sich die Startreihenfolge auf:
+
+```text
+PostgreSQL healthy
+  -> migrations
+  -> privacy-check
+  -> app/readiness
+  -> maintenance jobs
+  -> Caddy
+```
+
 ## TLS-Betriebsmodus
 
 Der Repository-Standard ist Caddys automatisches öffentliches TLS für einen öffentlich auflösbaren `APP_HOST`. Für rein interne Club-Hostnamen ist `tls internal` eine bewusste alternative Betriebsvariante; sie erfordert die kontrollierte Verteilung von Caddys Root-CA an die Clients und besonderen Schutz der CA-Privatschlüssel.
@@ -85,22 +131,24 @@ Wichtig für beide Modi: `caddy-data` und `caddy-config` sind persistente Sicher
 
 ## Versionierte Infrastruktur-Images
 
-Der Club-Stack verwendet für externe Infrastruktur keine gleitenden `latest`-Tags. libSQL und Caddy werden in `infra/docker-compose.club.yml` auf explizite veröffentlichte Versionen gepinnt; CI prüft diese Invariante im kanonischen Compose-Output.
+Der Club-Stack verwendet für externe Infrastruktur keine gleitenden `latest`-Tags. Im aktuellen Übergangspfad sind libSQL und Caddy in `infra/docker-compose.club.yml` auf explizite veröffentlichte Versionen gepinnt; nach dem PostgreSQL-Cutover gilt dieselbe Regel für PostgreSQL 18.x und Caddy.
 
-Ein Upgrade dieser Komponenten ist damit eine bewusste Repository-Änderung: Versionshinweise prüfen, Image-Pin ändern, vollständige CI ausführen und erst danach deployen. Insbesondere Datenbank-Upgrades sollen später mit dem in SPEC §41 geforderten manuellen Vorab-Backup gekoppelt werden, statt implizit durch ein erneutes `docker pull` zu entstehen.
+Ein Upgrade dieser Komponenten ist eine bewusste Repository-Änderung: Versionshinweise prüfen, Image-Pin ändern, vollständige CI ausführen und erst danach deployen. Datenbank-Upgrades werden mit manuellem Vorab-Backup, Restore-Kompatibilitätsprüfung und dokumentiertem Migrationspfad gekoppelt, statt implizit durch ein erneutes `docker pull` zu entstehen.
 
 ## Persistente Privacy-Artefakte
 
-Der Club-Stack bindet folgende Docker-Volumes ein:
+Der aktuelle Übergangsstack bindet folgende Docker-Volumes ein:
 
-- `libsql-data` → Datenbank,
+- `libsql-data` → aktuelle Datenbank,
 - `report-data` → Report-PDFs,
 - `export-data` → verschlüsselte vollständige Tenant-Exportpakete (`.mde`),
 - `data-subject-delivery-data` → verschlüsselte Betroffenenexportpakete (`.mdse`).
 
+Im PostgreSQL-Zielstack wird `libsql-data` durch ein ausschließlich intern verwendetes persistentes PostgreSQL-Datenvolume ersetzt. Report-/Export-/Betroffenenartefakte behalten ihre vorhandenen Lebenszyklus- und Privacy-Verträge.
+
 App und Maintenance-Container verwenden für `.mdse` denselben Pfad `/var/lib/masters/data-subject-delivery-packages`. Dadurch überstehen noch auslieferbare Pakete einen App-Neustart und die in Policy 1.6 verwendete Anonymisierungs-Quarantäne arbeitet auf demselben persistenten Storage.
 
-Bei regulären Updates dürfen diese Volumes nicht mit `docker compose down -v` entfernt werden.
+Bei regulären Updates dürfen persistente Daten-, Report-, Export-, Betroffenen- oder Caddy-Volumes nicht mit `docker compose down -v` entfernt werden.
 
 ## Retention-Scheduler
 
@@ -118,7 +166,7 @@ Tenant-, Athleten- und verknüpfte User-IDs werden nicht in die periodische Summ
 
 Ein Fehler beendet den Container wegen `set -e`; `restart: unless-stopped` startet ihn erneut. Damit wird ein fehlgeschlagener Scan nicht als erfolgreicher Tageszyklus verschluckt. Die 24-Stunden-Kadenz ist relativ zum letzten erfolgreichen Containerlauf; sie ist bewusst kein kalendergenauer Mitternachts-Cron.
 
-## Verifikation
+## Verifikation des aktuellen Übergangspfads
 
 ```bash
 curl --fail https://diagnostics.example.org/api/health
@@ -127,7 +175,7 @@ docker compose -f infra/docker-compose.club.yml logs --tail=100 migrate privacy-
 
 Erwartet werden eine erfolgreiche Health-Antwort, mit Status `0` beendete `migrate`- und `privacy-check`-Container sowie laufende `export-cleanup`- und `retention-scan`-Container.
 
-## Betrieb
+## Betrieb des aktuellen Übergangspfads
 
 ```bash
 # Status
@@ -159,3 +207,9 @@ docker compose -f infra/docker-compose.club.yml down
 `export-cleanup` führt in jedem Zyklus zuerst den Cleanup abgelaufener Tenant-Exporte und danach den Cleanup konsumierter/abgelaufener Betroffenenexportpakete aus. Schlägt einer der beiden Schritte fehl, beendet sich der Container und wird durch `restart: unless-stopped` erneut gestartet; der Fehler wird nicht als scheinbar erfolgreicher Maintenance-Zyklus verschluckt.
 
 Vor einem produktiven Einsatz müssen Backup und Restore aus `infra/backup/README.md` praktisch getestet werden. Sobald ein Backup-System tatsächlich aktiviert wird, muss dessen reale Betriebsimplementierung zusätzlich den versionierten Privacy-Vertrag aus `docs/global-privacy-policy.md` erfüllen; `PRIVACY_BACKUP_STATE=ENABLED` ist keine bloße Selbstdeklaration ohne die dort geforderten Kontrollen.
+
+## Weiterführend
+
+- [ADR-0023 PostgreSQL Platform Convergence](./adr/0023-postgresql-platform-convergence.md)
+- [PostgreSQL Platform Convergence](./postgresql-convergence.md)
+- [Diagnostic Artifact Integration](./diagnostic-artifact-integration.md)
