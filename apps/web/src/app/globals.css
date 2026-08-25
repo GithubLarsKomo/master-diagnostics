@@ -1,50 +1,106 @@
-:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* Canonical Skillz sport-performance brand tokens. Do not change locally. */
+  --sport-navy: #173652;
+  --sport-dark: #1C2B3A;
+  --sport-body: #24313E;
+  --sport-teal: #246F6C;
+  --sport-teal-bright: #2B8884;
+  --sport-muted: #6B7785;
+  --sport-energy: #B54708;
+  --sport-success: #2E7D32;
+  --sport-warning: #9A6500;
+  --sport-critical: #B42318;
+  --sport-recovery: #6D5BD0;
+  --sport-border: #D6E0E6;
+  --sport-surface: #EDF3F6;
+  --sport-surface-subtle: #F6F8F9;
+  --sport-warning-surface: #FFF4D6;
+  --sport-white: #FFFFFF;
+
+  /* Semantic project tokens. */
+  --color-primary: var(--sport-navy);
+  --color-secondary: var(--sport-teal);
+  --color-accent: var(--sport-energy);
+  --color-success: var(--sport-success);
+  --color-warning: var(--sport-warning);
+  --color-danger: var(--sport-critical);
+  --color-info: var(--sport-teal);
+  --color-recovery: var(--sport-recovery);
+  --color-text: var(--sport-body);
+  --color-text-muted: var(--sport-muted);
+  --color-background: var(--sport-white);
+  --color-surface: var(--sport-surface);
+  --color-surface-subtle: var(--sport-surface-subtle);
+  --color-border: var(--sport-border);
+  --color-focus: var(--sport-teal-bright);
+}
+
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; }
+html { background: var(--color-surface-subtle); }
+body { margin: 0; min-height: 100vh; color: var(--color-text); background: var(--color-surface-subtle); line-height: 1.5; }
 main { max-width: 72rem; margin: 0 auto; padding: 2rem; }
-.card { border: 1px solid currentColor; border-radius: .75rem; padding: 1.25rem; margin-block: 1rem; }
+button, input, select, textarea { font: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.card { background: var(--color-background); border: 1px solid var(--color-border); border-radius: .75rem; padding: 1.25rem; margin-block: 1rem; box-shadow: 0 8px 24px rgb(23 54 82 / 6%); }
 .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
 code { overflow-wrap: anywhere; }
 
 .setup-form { display: grid; gap: 1rem; max-width: 42rem; }
 .setup-form label { display: grid; gap: .35rem; font-weight: 600; }
-.setup-form input, .setup-form select { min-height: 2.75rem; padding: .55rem .7rem; font: inherit; }
-.setup-form button { min-height: 2.75rem; font: inherit; font-weight: 700; cursor: pointer; }
-.app-header { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
+.setup-form input, .setup-form select, .setup-form textarea { min-height: 2.75rem; padding: .55rem .7rem; border: 1px solid var(--color-border); border-radius: .5rem; background: var(--color-background); color: var(--color-text); }
+.setup-form button, .primary-action { min-height: 2.75rem; padding-inline: 1rem; border: 1px solid var(--color-primary); border-radius: .5rem; background: var(--color-primary); color: var(--sport-white); font-weight: 700; cursor: pointer; }
+.setup-form button:hover, .primary-action:hover { background: var(--sport-dark); border-color: var(--sport-dark); }
+.app-header { display: flex; align-items: start; justify-content: space-between; gap: 1rem; padding-bottom: .75rem; border-bottom: 3px solid var(--color-secondary); }
 .app-header > * { min-width: 0; }
-.app-header button { min-height: 2.75rem; padding-inline: 1rem; }
+.app-header button { min-height: 2.75rem; padding-inline: 1rem; border: 1px solid var(--color-border); border-radius: .5rem; background: var(--color-background); color: var(--color-primary); }
 
-.setup-form textarea { padding: .55rem .7rem; font: inherit; }
 .safety-checklist { display: grid; gap: .75rem; max-width: 48rem; }
 .safety-checklist label { display: flex; align-items: center; gap: .75rem; min-height: 2.5rem; }
 .safety-checklist input { width: 1.25rem; height: 1.25rem; }
-.safety-checklist button, .primary-action { min-height: 3rem; padding-inline: 1.25rem; font: inherit; font-weight: 800; cursor: pointer; }
-.live-test { border-width: 3px; }
+.safety-checklist button { min-height: 3rem; padding-inline: 1.25rem; border: 1px solid var(--color-primary); border-radius: .5rem; background: var(--color-primary); color: var(--sport-white); font-weight: 800; cursor: pointer; }
+.live-test { border-width: 3px; border-color: var(--color-secondary); }
 .live-test-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
-.live-test-heading button { min-height: 3rem; min-width: 9rem; font: inherit; font-weight: 800; cursor: pointer; }
-.eyebrow { margin: 0; text-transform: uppercase; letter-spacing: .08em; font-weight: 800; }
-.timer-display { font-variant-numeric: tabular-nums; font-size: clamp(4rem, 16vw, 9rem); line-height: 1; font-weight: 900; text-align: center; padding-block: 1rem; }
+.live-test-heading button { min-height: 3rem; min-width: 9rem; border-radius: .5rem; font-weight: 800; cursor: pointer; }
+.eyebrow { margin: 0; text-transform: uppercase; letter-spacing: .08em; color: var(--color-secondary); font-weight: 800; }
+.timer-display { font-variant-numeric: tabular-nums; font-size: clamp(4rem, 16vw, 9rem); line-height: 1; font-weight: 900; color: var(--color-primary); text-align: center; padding-block: 1rem; }
 .live-test-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: 1rem; }
-.live-test-metrics div { border: 1px solid currentColor; border-radius: .5rem; padding: .75rem; }
-.live-test-metrics dt { font-size: .9rem; }
+.live-test-metrics div { border: 1px solid var(--color-border); border-radius: .5rem; padding: .75rem; background: var(--color-surface-subtle); }
+.live-test-metrics dt { font-size: .9rem; color: var(--color-text-muted); }
 .live-test-metrics dd { margin: .25rem 0 0; font-size: 1.4rem; font-weight: 800; }
 .sample-window, .timer-alert { font-size: 1.2rem; font-weight: 800; }
-.timer-warning { background: #fff3cd; color: #241a00; }
-.critical-action { border-color: #b42318; border-width: 3px; }
-.critical-action button { background: #b42318; color: white; border: 0; }
-.connection-state { opacity: .8; }
+.timer-warning { background: var(--sport-warning-surface); color: var(--color-text); border-color: var(--color-warning); }
+.critical-action { border-color: var(--color-danger); border-width: 3px; }
+.critical-action button { background: var(--color-danger); color: var(--sport-white); border: 0; }
+.connection-state { color: var(--color-text-muted); }
 .measurement-form { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); align-items: end; }
 .measurement-form label { display: grid; gap: .35rem; font-weight: 700; }
-.measurement-form input, .measurement-form select, .measurement-form button { min-height: 3rem; padding: .55rem .7rem; font: inherit; }
-.measurement-form button { font-weight: 800; cursor: pointer; }
+.measurement-form input, .measurement-form select, .measurement-form button { min-height: 3rem; padding: .55rem .7rem; border: 1px solid var(--color-border); border-radius: .5rem; background: var(--color-background); color: var(--color-text); }
+.measurement-form button { background: var(--color-primary); color: var(--sport-white); border-color: var(--color-primary); font-weight: 800; cursor: pointer; }
 .measurement-summary { display: grid; gap: .5rem; padding-left: 1.25rem; }
 .review-table { overflow-x: auto; }
-.review-header, .review-row { display: grid; grid-template-columns: 9rem 7rem 8rem 7rem 12rem 10rem 12rem 14rem 10rem; gap: .5rem; min-width: 92rem; align-items: end; padding: .75rem; border-bottom: 1px solid currentColor; }
-.review-header { align-items: center; background: color-mix(in srgb, CanvasText 8%, Canvas); }
+.review-header, .review-row { display: grid; grid-template-columns: 9rem 7rem 8rem 7rem 12rem 10rem 12rem 14rem 10rem; gap: .5rem; min-width: 92rem; align-items: end; padding: .75rem; border-bottom: 1px solid var(--color-border); }
+.review-header { align-items: center; background: var(--color-surface); color: var(--color-primary); }
 .review-row label, .review-row > div { display: grid; gap: .3rem; }
-.review-row input, .review-row select, .review-row button { min-height: 2.75rem; padding: .45rem .55rem; font: inherit; }
+.review-row input, .review-row select, .review-row button { min-height: 2.75rem; padding: .45rem .55rem; border: 1px solid var(--color-border); border-radius: .45rem; background: var(--color-background); color: var(--color-text); }
 .review-row button { font-weight: 800; cursor: pointer; }
-.review-row small { display: block; margin-top: .3rem; }
+.review-row small { display: block; margin-top: .3rem; color: var(--color-text-muted); }
+
+/* Meaning must never be conveyed by color alone. These classes support existing text labels/states. */
+.state-success { color: var(--color-success); }
+.state-warning { color: var(--color-warning); }
+.state-danger { color: var(--color-danger); }
+.state-recovery { color: var(--color-recovery); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}
 
 @media (max-width: 30rem) {
   main { padding: 1rem; }
