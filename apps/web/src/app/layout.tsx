@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import './brand.css';
+import './data-views.css';
 
 export const metadata: Metadata = {
   title: {
