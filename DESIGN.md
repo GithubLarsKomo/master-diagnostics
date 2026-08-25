@@ -80,15 +80,17 @@ New UI code should reuse these primitives before introducing another page-local 
 
 ## Brand assets
 
-The canonical Masters Diagnostics mark combines three core product properties: the `M` identifies the Masters context, the plotted curve represents diagnostic measurement, and the rising endpoint represents performance progression. The mark uses Navy, Bright Teal and the Energy accent only.
+Masters Diagnostics and Training Control use one shared Sport Performance mark grammar: a Navy rounded-square field, a white product monogram, one Bright Teal performance ribbon and a restrained Energy endpoint. The geometry, stroke character and corner treatment are shared; each product remains identifiable through its own monogram and ribbon path.
+
+The Masters Diagnostics mark is a deliberately reduced split `M`: its white left stroke establishes the Masters identity, while the Bright Teal right stroke is simultaneously the rising diagnostic/performance trajectory. The Energy point marks the interpreted endpoint. Measurement and progression are therefore integrated into the letterform rather than drawn as a separate chart pictogram.
 
 Canonical assets live in `apps/web/public/brand/`:
 
-- `masters-diagnostics-mark.svg` — vector master mark
-- `masters-diagnostics-logo.svg` — full logo lockup with the project descriptor
-- `favicon-32.png` — browser favicon
-- `apple-touch-icon.png` — iOS home-screen icon
-- `app-icon-192.png` and `app-icon-512.png` — installable PWA icons
+- `masters-diagnostics-mark.svg` — vector master mark and source for favicon/PWA icon rendering
+- `masters-diagnostics-logo.svg` — primary horizontal lockup for light surfaces
+- `masters-diagnostics-logo-inverse.svg` — horizontal lockup for dark Sport Performance surfaces
+
+Browser and installable-app metadata reference the SVG master directly so the icon family cannot drift from the canonical mark. Raster derivatives may be generated for platform-specific distribution, but they must be rendered from `masters-diagnostics-mark.svg` without redrawing or recoloring it.
 
 Logo, favicon and app icon must remain one coherent Sport Performance brand family. Do not replace them with framework/default iconography or locally recolored variants.
 
