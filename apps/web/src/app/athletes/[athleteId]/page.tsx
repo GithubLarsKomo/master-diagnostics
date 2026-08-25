@@ -20,6 +20,7 @@ import { notFound } from 'next/navigation';
 import { db } from '@/lib/db';
 import { getTenantContext } from '@/lib/tenant-context';
 import { editAthlete } from '../actions';
+import { AthleteSportFields } from '../athlete-sport-fields';
 import { addCoachAssignment, captureAthleteSnapshot } from './context-actions';
 import { addConsent, withdrawAthleteConsent } from './consent-actions';
 import { completeDeletionRequest, decideDeletionRequest, submitDeletionRequest } from './deletion-actions';
@@ -164,9 +165,11 @@ export default async function AthletePage({ params }: { params: Promise<{ athlet
           <label>Referenzkategorie<input name="referenceCategory" required defaultValue={athlete.referenceCategory} /></label>
           <label>Körpergröße (cm)<input name="heightCm" type="number" min="80" max="250" required defaultValue={athlete.heightCm} /></label>
           <label>Gewicht (kg)<input name="weightKg" type="number" min="20" max="300" step="0.01" required defaultValue={athlete.currentWeightKgX100 / 100} /></label>
-          <label>Hauptsportart<input name="primarySport" required defaultValue={athlete.primarySport} /></label>
-          <label>Disziplin<input name="primaryDiscipline" required defaultValue={athlete.primaryDiscipline} /></label>
-          <label>Trainingsstatus<input name="trainingStatus" required defaultValue={athlete.trainingStatus} /></label>
+          <AthleteSportFields
+            initialSport={athlete.primarySport}
+            initialDiscipline={athlete.primaryDiscipline}
+            initialTrainingStatus={athlete.trainingStatus}
+          />
           <button type="submit">Änderungen speichern</button>
         </form>
       </section>
