@@ -61,8 +61,18 @@ Masters Diagnostics is a trainer-centered performance diagnostics workbench. It 
 
 ## Brand assets
 
-Logo, favicon and app icon must form one coherent Sport Performance brand family and use the same canonical color system. Until dedicated assets are introduced, no unrelated framework/default-color iconography should be added.
+The canonical Masters Diagnostics mark combines three core product properties: the `M` identifies the Masters context, the plotted curve represents diagnostic measurement, and the rising endpoint represents performance progression. The mark uses Navy, Bright Teal and the Energy accent only.
+
+Canonical assets live in `apps/web/public/brand/`:
+
+- `masters-diagnostics-mark.svg` — vector master mark
+- `masters-diagnostics-logo.svg` — full logo lockup with the project descriptor
+- `favicon-32.png` — browser favicon
+- `apple-touch-icon.png` — iOS home-screen icon
+- `app-icon-192.png` and `app-icon-512.png` — installable PWA icons
+
+Logo, favicon and app icon must remain one coherent Sport Performance brand family. Do not replace them with framework/default iconography or locally recolored variants.
 
 ## Review gate
 
-A UI change is acceptable only when canonical token values are intact, semantic roles are respected, foreground/background contrast is AA-compatible, charts do not rely on color alone, and no template/framework colors silently override the Sport Performance profile.
+A UI change is acceptable only when canonical token values are intact, semantic roles are respected, foreground/background contrast is AA-compatible, charts do not rely on color alone, and no template/framework colors silently override the Sport Performance profile. Header, authentication/setup surfaces, favicon and installable app icons must use the canonical Masters Diagnostics brand assets.
