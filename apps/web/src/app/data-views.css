@@ -1,0 +1,46 @@
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin-block: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-background);
+  font-variant-numeric: tabular-nums;
+}
+caption {
+  padding: .65rem .75rem;
+  color: var(--color-text-muted);
+  font-size: .85rem;
+  font-weight: 700;
+  text-align: left;
+}
+th, td { padding: .65rem .75rem; border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; }
+thead th { background: var(--color-surface); color: var(--color-primary); font-size: .82rem; font-weight: 800; }
+tbody th { color: var(--color-primary); }
+tbody tr:nth-child(even) { background: rgb(246 248 249 / 65%); }
+tbody tr:last-child > * { border-bottom: 0; }
+
+.diagnostic-chart {
+  display: block;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  padding: .75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-background);
+  color: var(--color-text-muted);
+}
+.diagnostic-chart .chart-axis { stroke: var(--sport-muted); stroke-width: 1.25; }
+.diagnostic-chart .chart-series-primary { stroke: var(--sport-navy); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+.diagnostic-chart .chart-point-primary { fill: var(--sport-teal-bright); stroke: var(--sport-white); stroke-width: 2; }
+.diagnostic-chart text { fill: var(--sport-body); font-size: 13px; font-weight: 650; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: .75rem 1rem; padding: 0; list-style: none; }
+.chart-legend li { display: inline-flex; align-items: center; gap: .4rem; }
+.chart-legend-marker { width: .8rem; height: .35rem; border-radius: 999px; background: var(--sport-navy); }
+
+@media (max-width: 44rem) {
+  table { display: block; overflow-x: auto; white-space: nowrap; }
+  .diagnostic-chart { padding: .25rem; }
+}
