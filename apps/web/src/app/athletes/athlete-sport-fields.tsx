@@ -28,6 +28,11 @@ export function AthleteSportFields({
     ? initialDiscipline
     : availableDisciplines[0];
   const [discipline, setDiscipline] = useState(normalizedDiscipline);
+  const normalizedTrainingStatus = TRAINING_STATUS_VALUES.includes(
+    initialTrainingStatus as (typeof TRAINING_STATUS_VALUES)[number],
+  )
+    ? initialTrainingStatus
+    : 'leistungsorientiert';
 
   function handleSportChange(nextSport: AthleteSport) {
     setSport(nextSport);
@@ -63,10 +68,7 @@ export function AthleteSportFields({
       </label>
       <label>
         Trainingsstatus
-        <select name="trainingStatus" required defaultValue={initialTrainingStatus}>
-          {!TRAINING_STATUS_VALUES.includes(initialTrainingStatus as (typeof TRAINING_STATUS_VALUES)[number]) && (
-            <option value={initialTrainingStatus}>{initialTrainingStatus}</option>
-          )}
+        <select name="trainingStatus" required defaultValue={normalizedTrainingStatus}>
           {TRAINING_STATUS_VALUES.map((value) => <option key={value} value={value}>{value}</option>)}
         </select>
       </label>
