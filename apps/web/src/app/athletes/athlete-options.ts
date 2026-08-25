@@ -1,8 +1,9 @@
 export const SPORT_VALUES = ['Rudern', 'Radsport', 'Triathlon', 'Laufen', 'Sonstige'] as const;
 
 export type AthleteSport = (typeof SPORT_VALUES)[number];
+type NonEmptyStringList = readonly [string, ...string[]];
 
-export const DISCIPLINES_BY_SPORT: Record<AthleteSport, readonly string[]> = {
+export const DISCIPLINES_BY_SPORT: Record<AthleteSport, NonEmptyStringList> = {
   Rudern: ['Skullen', 'Riemenrudern', 'Ergometerrudern'],
   Radsport: ['Straßenradsport', 'Zeitfahren', 'Mountainbike', 'Bahnrad'],
   Triathlon: ['Sprint', 'Olympische Distanz', 'Mitteldistanz', 'Langdistanz'],
