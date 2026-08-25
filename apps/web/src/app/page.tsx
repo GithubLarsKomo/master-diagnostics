@@ -7,6 +7,7 @@ import { listTestsForTrainerDashboard } from '@masters/db';
 import type { Route } from 'next';
 import Link from 'next/link';
 import { headers } from 'next/headers';
+import { BrandLockup } from '@/components/brand-lockup';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { getTenantContext } from '@/lib/tenant-context';
@@ -34,7 +35,11 @@ export default async function HomePage() {
   return (
     <main>
       <header className="app-header">
-        <div><h1>Masters Diagnostics</h1><p>{session?.user.name} · {tenantContext.role}</p></div>
+        <div className="app-brand-context">
+          <BrandLockup />
+          <h1 className="sr-only">Masters Diagnostics</h1>
+          <p className="app-user-context">{session?.user.name} · {tenantContext.role}</p>
+        </div>
         <form action={signOut}><button type="submit">Abmelden</button></form>
       </header>
 
