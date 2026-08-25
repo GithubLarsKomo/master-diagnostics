@@ -16,14 +16,24 @@ test('renders the lactate curve with an equivalent data table', async ({ page })
 
   await page.getByLabel('Qualität Stufe 1').selectOption('MANUALLY_CORRECTED');
   await page.getByLabel('Korrekturgrund Stufe 1').fill('Stufe für Kurvenvergleich wieder aufgenommen');
+  const stageOneSave = page.waitForResponse(
+    (response) => response.url().includes('/review/measurements')
+      && response.request().method() === 'POST',
+  );
   await page.getByRole('button', { name: 'Stufe 1 speichern' }).click();
+  expect((await stageOneSave).ok()).toBe(true);
   await expect(page.getByLabel('Qualität Stufe 1')).toHaveValue('MANUALLY_CORRECTED');
 
   await page.getByLabel('Laktat Stufe 2').fill('4,10');
   await page.getByLabel('Herzfrequenz Stufe 2').fill('145');
   await page.getByLabel('Qualität Stufe 2').selectOption('MANUALLY_CORRECTED');
   await page.getByLabel('Korrekturgrund Stufe 2').fill('Papierprotokoll für Kurvenprüfung nachgetragen');
+  const stageTwoSave = page.waitForResponse(
+    (response) => response.url().includes('/review/measurements')
+      && response.request().method() === 'POST',
+  );
   await page.getByRole('button', { name: 'Stufe 2 speichern' }).click();
+  expect((await stageTwoSave).ok()).toBe(true);
   await expect(page.getByLabel('Qualität Stufe 2')).toHaveValue('MANUALLY_CORRECTED');
 
   await page.goto('/athletes');
