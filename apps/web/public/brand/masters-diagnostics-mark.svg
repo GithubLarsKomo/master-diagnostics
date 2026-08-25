@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Masters Diagnostics Bildmarke</title>
+  <desc id="desc">Reduziertes M, dessen rechte Hälfte als ansteigende diagnostische Performance-Kurve ausgeführt ist.</desc>
+  <rect width="128" height="128" rx="28" fill="#173652"/>
+  <path d="M29 91V42L63 75" fill="none" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M63 75C76 74 87 59 96 40V91" fill="none" stroke="#2B8884" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="96" cy="40" r="6" fill="#B54708" stroke="#173652" stroke-width="3"/>
+</svg>

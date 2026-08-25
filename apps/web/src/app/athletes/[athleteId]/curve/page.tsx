@@ -2,6 +2,7 @@ import { authorize } from '@masters/domain';
 import { getAthlete, getLatestAthleteLactateCurve } from '@masters/db';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { WorkspaceNav } from '@/components/workspace-nav';
 import { db } from '@/lib/db';
 import { getTenantContext } from '@/lib/tenant-context';
 
@@ -39,22 +40,29 @@ export default async function AthleteLactateCurvePage({ params }: { params: Prom
         <div><Link href={`/athletes/${athlete.id}/comparison`}>Bis zu fünf Tests vergleichen</Link> · <Link href={`/athletes/${athlete.id}`}>Zurück zum Athleten</Link></div>
       </header>
 
-      <section className="card" aria-labelledby="lactate-curve-heading">
+      <WorkspaceNav />
+
+      <section className="card dashboard-card" aria-labelledby="lactate-curve-heading">
+        <p className="eyebrow">Diagnostische Messkurve</p>
         <h2 id="lactate-curve-heading">Aktuellster Test</h2>
         {points.length < 2 ? (
-          <p>Für eine Kurve sind mindestens zwei verwertbare Stufenmessungen erforderlich.</p>
+          <p className="notice notice-info">Für eine Kurve sind mindestens zwei verwertbare Stufenmessungen erforderlich.</p>
         ) : (
           <>
-            <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby="curve-title curve-desc" style={{ width: '100%', maxWidth: width }}>
+            <svg className="diagnostic-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby="curve-title curve-desc" style={{ maxWidth: width }}>
               <title id="curve-title">Laktat-Leistungs-Kurve des aktuellsten Tests</title>
-              <desc id="curve-desc">Laktatwerte in Millimol pro Liter über der Leistung in Watt. Die exakten Werte stehen zusätzlich in der Tabelle unterhalb der Grafik.</desc>
-              <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="currentColor" />
-              <line x1={padding} y1={padding} x2={padding} y2={height - padding} stroke="currentColor" />
-              <polyline points={polyline} fill="none" stroke="currentColor" strokeWidth="3" />
-              {coordinates.map((point) => <circle key={point.stageNumber} cx={point.x} cy={point.y} r="5"><title>{`Stufe ${point.stageNumber}: ${point.watts} Watt, ${(point.lactateValueX100 / 100).toFixed(2)} mmol/l`}</title></circle>)}
+              <desc id="curve-desc">Laktatwerte in Millimol pro Liter über der Leistung in Watt. Navy kennzeichnet die Messkurve, helle Teal-Marker kennzeichnen die einzelnen Stufen. Die exakten Werte stehen zusätzlich in der Tabelle unterhalb der Grafik.</desc>
+              <line className="chart-axis" x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} />
+              <line className="chart-axis" x1={padding} y1={padding} x2={padding} y2={height - padding} />
+              <polyline className="chart-series-primary" points={polyline} fill="none" />
+              {coordinates.map((point) => <circle className="chart-point-primary" key={point.stageNumber} cx={point.x} cy={point.y} r="5"><title>{`Stufe ${point.stageNumber}: ${point.watts} Watt, ${(point.lactateValueX100 / 100).toFixed(2)} mmol/l`}</title></circle>)}
               <text x={width / 2} y={height - 8} textAnchor="middle">Leistung (W)</text>
               <text x="16" y={height / 2} textAnchor="middle" transform={`rotate(-90 16 ${height / 2})`}>Laktat (mmol/l)</text>
             </svg>
+            <ul className="chart-legend" aria-label="Legende">
+              <li><span className="chart-legend-marker" aria-hidden="true" /> Laktat-Leistungs-Kurve</li>
+              <li>● Messstufe</li>
+            </ul>
 
             <table>
               <caption>Messwerte der Laktatkurve</caption>
