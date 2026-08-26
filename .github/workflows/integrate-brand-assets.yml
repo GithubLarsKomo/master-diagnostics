@@ -1,0 +1,31 @@
+name: Integrate Brand Assets
+on:
+  push:
+    branches: [feat/sport-brand-assets]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/sport-brand-assets
+      - name: Integrate brand into UI and design contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          css=Path('apps/web/src/app/globals.css'); c=css.read_text()
+          addon='''\n/* Shared Sport Performance product-family branding. */\n.brand-header{display:flex;align-items:center;gap:.85rem;min-width:0}\n.brand-mark{display:block;width:58px;height:58px;flex:0 0 auto}\n@media(max-width:30rem){.brand-header{gap:.65rem}.brand-mark{width:46px;height:46px}}\n'''
+          if '.brand-header{' not in c: css.write_text(c+addon)
+          d=Path('DESIGN.md'); text=d.read_text()
+          block='''\n\n## Implemented brand asset registry\n\nThe product-specific Masters Diagnostics identity is implemented and derived from one canonical vector geometry.\n\n- `apps/web/public/brand/mark.svg` — standalone diagnostics mark with ring, measurement bars and performance curve.\n- `apps/web/public/brand/app-icon.svg` — high-contrast app-icon source.\n- `apps/web/public/brand/logo-lockup.svg` / `logo-lockup.png` — primary horizontal lockup.\n- `apps/web/public/favicon.svg` / `favicon-32.png` — browser identity.\n- `apps/web/public/icons/app-icon-192.png`, `app-icon-512.png`, `app-icon-1024.png` — installable-app derivatives.\n- `apps/web/public/manifest.webmanifest` — canonical PWA registration using Sport Navy `#173652`.\n\nAll raster files are derivatives of the SVG masters. Do not redraw favicon or app icons independently; regenerate them from these sources.\n'''
+          if '## Implemented brand asset registry' not in text: d.write_text(text+block)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add apps/web/src/app/globals.css DESIGN.md
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat(brand): integrate product identity into diagnostics app'
+            git push origin HEAD:feat/sport-brand-assets
+          fi
