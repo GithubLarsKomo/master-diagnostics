@@ -34,7 +34,10 @@ export default async function HomePage() {
   return (
     <main>
       <header className="app-header">
-        <div><h1>Masters Diagnostics</h1><p>{session?.user.name} · {tenantContext.role}</p></div>
+        <div className="brand-header">
+          <img className="brand-mark" src="/brand/mark.svg" width="58" height="58" alt="" aria-hidden="true" />
+          <div><h1>Masters Diagnostics</h1><p>{session?.user.name} · {tenantContext.role}</p></div>
+        </div>
         <form action={signOut}><button type="submit">Abmelden</button></form>
       </header>
 
