@@ -12,6 +12,7 @@ import {
 } from '@masters/db';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { WorkspaceNav } from '@/components/workspace-nav';
 import { readAnalysisExportMinimumEquivalenceClassSize } from '@/lib/analysis-export-policy';
 import { db } from '@/lib/db';
 import { getTenantContext } from '@/lib/tenant-context';
@@ -39,6 +40,24 @@ const safetyLabels = {
   emergencyProceduresKnown: 'Notfallverfahren bekannt',
   sensorValuesPlausibleOrNotConnected: 'Sensorwerte plausibel oder Sensor nicht verbunden',
   trainerResponsibilityAccepted: 'Verantwortung für Start und Abbruch übernommen',
+} as const;
+
+const statusLabels = {
+  PLANNED: 'Geplant',
+  IN_PROGRESS: 'Läuft',
+  DATA_REVIEW: 'Datenprüfung',
+  INTERPRETED: 'Interpretiert',
+  RELEASED: 'Freigegeben',
+  ARCHIVED: 'Archiviert',
+} as const;
+
+const statusClasses = {
+  PLANNED: 'status-planned',
+  IN_PROGRESS: 'status-running',
+  DATA_REVIEW: 'status-review',
+  INTERPRETED: 'status-complete',
+  RELEASED: 'status-complete',
+  ARCHIVED: 'status-archived',
 } as const;
 
 export default async function TestPage({ params }: { params: Promise<{ testId: string }> }) {
@@ -92,23 +111,28 @@ export default async function TestPage({ params }: { params: Promise<{ testId: s
     <main>
       <header className="app-header">
         <div>
+          <p className="eyebrow">Diagnostik-Workflow</p>
           <h1>Live-Test</h1>
           <p>{execution.athlete.firstName} {execution.athlete.lastName} · {execution.test.deviceType}</p>
         </div>
-        <Link href="/tests">Zur Testübersicht</Link>
+        <Link className="secondary-action" href="/tests">Zur Testübersicht</Link>
       </header>
 
-      <section className="card">
+      <WorkspaceNav />
+
+      <section className="card planning-card">
+        <span className={`status-chip ${statusClasses[execution.test.status]}`}>{statusLabels[execution.test.status]}</span>
         <h2>Testplan</h2>
         <p>
           LT2 {execution.plan.expectedLt2Watts} W · Start {execution.plan.startWatts} W ·
           {' '}+{execution.plan.incrementWatts} W · {execution.plan.maximumStages} Stufen
         </p>
-        <p>Geplante Gesamtdauer: {Math.round(timer.totalDurationSeconds / 60)} Minuten</p>
+        <p className="muted">Geplante Gesamtdauer: {Math.round(timer.totalDurationSeconds / 60)} Minuten</p>
       </section>
 
       {execution.test.status === 'PLANNED' && readiness && !readiness.confirmation && (
-        <section className="card">
+        <section className="card dashboard-card">
+          <p className="eyebrow">Sicherheit vor Geschwindigkeit</p>
           <h2>Sicherheitscheck vor dem Start</h2>
           <form action={safetyAction} className="safety-checklist">
             {TEST_START_SAFETY_CHECKLIST_ITEMS.map((item) => (
@@ -123,7 +147,8 @@ export default async function TestPage({ params }: { params: Promise<{ testId: s
       )}
 
       {execution.test.status === 'PLANNED' && readiness?.confirmation && (
-        <section className="card">
+        <section className="card dashboard-card">
+          <p className="eyebrow">Bereit</p>
           <h2>Startbereit</h2>
           <p>Der unveränderliche Testplan und alle Sicherheitsbestätigungen liegen vor.</p>
           <form action={startAction}>
@@ -143,9 +168,8 @@ export default async function TestPage({ params }: { params: Promise<{ testId: s
 
       {execution.test.status === 'DATA_REVIEW' && (
         <>
-          <section className="card" role="status">
-            <h2>Datenprüfung</h2>
-            <p>Der Test wurde beendet und befindet sich jetzt in der Datenprüfung.</p>
+          <section className="notice notice-info" role="status">
+            <strong>Datenprüfung:</strong> Der Test wurde beendet und befindet sich jetzt in der fachlichen Review-Phase.
           </section>
           {warnings.length > 0 && (
             <section className="card" aria-labelledby="plausibility-heading">
@@ -168,6 +192,7 @@ export default async function TestPage({ params }: { params: Promise<{ testId: s
 
       {(execution.test.status === 'DATA_REVIEW' || execution.test.status === 'RELEASED') && (
         <section className="card" aria-labelledby="test-export-heading">
+          <p className="eyebrow">Portabilität</p>
           <h2 id="test-export-heading">Testexport</h2>
           <p>Messwerte und Testmetadaten in einem portablen, versionierten Exportformat.</p>
           <p>
@@ -180,22 +205,23 @@ export default async function TestPage({ params }: { params: Promise<{ testId: s
 
       {execution.test.status === 'RELEASED' && (
         <section className="card" aria-labelledby="analysis-export-heading">
+          <p className="eyebrow">Datenschutz</p>
           <h2 id="analysis-export-heading">Anonymisierter Analyseexport</h2>
           {minimumEquivalenceClassSize === null ? (
-            <p role="status">
+            <p className="notice notice-warning" role="status">
               Analyseexport deaktiviert: Es ist noch keine gültige Mindestgröße für die Vergleichsgruppe konfiguriert.
             </p>
           ) : !analysisExportCohort || !analysisExportAssessment ? (
-            <p role="status">Analyseexport nicht verfügbar: Die Vergleichsgruppe konnte nicht bestimmt werden.</p>
+            <p className="notice notice-warning" role="status">Analyseexport nicht verfügbar: Die Vergleichsgruppe konnte nicht bestimmt werden.</p>
           ) : analysisExportAssessment.exportAllowed ? (
             <>
-              <p role="status">
+              <p className="notice notice-info" role="status">
                 Freigegeben: Vergleichsgruppe {analysisExportAssessment.equivalenceClassSize} · Mindestgröße {minimumEquivalenceClassSize}.
               </p>
               <p><a href={`/api/tests/${testId}/analysis-export`}>Anonymisierten Analyseexport herunterladen</a></p>
             </>
           ) : (
-            <p role="alert">
+            <p className="notice notice-danger" role="alert">
               Reidentifikationswarnung: Vergleichsgruppe {analysisExportAssessment.equivalenceClassSize} liegt unter der Mindestgröße {minimumEquivalenceClassSize}. Der Export bleibt gesperrt.
             </p>
           )}

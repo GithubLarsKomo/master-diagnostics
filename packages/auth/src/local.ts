@@ -1,4 +1,8 @@
-import type { Database, DatabaseEngine } from '@masters/db';
+import {
+  postgresAuthSchema,
+  type Database,
+  type DatabaseEngine,
+} from '@masters/db';
 import * as schema from '@masters/db';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { betterAuth } from 'better-auth/minimal';
@@ -13,6 +17,16 @@ export function createLocalAuth(db: Database, databaseEngine: DatabaseEngine = '
     );
   }
 
+  const database = databaseEngine === 'postgres'
+    ? drizzleAdapter(db, {
+        provider: 'pg',
+        schema: postgresAuthSchema,
+      })
+    : drizzleAdapter(db, {
+        provider: 'sqlite',
+        schema,
+      });
+
   return betterAuth({
     appName: 'Masters Diagnostics',
     baseURL:
@@ -20,10 +34,7 @@ export function createLocalAuth(db: Database, databaseEngine: DatabaseEngine = '
       'http://localhost:3000',
     secret,
 
-    database: drizzleAdapter(db, {
-      provider: databaseEngine === 'postgres' ? 'pg' : 'sqlite',
-      schema,
-    }),
+    database,
 
     emailAndPassword: {
       enabled: true,

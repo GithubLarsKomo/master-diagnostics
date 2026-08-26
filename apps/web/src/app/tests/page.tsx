@@ -6,6 +6,8 @@ import {
   listTestsForExecution,
 } from '@masters/db';
 import Link from 'next/link';
+import { BrandLockup } from '@/components/brand-lockup';
+import { WorkspaceNav } from '@/components/workspace-nav';
 import { db } from '@/lib/db';
 import { getTenantContext } from '@/lib/tenant-context';
 import { planTest } from './actions';
@@ -19,6 +21,15 @@ const statusLabels = {
   INTERPRETED: 'Interpretiert',
   RELEASED: 'Freigegeben',
   ARCHIVED: 'Archiviert',
+} as const;
+
+const statusClasses = {
+  PLANNED: 'status-planned',
+  IN_PROGRESS: 'status-running',
+  DATA_REVIEW: 'status-review',
+  INTERPRETED: 'status-complete',
+  RELEASED: 'status-complete',
+  ARCHIVED: 'status-archived',
 } as const;
 
 export default async function TestsPage() {
@@ -48,35 +59,43 @@ export default async function TestsPage() {
   return (
     <main>
       <header className="app-header">
-        <div><h1>Tests</h1><p>Stufentests planen, vorbereiten und durchführen.</p></div>
-        <Link href="/">Zur Übersicht</Link>
+        <div>
+          <BrandLockup compact />
+          <p className="eyebrow">Leistungsdiagnostik</p>
+          <h1>Tests</h1>
+          <p>Stufentests planen, sicher vorbereiten, live durchführen und anschließend prüfen.</p>
+        </div>
+        <Link className="secondary-action" href="/">Zur Übersicht</Link>
       </header>
+
+      <WorkspaceNav />
 
       <section className="grid" aria-label="Testbestand">
         {testRows.length === 0 ? (
-          <article className="card"><h2>Noch keine Tests</h2><p>Plane den ersten Test über das Formular.</p></article>
+          <article className="card info-card"><h2>Noch keine Tests</h2><p>Plane den ersten Test über das Formular.</p></article>
         ) : testRows.map(({ test, athlete, plan }) => (
-          <article className="card" key={test.id}>
+          <article className="card entity-card" key={test.id}>
+            <span className={`status-chip ${statusClasses[test.status]}`}>{statusLabels[test.status]}</span>
             <h2>{athlete.firstName} {athlete.lastName}</h2>
-            <p><strong>{statusLabels[test.status]}</strong> · {test.deviceType}</p>
-            <p>LT2 {plan.expectedLt2Watts} W · {plan.maximumStages} Stufen</p>
+            <p>{test.deviceType} · LT2 {plan.expectedLt2Watts} W · {plan.maximumStages} Stufen</p>
             <p>Start {plan.startWatts} W · +{plan.incrementWatts} W</p>
-            <Link href={`/tests/${test.id}`}>Test öffnen</Link>
+            <Link className="card-action" href={`/tests/${test.id}`}>Test öffnen</Link>
           </article>
         ))}
       </section>
 
-      <section className="card">
+      <section className="card planning-card">
+        <p className="eyebrow">Neuer Diagnostiklauf</p>
         <h2>Test planen</h2>
         {blockedAthleteCount > 0 && (
-          <p role="status">
+          <p className="notice notice-warning" role="status">
             {blockedAthleteCount === 1
               ? '1 Athlet ist wegen einer Einwilligungs- oder Löschsperre nicht für neue Tests auswählbar.'
               : `${blockedAthleteCount} Athleten sind wegen einer Einwilligungs- oder Löschsperre nicht für neue Tests auswählbar.`}
           </p>
         )}
         {!canPlan ? (
-          <p>Für die Planung werden mindestens ein freigegebener Athlet und eine aktive Protokollversion benötigt.</p>
+          <p className="notice notice-info">Für die Planung werden mindestens ein freigegebener Athlet und eine aktive Protokollversion benötigt.</p>
         ) : (
           <form action={planTest} className="setup-form">
             <label>Athlet
