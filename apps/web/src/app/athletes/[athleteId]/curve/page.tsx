@@ -51,7 +51,7 @@ export default async function AthleteLactateCurvePage({ params }: { params: Prom
           <>
             <svg className="diagnostic-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby="curve-title curve-desc" style={{ maxWidth: width }}>
               <title id="curve-title">Laktat-Leistungs-Kurve des aktuellsten Tests</title>
-              <desc id="curve-desc">Laktatwerte in Millimol pro Liter über der Leistung in Watt. Navy kennzeichnet die Messkurve, helle Teal-Marker kennzeichnen die einzelnen Stufen. Die exakten Werte stehen zusätzlich in der Tabelle unterhalb der Grafik.</desc>
+              <desc id="curve-desc">Laktatwerte in Millimol pro Liter über der Leistung in Watt. Die exakten Werte stehen zusätzlich in der Tabelle unterhalb der Grafik.</desc>
               <line className="chart-axis" x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} />
               <line className="chart-axis" x1={padding} y1={padding} x2={padding} y2={height - padding} />
               <polyline className="chart-series-primary" points={polyline} fill="none" />
