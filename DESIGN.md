@@ -2,7 +2,7 @@
 
 ## Brand profile
 
-This application uses the canonical Skillz `sport-performance` brand profile (`skills/frontend-design-system-context/references/brand-profiles/sport-performance.json`). The profile is the default for Sport projects and is authoritative unless an explicit project brand override is approved.
+This application uses the canonical Skillz `sport-performance` brand profile (`skills/frontend-design-system-context/references/brand-profiles/sport-performance.json`). The profile is the binding visual color standard for Sport applications unless a higher-priority corporate profile such as EUROIMMUN applies.
 
 ### Canonical brand tokens
 
@@ -25,7 +25,7 @@ This application uses the canonical Skillz `sport-performance` brand profile (`s
 --sport-white: #FFFFFF;
 ```
 
-Canonical values must not be locally replaced by framework or template colors. Derived UI colors are allowed only when their source token and purpose remain traceable.
+Canonical values must not be locally replaced by framework, template or arbitrary project colors. Derived UI colors are allowed only when their source token and purpose remain traceable.
 
 ## Semantic defaults
 
@@ -48,6 +48,46 @@ Canonical values must not be locally replaced by framework or template colors. D
 
 Masters Diagnostics is a trainer-centered performance diagnostics workbench. It should feel clinical enough for measurement review while remaining recognizably part of the Sport product family: calm light work surfaces, navy hierarchy, teal diagnostic accents and restrained semantic state colors.
 
+## Shared Sport Performance brand family
+
+Masters Diagnostics and Sport Athlete Management are related products, not identical brands. They therefore share a common visual grammar while using product-specific marks.
+
+The family rules are binding:
+
+- same canonical `sport-performance` palette;
+- same visual weight, geometric discipline and line/stroke language;
+- same system-first geometric sans typography;
+- same icon construction logic and corner/radius character;
+- logo, favicon and app icon are derived from one product mark, not designed independently;
+- product identity comes from the central symbol and emphasis, not from introducing unrelated colors;
+- the two product marks must remain clearly distinguishable at favicon size.
+
+### Masters Diagnostics mark
+
+The Masters Diagnostics mark represents **measurement, diagnostics and performance interpretation**. The preferred concept combines:
+
+- a strong circular or partial-ring frame in Sport Navy as the shared family anchor;
+- rising metric/data bars in Teal/Bright Teal;
+- a compact diagnostic/performance curve or pulse line using the Energy accent;
+- simplified geometry that remains legible at 32 px.
+
+The mark must communicate at least these project properties: **diagnostics/data**, **performance progression**, and **clinical/technical reliability**. Avoid medical-cross clichés, generic heart icons, framework logos and decorative fitness silhouettes.
+
+### Wordmark and lockup
+
+- Product name: `Masters Diagnostics`.
+- Wordmark uses the shared Sport Performance typographic family and Navy/Dark text.
+- The symbol may be used alone for favicon/app-icon contexts.
+- Horizontal and stacked lockups must preserve the same symbol proportions.
+
+### Favicon
+
+The favicon is a simplified version of the same circular diagnostics mark. It keeps the Navy frame and only the minimum Teal + Energy diagnostic geometry required for recognition. No separate favicon artwork or unrelated monogram is allowed.
+
+### App icon
+
+The app icon uses the same mark centered on a high-contrast Sport Performance field, preferably Navy/Dark with light mark elements or a White/Surface field with the canonical Navy/Teal/Energy symbol. Platform-specific masking may alter the outer container, but not the internal brand geometry.
+
 ## Accessibility and data visualization
 
 - WCAG AA is the minimum target for normal text.
@@ -61,8 +101,19 @@ Masters Diagnostics is a trainer-centered performance diagnostics workbench. It 
 
 ## Brand assets
 
-Logo, favicon and app icon must form one coherent Sport Performance brand family and use the same canonical color system. Until dedicated assets are introduced, no unrelated framework/default-color iconography should be added.
+Logo, favicon and app icon must form one coherent Sport Performance brand family and use the same canonical color system. The Masters Diagnostics assets must implement the diagnostics/data/curve concept above and stay visibly related to, but distinct from, the Sport Athlete Management assets.
+
+Required asset set when branding is implemented:
+
+- primary logo/lockup;
+- standalone product mark;
+- favicon at browser-relevant sizes;
+- installable-app/PWA icon set;
+- source vector artwork where practical;
+- raster exports derived from the same source geometry.
+
+No unrelated framework/default-color iconography may be introduced.
 
 ## Review gate
 
-A UI change is acceptable only when canonical token values are intact, semantic roles are respected, foreground/background contrast is AA-compatible, charts do not rely on color alone, and no template/framework colors silently override the Sport Performance profile.
+A UI or brand change is acceptable only when canonical token values are intact, semantic roles are respected, foreground/background contrast is AA-compatible, charts do not rely on color alone, no template/framework colors silently override the Sport Performance profile, and logo/favicon/app-icon remain one coherent product-specific member of the shared Sport family.
