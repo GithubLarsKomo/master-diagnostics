@@ -1,0 +1,12 @@
+:root {
+  /* Binding 2026-08-26 Sport Performance template spectrum.
+     Color-only overlay: do not add layout/component geometry rules here. */
+  --sport-dark: #0F172A;
+  --sport-body: #0F172A;
+  --sport-muted: #475569;
+  --sport-warning: #B54708;
+  --sport-border: #E2E8F0;
+  --sport-surface: #EEF2F7;
+  --sport-surface-subtle: #F5F7FA;
+  --sport-warning-surface: #F5F7FA;
+}
