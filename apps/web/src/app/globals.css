@@ -107,3 +107,8 @@ code { overflow-wrap: anywhere; }
   .app-header { flex-wrap: wrap; }
   .grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Shared Sport Performance product-family branding. */
+.brand-header{display:flex;align-items:center;gap:.85rem;min-width:0}
+.brand-mark{display:block;width:58px;height:58px;flex:0 0 auto}
+@media(max-width:30rem){.brand-header{gap:.65rem}.brand-mark{width:46px;height:46px}}

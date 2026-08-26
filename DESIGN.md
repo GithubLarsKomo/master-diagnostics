@@ -117,3 +117,17 @@ No unrelated framework/default-color iconography may be introduced.
 ## Review gate
 
 A UI or brand change is acceptable only when canonical token values are intact, semantic roles are respected, foreground/background contrast is AA-compatible, charts do not rely on color alone, no template/framework colors silently override the Sport Performance profile, and logo/favicon/app-icon remain one coherent product-specific member of the shared Sport family.
+
+
+## Implemented brand asset registry
+
+The product-specific Masters Diagnostics identity is implemented and derived from one canonical vector geometry.
+
+- `apps/web/public/brand/mark.svg` — standalone diagnostics mark with ring, measurement bars and performance curve.
+- `apps/web/public/brand/app-icon.svg` — high-contrast app-icon source.
+- `apps/web/public/brand/logo-lockup.svg` / `logo-lockup.png` — primary horizontal lockup.
+- `apps/web/public/favicon.svg` / `favicon-32.png` — browser identity.
+- `apps/web/public/icons/app-icon-192.png`, `app-icon-512.png`, `app-icon-1024.png` — installable-app derivatives.
+- `apps/web/public/manifest.webmanifest` — canonical PWA registration using Sport Navy `#173652`.
+
+All raster files are derivatives of the SVG masters. Do not redraw favicon or app icons independently; regenerate them from these sources.
