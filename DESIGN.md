@@ -118,7 +118,6 @@ No unrelated framework/default-color iconography may be introduced.
 
 A UI or brand change is acceptable only when canonical token values are intact, semantic roles are respected, foreground/background contrast is AA-compatible, charts do not rely on color alone, no template/framework colors silently override the Sport Performance profile, and logo/favicon/app-icon remain one coherent product-specific member of the shared Sport family.
 
-
 ## Implemented brand asset registry
 
 The product-specific Masters Diagnostics identity is implemented and derived from one canonical vector geometry.
@@ -131,3 +130,47 @@ The product-specific Masters Diagnostics identity is implemented and derived fro
 - `apps/web/public/manifest.webmanifest` — canonical PWA registration using Sport Navy `#173652`.
 
 All raster files are derivatives of the SVG masters. Do not redraw favicon or app icons independently; regenerate them from these sources.
+
+## Implemented Impeccable UI contract
+
+The application shell and task views follow the Impeccable workbench design implemented in `apps/web/src/app/globals.css`, `brand.css` and `data-views.css`. Branding and application UI are one system: the Impeccable layout may use semantic aliases and traceable derived surfaces, but it must never replace the canonical `sport-performance` palette.
+
+### Shell and hierarchy
+
+- Use a calm, light diagnostic canvas with restrained depth; navigation and primary hierarchy use Navy, diagnostic emphasis uses Teal/Bright Teal, and Energy is reserved for deliberate focal accents.
+- Keep the workspace centered and readable on large screens; dense diagnostic content may expand to approximately 1600 px where tables, curves or longitudinal comparisons benefit from the width.
+- Navigation/header surfaces may use subtle transparency or backdrop filtering, but content contrast and legibility take priority over decorative effects.
+- Each screen has one clear primary task or hero action. Secondary actions must not visually compete with the primary CTA.
+
+### Typography and spacing
+
+- Use the system-first geometric sans stack already implemented by the application, with a practical type range of roughly 12–48 px and weights 400–700.
+- Headings establish hierarchy through scale, weight and spacing rather than additional colors.
+- Maintain generous whitespace around diagnostic summaries; dense tables and test data may use tighter spacing only where scanning efficiency improves.
+- Interactive targets should be at least 44 px on touch layouts where practical.
+
+### Components and data views
+
+- Cards and panels use the canonical White/Surface/Surface Subtle hierarchy, sport Border tokens, restrained shadows and approximately 12–24 px radii depending on component prominence.
+- Tables, longitudinal measurements and test-detail views follow `data-views.css`; numeric alignment and scanability take precedence over decoration.
+- Status components must pair color with text, labels, icons, markers or line styles. Color alone never communicates validity, risk, readiness or interpretation.
+- Loading, empty, error and permission states must be intentional first-class states rather than unstyled fallback text.
+- Destructive or stop actions use Critical only when the underlying action or state is genuinely destructive/risk-related.
+
+### Responsive behavior
+
+- Desktop (`>=1024 px`): preserve the full workbench hierarchy and use available width for diagnostic comparison and longitudinal data.
+- Tablet (`640–1023 px`): reduce nonessential chrome, allow cards/grids to collapse, and preserve primary actions without horizontal overflow.
+- Mobile (`<=639 px`): prioritize task sequence, stack content, keep the compact product lockup recognizable, and avoid shrinking controls below usable touch dimensions.
+- No view may introduce clipped content, hidden primary actions, unintended horizontal scrolling or text/box overflow at supported breakpoints.
+
+### Interaction and accessibility
+
+- Keyboard focus must remain clearly visible using the canonical focus/accent system.
+- Respect `prefers-reduced-motion`; motion is functional and subtle, never required to understand state.
+- Maintain WCAG AA contrast for normal text and controls.
+- Forms expose clear labels, validation and recovery guidance; disabled state must not be represented by low contrast alone.
+
+### Impeccable acceptance gate
+
+A UI change is acceptable only if it preserves both layers simultaneously: **(1) the Impeccable application hierarchy/layout/component behavior and (2) the canonical Sport Performance brand system and product-specific mark**. Branding work must not regress the application shell, navigation, data views or responsive behavior; UI refactors must not replace or redraw the canonical logo/favicon/app-icon family.
