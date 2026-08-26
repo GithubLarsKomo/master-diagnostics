@@ -38,7 +38,7 @@ export default async function AthletesPage() {
             <p>{athlete.primarySport} · {athlete.primaryDiscipline}</p>
             <p>{athlete.heightCm} cm · {(athlete.currentWeightKgX100 / 100).toLocaleString('de-DE')} kg</p>
             <p>Trainingsstatus: {athlete.trainingStatus}</p>
-            <Link className="card-action" href={`/athletes/${athlete.id}`}>Profil bearbeiten</Link>
+            <Link className="card-action" href={`/athletes/${athlete.id}`}>Bearbeiten</Link>
           </article>
         ))}
       </section>
