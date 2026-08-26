@@ -194,7 +194,7 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
   await page.locator('select[name="reason"]').selectOption('TECHNICAL_FAILURE');
   await page.getByLabel('Vermerk').fill('E2E Testabbruch');
   await page.getByRole('button', { name: 'Test sofort abbrechen' }).click();
-  await expect(page.getByRole('heading', { name: 'Datenprüfung' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Datenprüfung' })).toBeVisible();
   await expect(
     page.getByRole('heading', { name: 'Messwerte prüfen und korrigieren' }),
   ).toBeVisible();

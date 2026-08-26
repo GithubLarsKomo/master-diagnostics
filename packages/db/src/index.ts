@@ -1,6 +1,7 @@
 export * from './client';
 export * from './runtime';
 export * from './schema';
+export * as postgresAuthSchema from './postgres/auth-schema';
 
 export * from './services/audit';
 export * from './services/audit-privacy-inventory';

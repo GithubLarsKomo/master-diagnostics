@@ -1,133 +1,127 @@
 # DESIGN.md — Masters Diagnostics
 
-## Brand profile
+## Status and source of truth
 
-This application uses the canonical Skillz `sport-performance` brand profile (`skills/frontend-design-system-context/references/brand-profiles/sport-performance.json`). The profile is the binding visual color standard for Sport applications unless a higher-priority corporate profile such as EUROIMMUN applies.
+This document is normative for Masters Diagnostics.
 
-### Canonical brand tokens
+- Template family: `sport-performance`
+- Template type: `masters-diagnostics`
+- Canonical Skillz template: `frontend-design-system-context/references/design-templates/sport-performance-apps.md`
+- Canonical Skillz brand profile: `frontend-design-system-context/references/brand-profiles/sport-performance.json`
+
+The restored and accepted **Impeccable UI/CSS is the binding layout template**. The confirmed 2026-08-26 Sport Performance proposal contributes **only the Masters Diagnostics logo family and the color spectrum**. Branding work must not replace or redesign the accepted layout.
+
+## Binding layer separation
+
+### Layer A — Impeccable UI/CSS
+
+The existing implementation in `apps/web/src/app/globals.css`, `brand.css` and `data-views.css` owns and preserves:
+
+- application shell, header and workspace navigation;
+- content widths and responsive breakpoints;
+- cards, grids, tables, review rows, charts and forms;
+- typography scale and hierarchy;
+- spacing and vertical rhythm;
+- radii, borders and component geometry;
+- diagnostic information density and hierarchy;
+- responsive/mobile behavior;
+- focus, hover, loading, empty and error patterns;
+- motion rules.
+
+For branding-only work this layer is frozen. A palette, logo, favicon or app-icon task must not alter non-color CSS behavior.
+
+### Layer B — Sport Performance branding
+
+This layer owns only:
+
+- canonical color tokens and semantic color roles;
+- the Masters Diagnostics mark and lockup;
+- favicon and PWA/app icons;
+- chart/status colors where the existing component already supports semantic color;
+- PWA/theme metadata.
+
+If a task says **"only logos and colors"**, treat it literally: layout, spacing, typography, component geometry, navigation, breakpoints and information hierarchy remain unchanged or behaviorally equivalent.
+
+## Confirmed Sport Performance spectrum
+
+These exact values are binding:
 
 ```css
 --sport-navy: #173652;
---sport-dark: #1C2B3A;
---sport-body: #24313E;
 --sport-teal: #246F6C;
 --sport-teal-bright: #2B8884;
---sport-muted: #6B7785;
 --sport-energy: #B54708;
---sport-success: #2E7D32;
---sport-warning: #9A6500;
 --sport-critical: #B42318;
 --sport-recovery: #6D5BD0;
---sport-border: #D6E0E6;
---sport-surface: #EDF3F6;
---sport-surface-subtle: #F6F8F9;
---sport-warning-surface: #FFF4D6;
---sport-white: #FFFFFF;
+--sport-success: #2E7D32;
+--sport-surface-0: #FFFFFF;
+--sport-surface-1: #F5F7FA;
+--sport-surface-2: #EEF2F7;
+--sport-text-primary: #0F172A;
+--sport-text-secondary: #475569;
+--sport-border: #E2E8F0;
 ```
 
-Canonical values must not be locally replaced by framework, template or arbitrary project colors. Derived UI colors are allowed only when their source token and purpose remain traceable.
+Compatibility aliases in the application may map to these values, but must not introduce a competing palette. `Energy` is also the warning/emphasis base where needed; `Critical` is reserved for genuine risk/stop/destructive states.
 
-## Semantic defaults
-
-- Primary: Navy
-- Secondary / info: Teal
-- Accent: Energy
-- Success: Success green
-- Warning: Warning ochre
-- Danger / stop: Critical red
-- Recovery / readiness: Recovery violet
-- Text: Body
-- Muted text: Muted
-- Background: White
-- Surface: Surface
-- Border: Border
-
-`teal_bright` is primarily a chart/accent/focus color. `critical` is reserved for real risk, injury, destructive or stop states and must not be decorative.
+The application applies this spectrum as a **color-only token overlay** in `apps/web/src/app/sport-performance-theme.css`, loaded after the accepted Impeccable CSS. That overlay must never contain layout or component-geometry rules.
 
 ## Product direction
 
-Masters Diagnostics is a trainer-centered performance diagnostics workbench. It should feel clinical enough for measurement review while remaining recognizably part of the Sport product family: calm light work surfaces, navy hierarchy, teal diagnostic accents and restrained semantic state colors.
+Masters Diagnostics is a trainer-centered performance diagnostics workbench. The accepted Impeccable implementation remains the design reference: calm analytical work surfaces, clear diagnostic hierarchy, dense but readable measurement/review views, purposeful cards/tables/charts and responsive task flows.
 
-## Shared Sport Performance brand family
+## Product-specific mark
 
-Masters Diagnostics and Sport Athlete Management are related products, not identical brands. They therefore share a common visual grammar while using product-specific marks.
+The mark represents **measurement, diagnostics and performance interpretation**. It is the diagnostics/data/performance-curve member of the Sport family and remains visually related to Sport Athlete Management through geometry, stroke character and palette while staying distinct at favicon size.
 
-The family rules are binding:
+Logo, favicon and app icon are derived from one product-specific vector geometry. Do not reuse the Sport Athlete Management athlete/adaptation symbol.
 
-- same canonical `sport-performance` palette;
-- same visual weight, geometric discipline and line/stroke language;
-- same system-first geometric sans typography;
-- same icon construction logic and corner/radius character;
-- logo, favicon and app icon are derived from one product mark, not designed independently;
-- product identity comes from the central symbol and emphasis, not from introducing unrelated colors;
-- the two product marks must remain clearly distinguishable at favicon size.
+## Implemented brand assets
 
-### Masters Diagnostics mark
-
-The Masters Diagnostics mark represents **measurement, diagnostics and performance interpretation**. The preferred concept combines:
-
-- a strong circular or partial-ring frame in Sport Navy as the shared family anchor;
-- rising metric/data bars in Teal/Bright Teal;
-- a compact diagnostic/performance curve or pulse line using the Energy accent;
-- simplified geometry that remains legible at 32 px.
-
-The mark must communicate at least these project properties: **diagnostics/data**, **performance progression**, and **clinical/technical reliability**. Avoid medical-cross clichés, generic heart icons, framework logos and decorative fitness silhouettes.
-
-### Wordmark and lockup
-
-- Product name: `Masters Diagnostics`.
-- Wordmark uses the shared Sport Performance typographic family and Navy/Dark text.
-- The symbol may be used alone for favicon/app-icon contexts.
-- Horizontal and stacked lockups must preserve the same symbol proportions.
-
-### Favicon
-
-The favicon is a simplified version of the same circular diagnostics mark. It keeps the Navy frame and only the minimum Teal + Energy diagnostic geometry required for recognition. No separate favicon artwork or unrelated monogram is allowed.
-
-### App icon
-
-The app icon uses the same mark centered on a high-contrast Sport Performance field, preferably Navy/Dark with light mark elements or a White/Surface field with the canonical Navy/Teal/Energy symbol. Platform-specific masking may alter the outer container, but not the internal brand geometry.
-
-## Accessibility and data visualization
-
-- WCAG AA is the minimum target for normal text.
-- Approved dark filled states use white foreground according to the canonical profile.
-- Focus must remain visible on keyboard navigation.
-- Status and interpretation must include text, labels, markers, symbols or line styles; meaning must never be encoded by color alone.
-- Charts use the canonical order: Navy, Bright Teal, Energy, Critical, Recovery, Success.
-- Critical red is reserved for genuine stop/risk/injury states.
-- Recovery violet is reserved for recovery/readiness or a documented secondary analytic dimension.
-- Reduced-motion preferences are respected.
-
-## Brand assets
-
-Logo, favicon and app icon must form one coherent Sport Performance brand family and use the same canonical color system. The Masters Diagnostics assets must implement the diagnostics/data/curve concept above and stay visibly related to, but distinct from, the Sport Athlete Management assets.
-
-Required asset set when branding is implemented:
-
-- primary logo/lockup;
-- standalone product mark;
-- favicon at browser-relevant sizes;
-- installable-app/PWA icon set;
-- source vector artwork where practical;
-- raster exports derived from the same source geometry.
-
-No unrelated framework/default-color iconography may be introduced.
-
-## Review gate
-
-A UI or brand change is acceptable only when canonical token values are intact, semantic roles are respected, foreground/background contrast is AA-compatible, charts do not rely on color alone, no template/framework colors silently override the Sport Performance profile, and logo/favicon/app-icon remain one coherent product-specific member of the shared Sport family.
-
-
-## Implemented brand asset registry
-
-The product-specific Masters Diagnostics identity is implemented and derived from one canonical vector geometry.
-
-- `apps/web/public/brand/mark.svg` — standalone diagnostics mark with ring, measurement bars and performance curve.
-- `apps/web/public/brand/app-icon.svg` — high-contrast app-icon source.
-- `apps/web/public/brand/logo-lockup.svg` / `logo-lockup.png` — primary horizontal lockup.
+- `apps/web/public/brand/mark.svg` — standalone diagnostics mark.
+- `apps/web/public/brand/app-icon.svg` — app-icon source.
+- `apps/web/public/brand/logo-lockup.svg` / `logo-lockup.png` — horizontal lockup.
 - `apps/web/public/favicon.svg` / `favicon-32.png` — browser identity.
 - `apps/web/public/icons/app-icon-192.png`, `app-icon-512.png`, `app-icon-1024.png` — installable-app derivatives.
-- `apps/web/public/manifest.webmanifest` — canonical PWA registration using Sport Navy `#173652`.
+- `apps/web/public/manifest.webmanifest` — PWA registration using Sport Navy.
 
-All raster files are derivatives of the SVG masters. Do not redraw favicon or app icons independently; regenerate them from these sources.
+Raster assets are derivatives of the SVG masters and must not be redrawn independently.
+
+## Semantic color rules
+
+- Primary: Navy.
+- Secondary / info: Teal.
+- Focus / chart accent: Bright Teal.
+- Accent / energy / warning emphasis: Energy.
+- Critical / stop: Critical.
+- Recovery / readiness: Recovery.
+- Success: Success.
+- Background: Surface 0.
+- Quiet surface: Surface 1.
+- Secondary surface: Surface 2.
+- Text: Text Primary.
+- Secondary text: Text Secondary.
+- Borders: Border.
+
+Meaning must never be encoded by color alone; status and interpretation require text, labels, markers, icons, shapes or line styles as appropriate.
+
+## Accessibility
+
+- WCAG AA is the minimum target for normal text and controls.
+- Keyboard focus remains visible.
+- Touch targets remain usable on supported mobile/tablet flows.
+- Reduced-motion preferences are respected.
+- Critical red is not decorative.
+- Diagnostic charts and safety/status decisions remain understandable without color.
+
+## Change policy and review gate
+
+A branding-only change is accepted only if:
+
+1. the exact Sport Performance spectrum remains intact;
+2. current logo/favicon/app icons remain one coherent product-specific family;
+3. no unintended non-color change appears in the accepted Impeccable CSS/layout;
+4. header/navigation proportions, grids/cards/tables, typography, spacing and responsive behavior remain equivalent;
+5. WCAG AA and no-color-only semantics remain satisfied.
+
+Any change to Layer A requires an explicit redesign request or a separately confirmed DESIGN grilling decision. Branding work alone is not authorization for a UI redesign.

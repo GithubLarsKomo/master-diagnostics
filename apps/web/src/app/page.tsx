@@ -7,6 +7,8 @@ import { listTestsForTrainerDashboard } from '@masters/db';
 import type { Route } from 'next';
 import Link from 'next/link';
 import { headers } from 'next/headers';
+import { BrandLockup } from '@/components/brand-lockup';
+import { WorkspaceNav } from '@/components/workspace-nav';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { getTenantContext } from '@/lib/tenant-context';
@@ -34,27 +36,30 @@ export default async function HomePage() {
   return (
     <main>
       <header className="app-header">
-        <div className="brand-header">
-          <img className="brand-mark" src="/brand/mark.svg" width="58" height="58" alt="" aria-hidden="true" />
-          <div><h1>Masters Diagnostics</h1><p>{session?.user.name} · {tenantContext.role}</p></div>
+        <div className="app-brand-context">
+          <BrandLockup />
+          <h1 className="sr-only">Masters Diagnostics</h1>
+          <p className="app-user-context">{session?.user.name} · {tenantContext.role}</p>
         </div>
         <form action={signOut}><button type="submit">Abmelden</button></form>
       </header>
 
+      <WorkspaceNav />
+
       {(tenantContext.role === 'TRAINER' || tenantContext.role === 'TENANT_ADMIN') && (
-        <section className="card" aria-labelledby="trainer-tasks-heading">
+        <section className="card dashboard-card" aria-labelledby="trainer-tasks-heading">
           <p className="eyebrow">Trainer-Dashboard</p>
           <h2 id="trainer-tasks-heading">Meine nächsten Aufgaben</h2>
-          <dl aria-label="Aufgabenübersicht">
-            <div><dt>Offen gesamt</dt><dd>{dashboardSummary.total}</dd></div>
-            <div><dt>Laufende Tests</dt><dd>{dashboardSummary.continueTests}</dd></div>
-            <div><dt>Datenprüfung</dt><dd>{dashboardSummary.reviewData}</dd></div>
-            <div><dt>Vorbereitung</dt><dd>{dashboardSummary.prepareTests}</dd></div>
+          <dl className="metric-grid" aria-label="Aufgabenübersicht">
+            <div className="metric-card"><dt>Offen gesamt</dt><dd>{dashboardSummary.total}</dd></div>
+            <div className="metric-card"><dt>Laufende Tests</dt><dd>{dashboardSummary.continueTests}</dd></div>
+            <div className="metric-card"><dt>Datenprüfung</dt><dd>{dashboardSummary.reviewData}</dd></div>
+            <div className="metric-card"><dt>Vorbereitung</dt><dd>{dashboardSummary.prepareTests}</dd></div>
           </dl>
           {dashboardTasks.length === 0 ? (
-            <p>Aktuell gibt es keine offenen Testaufgaben.</p>
+            <p className="muted">Aktuell gibt es keine offenen Testaufgaben.</p>
           ) : (
-            <ol>
+            <ol className="task-list">
               {dashboardTasks.map((task) => (
                 <li key={task.testId}>
                   <strong>{task.athleteName}</strong> · {task.label} · <Link href={task.href as Route}>Öffnen</Link>
@@ -66,14 +71,34 @@ export default async function HomePage() {
       )}
 
       <section className="grid" aria-label="Arbeitsbereiche">
-        <article className="card"><h2>Athleten</h2><p>Tenant-gebundene Stammdaten anlegen und verwalten.</p><Link href="/athletes">Athleten öffnen</Link></article>
-        <article className="card"><h2>Tests</h2><p>Stufentests planen, vorbereiten und live durchführen.</p><Link href="/tests">Tests öffnen</Link></article>
-        <article className="card"><h2>Tenant-Kontext</h2><p>Anfragen werden serverseitig dem aktiven Tenant und Benutzer zugeordnet.</p></article>
-        <article className="card"><h2>Rollenmodell</h2><p>Berechtigungen und Tenant-Isolation werden gemeinsam geprüft.</p></article>
+        <article className="card entity-card">
+          <p className="eyebrow">Stammdaten</p>
+          <h2>Athleten</h2>
+          <p>Tenant-gebundene Profile, Trainingskontext und diagnostische Voraussetzungen verwalten.</p>
+          <Link className="card-action" href="/athletes">Athleten öffnen</Link>
+        </article>
+        <article className="card entity-card">
+          <p className="eyebrow">Diagnostik</p>
+          <h2>Tests</h2>
+          <p>Stufentests planen, sicher vorbereiten, live durchführen und anschließend prüfen.</p>
+          <Link className="card-action" href="/tests">Tests öffnen</Link>
+        </article>
+        <article className="card info-card">
+          <p className="eyebrow">Datenschutz</p>
+          <h2>Tenant-Kontext</h2>
+          <p>Anfragen werden serverseitig dem aktiven Tenant und Benutzer zugeordnet.</p>
+        </article>
+        <article className="card info-card">
+          <p className="eyebrow">Zugriff</p>
+          <h2>Rollenmodell</h2>
+          <p>Berechtigungen und Tenant-Isolation werden gemeinsam geprüft.</p>
+        </article>
       </section>
-      <section className="card">
-        <h2>Beispielplanung bei erwarteter LT2 von 350 W</h2>
-        <p>Start: {example.startWatts} W · Inkrement: {example.incrementWatts} W</p>
+
+      <section className="card planning-card">
+        <p className="eyebrow">Planungsbeispiel</p>
+        <h2>Erwartete LT2 von 350 W</h2>
+        <p className="muted">Start: {example.startWatts} W · Inkrement: {example.incrementWatts} W</p>
         <ol>{example.stages.map((watts) => <li key={watts}>{watts} W</li>)}</ol>
       </section>
     </main>
