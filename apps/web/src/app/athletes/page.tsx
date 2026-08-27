@@ -6,6 +6,7 @@ import { WorkspaceNav } from '@/components/workspace-nav';
 import { db } from '@/lib/db';
 import { getTenantContext } from '@/lib/tenant-context';
 import { addAthlete } from './actions';
+import { AthleteSportFields } from './athlete-sport-fields';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,9 +55,7 @@ export default async function AthletesPage() {
           <label>Referenzkategorie<input name="referenceCategory" required placeholder="Masters A" /></label>
           <label>Körpergröße (cm)<input name="heightCm" type="number" min="80" max="250" required /></label>
           <label>Gewicht (kg)<input name="weightKg" type="number" min="20" max="300" step="0.01" required /></label>
-          <label>Hauptsportart<input name="primarySport" required defaultValue="Rudern" /></label>
-          <label>Disziplin<input name="primaryDiscipline" required placeholder="Einer" /></label>
-          <label>Trainingsstatus<input name="trainingStatus" required placeholder="leistungsorientiert" /></label>
+          <AthleteSportFields />
           <button type="submit">Athlet speichern</button>
         </form>
       </section>

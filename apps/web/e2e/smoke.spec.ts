@@ -38,8 +38,8 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
   await page.getByLabel('Referenzkategorie', { exact: true }).fill('Junior');
   await page.getByLabel('Körpergröße (cm)', { exact: true }).fill('174');
   await page.getByLabel('Gewicht (kg)', { exact: true }).fill('68.5');
-  await page.getByLabel('Disziplin', { exact: true }).fill('Einer');
-  await page.getByLabel('Trainingsstatus', { exact: true }).fill('leistungsorientiert');
+  await page.getByLabel('Disziplin', { exact: true }).selectOption('Skullen');
+  await page.getByLabel('Trainingsstatus', { exact: true }).selectOption('leistungsorientiert');
   await page.getByRole('button', { name: 'Athlet speichern' }).click();
 
   await page.getByRole('link', { name: 'Bearbeiten' }).click();
@@ -72,8 +72,8 @@ test('bootstraps a club and completes the first live test workflow', async ({ pa
   await page.getByLabel('Referenzkategorie', { exact: true }).fill('Masters A');
   await page.getByLabel('Körpergröße (cm)', { exact: true }).fill('182');
   await page.getByLabel('Gewicht (kg)', { exact: true }).fill('78');
-  await page.getByLabel('Disziplin', { exact: true }).fill('Einer');
-  await page.getByLabel('Trainingsstatus', { exact: true }).fill('leistungsorientiert');
+  await page.getByLabel('Disziplin', { exact: true }).selectOption('Skullen');
+  await page.getByLabel('Trainingsstatus', { exact: true }).selectOption('leistungsorientiert');
   await page.getByRole('button', { name: 'Athlet speichern' }).click();
 
   const adultCard = page.locator('article').filter({ hasText: 'Max Test' });

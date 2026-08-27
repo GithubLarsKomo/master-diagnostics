@@ -7,6 +7,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { db } from '@/lib/db';
 import { getTenantContext } from '@/lib/tenant-context';
+import { SPORT_VALUES, TRAINING_STATUS_VALUES, isValidSportDisciplinePair } from './athlete-options';
 
 const athleteSchema = z.object({
   firstName: z.string().trim().min(1).max(120),
@@ -15,9 +16,17 @@ const athleteSchema = z.object({
   referenceCategory: z.string().trim().min(1).max(80),
   heightCm: z.coerce.number().int().min(80).max(250),
   weightKg: z.coerce.number().min(20).max(300),
-  primarySport: z.string().trim().min(1).max(80),
+  primarySport: z.enum(SPORT_VALUES),
   primaryDiscipline: z.string().trim().min(1).max(120),
-  trainingStatus: z.string().trim().min(1).max(80),
+  trainingStatus: z.enum(TRAINING_STATUS_VALUES),
+}).superRefine((input, ctx) => {
+  if (!isValidSportDisciplinePair(input.primarySport, input.primaryDiscipline)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['primaryDiscipline'],
+      message: 'Die Disziplin passt nicht zur ausgewählten Hauptsportart.',
+    });
+  }
 });
 
 function toAthleteInput(formData: FormData) {
