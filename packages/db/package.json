@@ -54,7 +54,7 @@
     "backup:restore-promotion-switch-completion-receipt-verify": "tsx src/verify-restore-private-promotion-switch-completion-receipt.ts"
   },
   "dependencies": {
-    "@libsql/client": "^0.17.4",
+    "@libsql/client": "^0.18.0",
     "@masters/domain": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.9"
